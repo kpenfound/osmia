@@ -501,12 +501,12 @@ func TestFlakeDecisionOfAWorkstreamTheManagerArchivedOnMergeClosesAsMoot(t *test
 		delivery.OwnPullRequestOutcome{PullRequest: 7, Outcome: delivery.OwnPullRequestOutcomeMerged, MergeCommit: "merge-commit"}, time.Now().UTC(), ownerActor)
 	archive := a.awaitCleaned(t)
 	if archive.Actor != runtime.ArchiveActorManager || archivedBy(archive) != api.ArchivedByManager {
-		t.Fatalf("archive %+v, want the chief of staff's archive-on-merge", archive)
+		t.Fatalf("archive %+v, want the manager's archive-on-merge", archive)
 	}
 	if n := len(flakeSurfacings(t, a.l.repository(), a.want)); n != 0 {
 		t.Fatalf("%d surfacings before reconciliation was allowed", n)
 	}
-	a.recovers(t, api.ArchivedByManager, "the chief of staff")
+	a.recovers(t, trace.Manager, "the manager")
 }
 
 // While announcements fail, the originating workstream's units and transitions

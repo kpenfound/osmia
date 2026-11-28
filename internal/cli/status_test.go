@@ -40,7 +40,7 @@ func TestStatusShowsLiveAgentFactsBelowNarrative(t *testing.T) {
 	st.Status = nil
 	out.Reset()
 	showStatus(&out, st)
-	if !strings.Contains(out.String(), "Status: none yet; the chief of staff has not written one\nLive agents:\n  mason") {
+	if !strings.Contains(out.String(), "Status: none yet; the manager has not written one\nLive agents:\n  mason") {
 		t.Fatalf("live turn without narrative:\n%s", out.String())
 	}
 }
@@ -129,7 +129,7 @@ func TestStatusOverviewShowsProfilesCapacityAndWorkstreams(t *testing.T) {
 		"  mason: 0 of 4 slot(s) in use\n  reviewer: 0 of 2 slot(s) in use\n  committee: 0 of 3 slot(s) in use\n" +
 			"  architect: 0 in use, unbounded (no factory-wide limit; at most one turn per workstream)\n" +
 			"  checks: 0 of 2 slot(s) in use\n" +
-			"  chief: 0 of 3 slot(s) in use\n",
+			"  manager: 0 of 3 slot(s) in use\n",
 		"Workspaces: setting=auto new_workstreams=",
 		"Workstreams:\n" +
 			"  " + stream + " state=handed open_questions=0 context_mode=file workspaces=git\n" +
@@ -169,7 +169,7 @@ func TestStatusJSONHoldsEveryWorkstreamProfilesCapacityAndWorkspaces(t *testing.
 		Status        wire.StatusResponse
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
-	capacity := &wire.CapacityStatus{PerWorkstream: 2, Roles: []wire.RoleCapacity{{Role: "mason", Limit: fixturekit.Limit(4), Waiting: []wire.SlotWait{}}, {Role: "reviewer", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "committee", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}, fixturekit.Unbounded("architect", 0, []wire.SlotWait{}), {Role: "checks", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "chief", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}}}
+	capacity := &wire.CapacityStatus{PerWorkstream: 2, Roles: []wire.RoleCapacity{{Role: "mason", Limit: fixturekit.Limit(4), Waiting: []wire.SlotWait{}}, {Role: "reviewer", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "committee", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}, fixturekit.Unbounded("architect", 0, []wire.SlotWait{}), {Role: "checks", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "manager", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}}}
 	if got := all.Status.Capacity; got == nil || len(got.Clients) != 1 || !got.Clients[0].Local || got.Clients[0].ID != "local" {
 		t.Fatalf("status --json capacity clients: %+v", got)
 	}
@@ -212,7 +212,7 @@ func TestStatusJSONOfOneWorkstream(t *testing.T) {
 
 func TestStatusOfAWorkstreamWithoutAStatusSaysSo(t *testing.T) {
 	_, root := startStatusFixture(t)
-	if out := successful(t, root, "status", quiet); out != "Workstream: "+quiet+" state=not recorded open_questions=0 context_mode=file workspaces=git\nStatus: none yet; the chief of staff has not written one\n" {
+	if out := successful(t, root, "status", quiet); out != "Workstream: "+quiet+" state=not recorded open_questions=0 context_mode=file workspaces=git\nStatus: none yet; the manager has not written one\n" {
 		t.Fatalf("no status:\n%s", out)
 	}
 }
@@ -602,8 +602,8 @@ func TestStatusPrintsCapacity(t *testing.T) {
 			{Workstream: stream, Review: 3, Reason: "capacity"},
 			{Workstream: quiet, Session: true, Reason: "capacity"},
 		}},
-		{Role: "chief", Used: 3, Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{
-			{Project: "p_a", Workstream: stream, Agent: "chief", Turn: "turn-1", Reason: "capacity"},
+		{Role: "manager", Used: 3, Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{
+			{Project: "p_a", Workstream: stream, Agent: "manager", Turn: "turn-1", Reason: "capacity"},
 		}},
 	}})
 	if want := "Capacity (per workstream 2):\n" +
@@ -616,8 +616,8 @@ func TestStatusPrintsCapacity(t *testing.T) {
 		"    Waiting: " + stream + " unit parser (capacity)\n" +
 		"    Waiting: " + stream + " final review 3 (capacity)\n" +
 		"    Waiting: " + quiet + " session (capacity)\n" +
-		"  chief: 3 of 3 slot(s) in use, 1 waiting\n" +
-		"    Waiting: " + stream + " turn turn-1 of chief (capacity)\n"; out.String() != want {
+		"  manager: 3 of 3 slot(s) in use, 1 waiting\n" +
+		"    Waiting: " + stream + " turn turn-1 of manager (capacity)\n"; out.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", out.String(), want)
 	}
 }

@@ -287,7 +287,7 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	p.AwaitText(card+`[data-objection="`+veto+`"] [data-field=standing]`, "blocking")
 	p.AwaitText(card+`[data-objection="`+veto+`"]`, "charter by "+intake.CommitteeAgent(1)+" in round 1 on spec#2")
 	p.AwaitText(card+`[data-objection="`+size+`"] [data-field=argument]`, "It does not hold.")
-	p.AwaitText(card+`[data-objection="`+veto+`"] [data-field=escalation]`, "Chief of staff: The veto cites the small-changes rule.")
+	p.AwaitText(card+`[data-objection="`+veto+`"] [data-field=escalation]`, "Manager: The veto cites the small-changes rule.")
 	if got := choices(); slices.Contains(got, "ratify") || !slices.Contains(got, "overrule "+veto) || !slices.Contains(got, "sustain "+size) || !slices.Contains(got, "redraft") {
 		t.Fatalf("the decisions offered while objections block: %v", got)
 	}
@@ -365,9 +365,9 @@ func TestBrowserPageFoldsObjectionsTheManagerDismissed(t *testing.T) {
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(ws)
 	p.AwaitText(card+"[data-field=kind]", "Ratification")
-	p.AwaitText(card+`[data-objection="`+size+`"] [data-field=escalation]`, "Chief of staff: Splitting the unit is a judgement call.")
-	p.AwaitText(card+"[data-field=dismissed] summary", "Dismissed by the chief of staff (1)")
-	p.AwaitText(card+`[data-field=dismissed] [data-objection="`+veto+`"] [data-field=note]`, "Chief of staff: Each unit is one small change with its own test.")
+	p.AwaitText(card+`[data-objection="`+size+`"] [data-field=escalation]`, "Manager: Splitting the unit is a judgement call.")
+	p.AwaitText(card+"[data-field=dismissed] summary", "Dismissed by the manager (1)")
+	p.AwaitText(card+`[data-field=dismissed] [data-objection="`+veto+`"] [data-field=note]`, "Manager: Each unit is one small change with its own test.")
 	var choices []string
 	p.Eval(`[...document.querySelectorAll(`+browsertest.Quote(card+"[data-decision-choice]")+`)].map((o) => o.dataset.decisionChoice)`, &choices)
 	if !slices.Contains(choices, "ratify") || !slices.Contains(choices, "overrule "+size) || slices.ContainsFunc(choices, func(c string) bool { return strings.HasSuffix(c, " "+veto) }) {

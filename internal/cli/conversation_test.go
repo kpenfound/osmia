@@ -88,7 +88,7 @@ func TestSendQueuesAMessageForTheManager(t *testing.T) {
 func TestSendPrintsTheQueuedMessage(t *testing.T) {
 	root, _ := startConversation(t)
 	out := successful(t, root, "send", quiet, "Hold this one.")
-	if !strings.HasPrefix(out, "Message message_") || !strings.HasSuffix(out, " sent to the chief of staff of "+quiet+": queued\n") {
+	if !strings.HasPrefix(out, "Message message_") || !strings.HasSuffix(out, " sent to the manager of "+quiet+": queued\n") {
 		t.Fatalf("send: %q", out)
 	}
 }
@@ -143,7 +143,7 @@ func TestConversationTextShowsEachEntryWithItsAuthorAndTurn(t *testing.T) {
 	answered := list.Entries[1].At
 	want := "Conversation: " + stream + "\n" +
 		sent.At.Format(time.RFC3339) + " owner [" + sent.Turn + " done]\n  Start with uploads.\n" +
-		answered.Format(time.RFC3339) + " chief of staff [" + sent.Turn + " done]\n  Noted.\n  The plan is next.\n"
+		answered.Format(time.RFC3339) + " manager [" + sent.Turn + " done]\n  Noted.\n  The plan is next.\n"
 	if got := successful(t, root, "conversation", stream); got != want {
 		t.Fatalf("conversation:\n%s\nwant:\n%s", got, want)
 	}

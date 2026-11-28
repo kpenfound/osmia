@@ -485,7 +485,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if err = s.recoverWorkgroupManagerSessions(ctx, projects); err != nil {
 		s.cleanupSocket()
 		st.Close()
-		return nil, fmt.Errorf("recover cross-repo workgroup chief-of-staff threads: %w", err)
+		return nil, fmt.Errorf("recover cross-repo workgroup manager threads: %w", err)
 	}
 	if err = s.recoverSessionOpen(ctx); err != nil {
 		s.cleanupSocket()
@@ -997,7 +997,7 @@ func EnsureManagers(ctx context.Context, repository *trace.Repository, at time.T
 			continue
 		}
 		if _, err := repository.EnsureManager(ctx, stream, at, serviceActor); err != nil {
-			return fmt.Errorf("workstream %s chief-of-staff thread: %w", stream, err)
+			return fmt.Errorf("workstream %s manager thread: %w", stream, err)
 		}
 	}
 	return nil

@@ -218,7 +218,7 @@ func ToolHolding(repository *trace.Repository, agent string, scope coreadapter.S
 		return coreadapter.Tool{}, errors.New("status tool requires a trace and a clock")
 	}
 	if scope.Role != trace.StatusRole {
-		return coreadapter.Tool{}, fmt.Errorf("%s is granted to the chief of staff only", ToolName)
+		return coreadapter.Tool{}, fmt.Errorf("%s is granted to the manager only", ToolName)
 	}
 	tool := coreadapter.Tool{Name: ToolName, Effect: coreadapter.ToolMemory,
 		Description: "Replace this workstream's status for the owner. goal: one sentence on what is being worked toward. attention: a concrete action while an owner gate is open, otherwise empty. note: a few sentences on what changed and where things stand. agents: one line per active agent. Write in words: no commit hashes, branch names, file paths, session IDs, Osmia IDs or model names.",

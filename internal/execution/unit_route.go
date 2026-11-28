@@ -51,8 +51,14 @@ const (
 	TriggerStalled           = "unit.stalled"
 	TriggerOwnerRuling       = "contest.owner_ruling"
 	TriggerJevRuling         = "contest.jev_ruling"
-	TriggerManagerRuling     = "contest.chief_ruling"
+	TriggerManagerRuling     = storedManagerRulingTrigger
 )
+
+// storedManagerRulingTrigger is a stored name of the manager role: the trigger
+// of the exit a manager ruling on a contested unit raises. Saved routing
+// records hold it and route spans are built from it, so the value must not
+// change.
+const storedManagerRulingTrigger = "contest.chief_ruling"
 
 // TargetWait is the target of an exit that leaves the unit where it is: nothing
 // moves while the exit's records and notices are committed. It is the default of

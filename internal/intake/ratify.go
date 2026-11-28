@@ -103,8 +103,9 @@ func (s *Controller) Packet(raw string) (PacketResponse, *APIError) {
 		return PacketResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the ratification packet of workstream %s; check the trace repository", stream)}
 	}
 	if !found {
-		return PacketResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("workstream %s has no ratification packet; the chief of staff presents one once debate concludes or the owner skips it", stream)}
+		return PacketResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("workstream %s has no ratification packet; the manager presents one once debate concludes or the owner skips it", stream)}
 	}
+	packet.Dissent = shownDissent(packet.Dissent)
 	out := PacketResponse{Project: project, Workstream: stream, Packet: packet, Revision: doc.Revision, At: doc.At}
 	if spec, _, found, err := repository.ProjectSpecOf(stream); err == nil && found {
 		out.ProjectSpec = &spec
@@ -526,4 +527,14 @@ func (s *Controller) planless(raw string) bool {
 	}
 	kind, err := StreamKind(repo, stream)
 	return err == nil && !kind.Documents.Planned()
+}
+
+// shownDissent is entries as the API reports them: the stored name of the
+// manager in By becomes its display name. The stored entries are not changed.
+func shownDissent(entries []shed.Entry) []shed.Entry {
+	shown := slices.Clone(entries)
+	for i := range shown {
+		shown[i].By = trace.DisplayRole(shown[i].By)
+	}
+	return shown
 }

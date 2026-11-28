@@ -26,7 +26,7 @@ func TestBrowserActivityLabelsOnlyJevDepartures(t *testing.T) {
 			routedTransitionEntry("2026-01-01T00:00:06Z", "verdict", "service:reviewer", "reviewer", "verdict", false),
 			actorTransitionEntry("2026-01-01T00:00:07Z", "unrouted", "service:jev"),
 			actorTransitionEntry("2026-01-01T00:00:08Z", "building", "owner:local"),
-			actorTransitionEntry("2026-01-01T00:00:09Z", "assembled", "agent:chief_of_staff"))
+			actorTransitionEntry("2026-01-01T00:00:09Z", "assembled", "agent:manager"))
 	})
 	p := f.p
 	p.openActivity()

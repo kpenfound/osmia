@@ -293,7 +293,7 @@ func TestConversationUnusableProfileIsInternal(t *testing.T) {
 	s.Cfg = &cfg
 	_, err := c.Send(context.Background(), fixturekit.Stream, "hello")
 	var apiErr *api.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != api.Internal || !strings.Contains(apiErr.Message, "role chief_of_staff has no usable profile \"default\"") {
+	if !errors.As(err, &apiErr) || apiErr.Code != api.Internal || !strings.Contains(apiErr.Message, "role manager has no usable profile \"default\"") {
 		t.Fatalf("unusable profile: %v", err)
 	}
 	th, err := s.Sole().Repository.ManagerThread(fixturekit.Stream)

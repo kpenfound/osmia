@@ -12,9 +12,9 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const managerSlotWaitReason = "waiting for a chief slot"
+const managerSlotWaitReason = "waiting for a manager slot"
 
-const managerRole = "chief"
+const managerRole = trace.ManagerDisplay
 
 // ManagerSlotTurn identifies a background manager turn waiting for or
 // holding capacity.manager. At is when its request was enqueued.

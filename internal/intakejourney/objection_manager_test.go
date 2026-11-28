@@ -89,13 +89,19 @@ func TestManagerDecidesObjectionsBeforeTheOwnerSeesThem(t *testing.T) {
 	for _, e := range packet.Dissent {
 		byID[e.ID] = e
 	}
-	if e := byID[veto]; e.Blocking || e.Disposition != shed.Dismissed || e.By != trace.Manager || e.Note != dismissal || e.Escalated {
+	if e := byID[veto]; e.Blocking || e.Disposition != shed.Dismissed || e.By != trace.ManagerDisplay || e.Note != dismissal || e.Escalated {
 		t.Fatalf("the dismissed veto in the packet %+v", e)
 	}
 	if e := byID[advice]; e.Blocking || e.Disposition != "" || e.By != "" || !e.Escalated || e.Escalation != escalation {
 		t.Fatalf("the escalated advice in the packet %+v", e)
 	}
-	if shown := shed.ForOwner(packet.Dissent); len(shown) != 1 || shown[0].ID != advice {
+	var shown []shed.Entry
+	for _, e := range packet.Dissent {
+		if e.By != trace.ManagerDisplay {
+			shown = append(shown, e)
+		}
+	}
+	if len(shown) != 1 || shown[0].ID != advice {
 		t.Fatalf("the owner is shown %+v", shown)
 	}
 	if entries := f.InboxEntries(t, stream, api.InboxRatification); len(entries) != 1 || !slices.Equal(entries[0].Options, []string{"ratify"}) || entries[0].Recommendation != ratifiable {

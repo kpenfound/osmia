@@ -1639,9 +1639,9 @@ func (a *FinalReviewer) FinalMoveNote(repository *trace.Repository, stream confi
 	}
 	m := moves[n-1]
 	if m.From == m.To {
-		return fmt.Sprintf("The %s asked for this review with this note: %s", m.By, m.Note), nil
+		return fmt.Sprintf("The %s asked for this review with this note: %s", trace.DisplayRuler(m.By), m.Note), nil
 	}
-	return fmt.Sprintf("The %s moved the workstream from %s to %s, which asked for this review, with this note: %s", m.By, m.From, m.To, m.Note), nil
+	return fmt.Sprintf("The %s moved the workstream from %s to %s, which asked for this review, with this note: %s", trace.DisplayRuler(m.By), m.From, m.To, m.Note), nil
 }
 
 // PreviousFinalReport returns the latest reviewed report of a final review

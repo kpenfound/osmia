@@ -469,7 +469,7 @@ func TestBrowserUnreadMarkersCountConversationEntries(t *testing.T) {
 		what  string
 		extra string
 	}{
-		{"a message", chatEntry("message", 6, "A note for the chief.")},
+		{"a message", chatEntry("message", 6, "A note for the manager.")},
 		{"a milestone", featureTransitionEntry(7, "assembled", "every unit merged")},
 		{"a final review", finalReviewEntry(8, 1, "reviewed")},
 	} {

@@ -21,7 +21,7 @@ func AnswerManager(t *testing.T, repo *trace.Repository, ws config.WorkstreamID,
 	Must(t, err)
 	i := slices.IndexFunc(thread.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == turn })
 	if i < 0 || thread.Turns[i].Claim == nil {
-		t.Fatalf("no claimed chief-of-staff turn %s", turn)
+		t.Fatalf("no claimed manager turn %s", turn)
 	}
 	q := thread.Turns[i]
 	h := q.Request.Header

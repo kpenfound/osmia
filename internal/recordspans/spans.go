@@ -124,7 +124,7 @@ func (r Recorder) turn(d trace.CommitDetail, turn trace.FinishedTurn) {
 		attrs = append(attrs, telemetry.CostUSD(res.Usage.CostUSD))
 	}
 	r.Sink.Emit(telemetry.Span{
-		Name: telemetry.GenAIName(telemetry.GenAIOperationInvokeAgent, turn.Role), Trace: telemetry.WorkstreamTrace(w),
+		Name: telemetry.GenAIName(telemetry.GenAIOperationInvokeAgent, trace.DisplayRole(turn.Role)), Trace: telemetry.WorkstreamTrace(w),
 		ID:     telemetry.RecordSpan(w, turn.Response.ID, turn.Response.Revision),
 		Parent: telemetry.WorkstreamRoot(w), Start: res.StartedAt, End: res.StartedAt.Add(res.Duration),
 		Attrs: attrs, Failed: outcome == TurnFailed,

@@ -99,7 +99,7 @@ func TestManagerSlotsFullPoolKeepsBackgroundTurnsQueuedAndOwnerTurnsRunning(t *t
 	if st.Limit != 2 || !slices.Equal(managerTurns(st.Active), []string{"H1", "H2"}) {
 		t.Fatalf("pool status: %+v", st)
 	}
-	if reason := f.reason(t, s, 2, "W1"); reason != "waiting for a chief slot" {
+	if reason := f.reason(t, s, 2, "W1"); reason != "waiting for a manager slot" {
 		t.Fatalf("waiting turn reason %q", reason)
 	}
 	if reason := f.reason(t, s, 2, "L1"); !strings.HasPrefix(reason, "waiting for an event turn") {
@@ -248,7 +248,7 @@ func TestManagerSlotsAbandonedWaiterDoesNotBlockAYoungerOne(t *testing.T) {
 	f.background(t, s, 1, "A", 2)
 	f.background(t, s, 2, "B", 3)
 	awaitManagerSlots(t, s, 1, "A", "B")
-	_, err := c.Abandon(ctx, f.streams[1], "Abandoned while waiting for a chief slot")
+	_, err := c.Abandon(ctx, f.streams[1], "Abandoned while waiting for a manager slot")
 	fixturekit.Must(t, err)
 	awaitManagerSlots(t, s, 1, "B")
 	f.agent.release(f.key(0, "H"))
@@ -413,7 +413,7 @@ func TestManagerSlotsSharedWorkgroupManagerTakesFromTheSamePool(t *testing.T) {
 	})
 	th, err := wt.Thread(host, trace.Manager)
 	fixturekit.Must(t, err)
-	if reason := s.queuedReason(th, th.Turns[0]); reason != "waiting for a chief slot" || agent.hasStarted("shared@"+string(host)) {
+	if reason := s.queuedReason(th, th.Turns[0]); reason != "waiting for a manager slot" || agent.hasStarted("shared@"+string(host)) {
 		t.Fatalf("shared chief turn: reason %q", reason)
 	}
 	s.manager.resize(1)

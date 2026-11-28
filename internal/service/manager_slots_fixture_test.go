@@ -244,7 +244,7 @@ func (f *managerFleet) reason(t *testing.T, s *Service, i int, turn string) stri
 
 func awaitManagerSlots(t *testing.T, s *Service, used int, waiting ...string) ManagerSlotStatus {
 	t.Helper()
-	intakefixture.Soon(t, fmt.Sprintf("%d chief slots held and waiting %v", used, waiting), func() bool {
+	intakefixture.Soon(t, fmt.Sprintf("%d manager slots held and waiting %v", used, waiting), func() bool {
 		st := s.ManagerSlots()
 		return st.Used == used && slices.Equal(managerTurns(st.Waiting), waiting)
 	})

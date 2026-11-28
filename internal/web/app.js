@@ -1064,7 +1064,7 @@
 
   // archiveLabel says who archived a workstream and how far its cleanup is.
   function archiveLabel(w) {
-    return (w.archived_by === 'chief_of_staff' ? 'Archived by the chief of staff' : 'Archived') + ', ' + (w.trace_deleted ? 'trace deleted' : 'cleanup pending');
+    return (w.archived_by === 'manager' ? 'Archived by the manager' : 'Archived') + ', ' + (w.trace_deleted ? 'trace deleted' : 'cleanup pending');
   }
   function repoLabel(id) {
     return configuredRepos().find(r => r.id === id)?.label || id;
@@ -1519,7 +1519,7 @@
         const button = el('button', { type: 'button', class: 'member-open', 'data-open-member': m.workstream },
           el('strong', { 'data-field': 'repo' }, repoLabel(m.repo)),
           el('span', { class: 'tag', 'data-field': 'state' }, m.display_state || m.state || 'planning'),
-          m.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, m.archived_by === 'chief_of_staff' ? 'Archived by chief of staff' : 'Archived') : null,
+          m.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, m.archived_by === 'manager' ? 'Archived by manager' : 'Archived') : null,
           m.running ? el('span', { class: 'working', 'data-field': 'running', 'aria-label': 'Agent running' }) : null);
         button.disabled = m.archived;
         button.addEventListener('click', () => select(m.workstream));
@@ -2431,7 +2431,7 @@
     act(c.result, c.button, () => request('POST', path, { text }), (entry) => {
       c.text.value = '';
       mark([group ? groupFeed(id) : 'feed/' + id]);
-      return 'Sent; the chief of staff answers in its next turn (' + entry.state + ').';
+      return 'Sent; the manager answers in its next turn (' + entry.state + ').';
     });
   }
 
@@ -2459,7 +2459,7 @@
       entries: el('div', { class: 'feed', 'data-field': 'feed' }),
       heading: el('h3', { class: 'needs-title' }, 'Waiting for you'),
       decisions: el('div', { class: 'decisions', 'data-field': 'decisions' }),
-      text: el('textarea', { name: 'text', rows: '2', 'aria-label': 'Message to the chief of staff', placeholder: 'Message the chief of staff' }),
+      text: el('textarea', { name: 'text', rows: '2', 'aria-label': 'Message to the manager', placeholder: 'Message the manager' }),
       button: sendButton(),
       result: el('p', { class: 'result', role: 'status' }),
       shown: null,
@@ -2504,7 +2504,7 @@
   }
 
   // conversationKinds are the feed entries of the conversation with the
-  // chief of staff.
+  // manager.
   const conversationKinds = new Set(['message', 'response', 'action']);
 
   function role(name) {
@@ -2529,12 +2529,12 @@
   }
 
   // renderConversationEntry shows one message, response, action or image of a
-  // conversation. agentLabel names who answered: it defaults to the chief
-  // of staff, but a session (which has no chief of staff, spec#5, spec#20)
+  // conversation. agentLabel names who answered: it defaults to the manager,
+  // but a session (which has no manager, spec#5, spec#20)
   // passes its own agent's label instead.
   function renderConversationEntry(e, agentLabel) {
     if (e.kind === 'image') return renderImage(e, agentLabel);
-    const who = { message: 'You', action: (agentLabel || 'Chief of staff') + ' acted' }[e.kind] || agentLabel || 'Chief of staff';
+    const who = { message: 'You', action: (agentLabel || 'Manager') + ' acted' }[e.kind] || agentLabel || 'Manager';
     return el('li', { class: 'entry', 'data-kind': e.kind, 'data-turn': e.turn, 'data-state': e.state },
       el('div', { class: 'meta meta-row' },
         el('span', { 'data-ann': 'role' }, who), ' ',
@@ -2562,14 +2562,14 @@
     ].filter((node) => node !== null);
   }
 
-  // renderBriefEntry shows the delivery brief the chief of staff recorded for
+  // renderBriefEntry shows the delivery brief the manager recorded for
   // a final review as an entry of its own, so the owner can answer it in the
   // conversation right under it.
   function renderBriefEntry(e) {
     const b = e.brief;
     return el('li', { class: 'entry', 'data-kind': 'brief', 'data-review': b.review, ...(e.workstream ? { 'data-workstream': e.workstream } : {}) },
       el('div', { class: 'meta meta-row' },
-        el('span', { 'data-ann': 'role' }, 'Chief of staff'), ' ',
+        el('span', { 'data-ann': 'role' }, 'Manager'), ' ',
         el('span', { 'data-ann': 'action' }, 'delivery brief for final review ' + b.review), ' ',
         el('span', { 'data-ann': 'when' }, when(e.at))),
       el('div', { class: 'card', 'data-field': 'brief' }, ...briefBody(b.text, b.before_you_ship || [], b.screenshots || [])));
@@ -2586,14 +2586,14 @@
       return el('section', { class: 'delivery-brief', ...state }, ...briefBody(b.text || '', b.before_you_ship || [], shots));
     }
     return el('section', { class: 'delivery-brief', ...state },
-      el('p', { 'data-field': 'brief-state' }, b.state === 'waiting' ? 'Waiting for the chief of staff to write the brief for this review' : 'No brief was recorded for this review'));
+      el('p', { 'data-field': 'brief-state' }, b.state === 'waiting' ? 'Waiting for the manager to write the brief for this review' : 'No brief was recorded for this review'));
   }
 
   function renderImage(e, agentLabel) {
     const image = e.image;
     return el('li', { id: 'feed-image-' + image.id, class: 'entry', 'data-kind': 'image', 'data-image': image.id, 'data-turn': e.turn, ...(e.workstream ? { 'data-workstream': e.workstream } : {}) },
       el('div', { class: 'meta meta-row' },
-        el('span', { 'data-ann': 'role' }, agentLabel || 'Chief of staff'), ' ',
+        el('span', { 'data-ann': 'role' }, agentLabel || 'Manager'), ' ',
         el('span', { 'data-ann': 'action' }, 'image'), ' ',
         el('span', { 'data-ann': 'when' }, when(e.at))),
       image.placeholder
@@ -2602,14 +2602,14 @@
           el('img', { src: image.url, alt: 'Image ' + image.id, 'data-field': 'image' })));
   }
 
-  // renderStatus shows a status the chief of staff wrote. Only the latest
+  // renderStatus shows a status the manager wrote. Only the latest
   // status's attention asks for something now; marked names the latest as
   // current, where older statuses sit beside it.
   function renderStatus(e, latest, marked = false) {
     const s = e.status;
     return el('li', { class: 'entry', 'data-kind': 'status', 'data-revision': String(s.revision), 'data-latest': String(latest) },
       el('div', { class: 'meta meta-row' },
-        el('span', { 'data-ann': 'role' }, 'Chief of staff'), ' ',
+        el('span', { 'data-ann': 'role' }, 'Manager'), ' ',
         el('span', { 'data-ann': 'action' }, 'status'), ' ',
         el('span', { 'data-ann': 'when' }, when(e.at)),
         latest && marked ? ' ' : null, latest && marked ? el('span', { class: 'current', 'data-field': 'current' }, 'Current') : null),
@@ -2768,7 +2768,7 @@
   }
 
   // activityKinds are the feed entries Activity shows: the machine events
-  // and every status of the chief of staff. The rest of the feed is the
+  // and every status of the manager. The rest of the feed is the
   // conversation.
   const activityKinds = new Set(['status', 'session', 'transition', 'unit_checks', 'final_checks', 'session_checks', 'final_review', 'recovery']);
 
@@ -2869,7 +2869,7 @@
   }
 
   // renderConversation shows the workstream's conversation: what the owner
-  // and the chief of staff said, the chief's latest status, and the
+  // and the manager said, the manager's latest status, and the
   // milestones, with the owner's command outcomes where they were taken.
   function renderConversation(c, id) {
     const name = 'feed/' + id;
@@ -2889,7 +2889,7 @@
     if (shown.length === 0 && outcomes.length === 0) {
       const open = el('button', { type: 'button', class: 'secondary' }, 'Open activity');
       open.addEventListener('click', () => showActivity());
-      c.entries.replaceChildren(el('div', { 'data-field': 'empty' }, stateBlock('empty', 'Nothing here yet.', 'Write to the chief of staff below. Sessions and check runs are in Activity.', open)));
+      c.entries.replaceChildren(el('div', { 'data-field': 'empty' }, stateBlock('empty', 'Nothing here yet.', 'Write to the manager below. Sessions and check runs are in Activity.', open)));
       return;
     }
     c.entries.replaceChildren(el('ol', {}, ...withOutcomes(shown, outcomes, (e) => {
@@ -2978,7 +2978,7 @@
   }
 
   // renderActivityTab shows every event of the workstream, oldest first,
-  // with a filter by unit. Routine runs fold into one line; older chief
+  // with a filter by unit. Routine runs fold into one line; older manager
   // statuses recede behind the latest.
   function renderActivityTab(c, w) {
     const id = w.workstream;
@@ -3041,12 +3041,12 @@
   }
 
   // feedView is the feed the workstream's card shows: its read feed, less the
-  // conversation, statuses and chief turns the shared conversation of a
+  // conversation, statuses and manager turns the shared conversation of a
   // multi-member workgroup shows instead.
   function feedView(id) {
     const raw = views['feed/' + id];
     const multi = isMultiMember(streams().find(w => w.workstream === id));
-    return raw && multi ? { ...raw, entries: raw.entries.filter(e => !conversationKinds.has(e.kind) && e.kind !== 'status' && !(e.kind === 'session' && e.session.role === 'chief_of_staff')) } : raw;
+    return raw && multi ? { ...raw, entries: raw.entries.filter(e => !conversationKinds.has(e.kind) && e.kind !== 'status' && !(e.kind === 'session' && e.session.role === 'manager')) } : raw;
   }
 
   // groupEntry reports whether a workgroup feed entry is part of its
@@ -3712,13 +3712,13 @@
     const nodes = [
       el('h2', { 'data-field': 'goal' }, isMultiMember(w) ? repoLabel(w.project) : status ? status.goal : 'No status yet'),
       el('div', { class: 'head-meta' }, pill,
-        w.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, w.archived_by === 'chief_of_staff' ? 'archived by chief of staff' : 'archived') : null,
+        w.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, w.archived_by === 'manager' ? 'archived by manager' : 'archived') : null,
         el('span', { class: 'head-project', 'data-field': 'project' }, repoLabel(w.project)),
         renderIDCopy(w.workstream)),
       w.work_kind === 'hill-climb' ? renderClimbLine(w) : renderUnitCounts(w.units),
       el('details', { class: 'head-details' }, el('summary', {}, 'Details'),
         el('p', { class: 'meta', 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
-      isMultiMember(w) ? renderChiefLine(w) : null].filter((node) => node !== null);
+      isMultiMember(w) ? renderManagerLine(w) : null].filter((node) => node !== null);
     const markup = nodes.map((node) => node.outerHTML).join('');
     if (markup === shownHead && head.childElementCount > 0) return;
     shownHead = markup;
@@ -3727,8 +3727,8 @@
     if (open) head.querySelector('.head-details').open = true;
   }
 
-  function renderChiefLine(w) {
-    const ask = el('a', { href: '#workgroup=' + encodeURIComponent(w.workgroup.id), 'data-ask-chief': w.workstream }, 'Ask the chief about this repo');
+  function renderManagerLine(w) {
+    const ask = el('a', { href: '#workgroup=' + encodeURIComponent(w.workgroup.id), 'data-ask-manager': w.workstream }, 'Ask the manager about this repo');
     ask.addEventListener('click', event => {
       event.preventDefault();
       selectWorkgroup(w.workgroup.id, w.workstream);
@@ -3737,8 +3737,8 @@
       c.form.scrollIntoView({ block: 'nearest' });
     });
     const status = views[groupFeed(w.workgroup.id)]?.entries.findLast(e => e.kind === 'status')?.status || w.status;
-    return el('div', { class: 'member-chief-line', 'data-field': 'chief-status' },
-      el('span', {}, 'Chief: ', status?.note || status?.attention || 'No status yet'), ask);
+    return el('div', { class: 'member-manager-line', 'data-field': 'manager-status' },
+      el('span', {}, 'Manager: ', status?.note || status?.attention || 'No status yet'), ask);
   }
 
   function renderWorkstream(w) {
@@ -3824,7 +3824,7 @@
   }
 
   // sessionConversationEntries builds the session's chat, oldest first, the
-  // same shape the chief-of-staff conversation uses: the owner's message,
+  // same shape the manager conversation uses: the owner's message,
   // from this page's own echo, and the agent's reply, from the session's
   // feed, once the turn that answers it finishes. A turn just sent, not yet
   // in the feed, still shows from its echo alone.
@@ -3879,7 +3879,7 @@
   }
 
   // sendSession posts the owner's message to the session's agent, the same
-  // way the chief-of-staff composer's send does: the sent message shows at
+  // way the manager composer's send does: the sent message shows at
   // once, from the echo this records, and the reply appears once the
   // session's feed is read again, without a reload. A busy refusal, or one
   // naming a session that has ended, shows in the composer's result.
@@ -4124,10 +4124,10 @@
   }
 
   // designConversationEntries reads the design session's conversation from
-  // its own endpoint, the same entry shape the chief-of-staff conversation
+  // its own endpoint, the same entry shape the manager conversation
   // uses. Unlike a session, a design session carries no feed event of its
   // own, so a sent message waits for this view to read again, the same way
-  // the ordinary chief-of-staff composer's send does.
+  // the ordinary manager composer's send does.
   function designConversationEntries(id) {
     const view = views['design/' + id + '/conversation'];
     return view ? view.entries : [];
@@ -4200,7 +4200,7 @@
 
   // startDesign is the one owner action that starts a workgroup from a
   // design session's drafted brief; the same conversation continues as the
-  // workgroup's chief-of-staff thread.
+  // workgroup's manager thread.
   function startDesign(id) {
     const revision = Number(byId('design-brief').dataset.revision);
     act(byId('design-start-result'), byId('design-start'), () => request('POST', '/design/' + id + '/start', { brief_revision: revision }), (out) => {
@@ -4977,12 +4977,12 @@
       d.detail.replaceChildren(readState(name, 'Reading the packet…', 'The packet is unavailable.'));
       return [];
     }
-    // The chief of staff decides the committee's objections first; the
+    // The manager decides the committee's objections first; the
     // owner rules on what it escalated and on their own, and what it
     // dismissed is folded away with its reasons.
     const all = view.packet.dissent || [];
-    const dissent = all.filter((o) => o.by !== 'chief_of_staff');
-    const dismissed = all.filter((o) => o.by === 'chief_of_staff');
+    const dissent = all.filter((o) => o.by !== 'manager');
+    const dismissed = all.filter((o) => o.by === 'manager');
     d.detail.replaceChildren(...[
       view.project_spec ? el('details', { 'data-field': 'project-spec' },
         el('summary', {}, 'Workgroup spec revision ' + view.project_spec_revision),
@@ -4993,7 +4993,7 @@
           el('span', { class: 'tag', 'data-field': 'standing' }, [o.blocking ? 'blocking' : 'advice', o.disposition].filter(Boolean).join(', '))),
         el('div', { class: 'meta' }, o.kind + ' by ' + o.member + ' in round ' + o.round + (o.part ? ' on ' + o.part : '')),
         el('div', { 'data-field': 'argument' }, o.argument),
-        o.escalation ? el('div', { class: 'meta', 'data-field': 'escalation' }, 'Chief of staff: ' + o.escalation) : null,
+        o.escalation ? el('div', { class: 'meta', 'data-field': 'escalation' }, 'Manager: ' + o.escalation) : null,
         o.note ? el('div', { class: 'meta', 'data-field': 'note' }, 'Your note: ' + o.note) : null,
         // Each objection is ruled on by its own pair of buttons, which send
         // the card's note with the objection they sit under.
@@ -5002,11 +5002,11 @@
           choiceButton(d, 'overrule ' + o.id, 'Overrule', 'secondary', 'Overrule ' + o.id))))),
       dissent.length === 0 ? null : el('p', { class: 'meta', 'data-field': 'objection-hint' }, 'Sustain, overrule and redraft send the note below.'),
       dismissed.length === 0 ? null : el('details', { 'data-field': 'dismissed' },
-        el('summary', { class: 'meta' }, 'Dismissed by the chief of staff (' + dismissed.length + ')'),
+        el('summary', { class: 'meta' }, 'Dismissed by the manager (' + dismissed.length + ')'),
         el('ul', { class: 'dissent' }, ...dismissed.map((o) => el('li', { 'data-objection': o.id },
           el('div', { class: 'meta' }, o.id + ': ' + o.kind + ' by ' + o.member + (o.part ? ' on ' + o.part : '')),
           el('div', { 'data-field': 'argument' }, o.argument),
-          el('div', { class: 'meta', 'data-field': 'note' }, 'Chief of staff: ' + o.note)))))].filter(Boolean));
+          el('div', { class: 'meta', 'data-field': 'note' }, 'Manager: ' + o.note)))))].filter(Boolean));
     return dissent;
   }
 
@@ -5111,7 +5111,7 @@
   // recommendedChoice names the option an entry's recommendation points at:
   // the one it opens with ("ratify: no objection stands"). With no
   // recommendation to read, a lone option is the recommended one. A
-  // contested unit's note is the chief of staff's account, not a pick.
+  // contested unit's note is the manager's account, not a pick.
   function recommendedChoice(entry) {
     const options = entry.options || [];
     const text = (entry.recommendation || '').trim().toLowerCase();
@@ -5180,7 +5180,7 @@
       el('div', { class: 'card-meta' },
         el('span', { class: 'tag', 'data-field': 'kind' }, kinds[entry.kind] || entry.kind),
         el('span', { class: 'meta', 'data-field': 'opened' }, when(entry.opened_at)),
-        // The question above is the chief of staff's rephrasing; what each
+        // The question above is the manager's rephrasing; what each
         // role asked in its own words stays one tap away.
         entry.asked.length === 0 ? null : footnote('asked',
           el('summary', {}, entry.asked.length === 1 ? 'What was asked' : 'What was asked (' + entry.asked.length + ' questions)'),
@@ -5893,7 +5893,7 @@
     const handin = byId('handin-form');
     const handinSelected = selectedHandinProjects();
     setOptions(handin.elements.base, [['', 'Project upstream'], ...all.filter(w => handinSelected.includes(w.project) && w.state !== 'abandoned' && !w.archived).map(w => [w.workstream, goal(w)])]);
-    byId('handin-project-order').textContent = handinProjects.length ? 'Selected order: ' + handinProjects.map(projectName).join(' → ') + '. First project hosts the shared chief and conversation.' : 'Choose projects in order; the first hosts the shared chief and conversation.';
+    byId('handin-project-order').textContent = handinProjects.length ? 'Selected order: ' + handinProjects.map(projectName).join(' → ') + '. First project hosts the shared manager and conversation.' : 'Choose projects in order; the first hosts the shared manager and conversation.';
     const w = shown();
     for (const id of workstreamForms) {
       byId(id).elements.workstream.value = w ? w.workstream : '';

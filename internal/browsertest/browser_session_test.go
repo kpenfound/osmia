@@ -97,9 +97,9 @@ func TestBrowserSessionSendAndReplyAppearWithoutReloadAndBusyRefusal(t *testing.
 	p.AwaitText("#session-feed", "Hi from the agent")
 	p.Await("the same document", `window.notReloaded === true`)
 	var labelledManager bool
-	p.Eval(`[...document.querySelectorAll('#session-feed [data-ann=role]')].some((n) => n.textContent === 'Chief of staff')`, &labelledManager)
+	p.Eval(`[...document.querySelectorAll('#session-feed [data-ann=role]')].some((n) => n.textContent === 'Manager')`, &labelledManager)
 	if labelledManager {
-		t.Fatal("the session feed labels a reply \"Chief of staff\"; a session has no chief of staff")
+		t.Fatal("the session feed labels a reply \"Manager\"; a session has no manager")
 	}
 
 	p.Eval(`(() => { fetch(`+quote("/v1/sessions/"+string(id)+"/message")+`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text: 'Hold please'})}).catch(() => {}); })()`, nil)

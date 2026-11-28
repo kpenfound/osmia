@@ -168,7 +168,7 @@ func TestBrowserWhisperDictationFillsAndAppendsWithoutSending(t *testing.T) {
 		t.Fatalf("dictation sent a message before Send: %+v", conversation.Entries)
 	}
 	p.Click(form + ` [aria-label=Send]`)
-	p.AwaitText(form+" .result", "Sent; the chief of staff answers in its next turn")
+	p.AwaitText(form+" .result", "Sent; the manager answers in its next turn")
 	p.Await("cleared draft", `document.querySelector(`+quote(area)+`).value === ''`)
 	conversation, err = c.Conversation(context.Background(), stream)
 	must(t, err)

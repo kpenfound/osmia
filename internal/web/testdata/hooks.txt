@@ -8,7 +8,7 @@ aria-label	Create
 aria-label	Dictate
 aria-label	Message the design agent
 aria-label	Message the session's agent
-aria-label	Message to the chief of staff
+aria-label	Message to the manager
 aria-label	Open full-size image 
 aria-label	Open full-size screenshot 
 aria-label	Pauses
@@ -45,7 +45,6 @@ data-field	brief-state
 data-field	brief-text
 data-field	check-result
 data-field	checks
-data-field	chief-status
 data-field	chosen
 data-field	clear
 data-field	commit-message
@@ -77,6 +76,7 @@ data-field	kind
 data-field	limit
 data-field	listed
 data-field	loading
+data-field	manager-status
 data-field	members
 data-field	mode
 data-field	needs

@@ -30,7 +30,7 @@ func managerContext(ctx context.Context, provider bundle.Provider, repository *t
 	host, err := repository.ManagerHost(stream)
 	if err != nil {
 		closeRepository()
-		return "", fmt.Errorf("chief of staff of workstream %s: %w", stream, err)
+		return "", fmt.Errorf("manager of workstream %s: %w", stream, err)
 	}
 	followUps, err := renderFollowUps(repository, host)
 	if err != nil {

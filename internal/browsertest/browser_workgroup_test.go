@@ -63,7 +63,7 @@ func newMemberPageFixture(t *testing.T, edges, multi bool) *workgroupPageFixture
 	_, err = live.EnsureManager(ctx, stream, demoStart, ownerActor)
 	must(t, err)
 	manager := claimTurn(t, live, t.TempDir(), stream, trace.Manager, trace.Manager, "group-status", demoStart)
-	_, err = live.SetStatus(ctx, trace.Manager, manager, trace.StatusContent{Goal: "Ship shared uploads", Note: "The chief coordinates both repos.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	_, err = live.SetStatus(ctx, trace.Manager, manager, trace.StatusContent{Goal: "Ship shared uploads", Note: "The manager coordinates both repos.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	must(t, err)
 	fixturekit.QueueRoleTurn(t, live, stream, intake.MasonAgent("upload"), "mason", "upload", demoStart)
 	_, err = live.ClaimTurn(ctx, stream, intake.MasonAgent("upload"), "group-worker-token", t.TempDir(), demoStart)
@@ -99,7 +99,7 @@ func openWorkgroup(p *page, id config.WorkgroupID) {
 	p.T.Helper()
 	p.Click(`[data-select-workgroup="` + string(id) + `"]`)
 	p.Await("the selected workgroup", `location.hash === `+quote("#workgroup="+string(id))+` && !document.querySelector('[data-view=workgroup]').hidden`)
-	p.AwaitText("#workgroup-content .feed", "The chief coordinates both repos.")
+	p.AwaitText("#workgroup-content .feed", "The manager coordinates both repos.")
 }
 
 func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
@@ -136,8 +136,8 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 	p.Await("no shared conversation in the member's Activity", `!document.querySelector('#workstream-activity [data-kind=message], #workstream-activity [data-kind=response], #workstream-activity [data-kind=action], #workstream-activity [data-kind=status], #workstream-activity [data-kind=session][data-role=chief_of_staff]')`)
 	p.OpenConversation()
 	p.Await("no session or check in the member's Conversation", `!document.querySelector('#workstreams [data-kind=session], #workstreams [data-kind=transition], #workstreams [data-kind=unit_checks]')`)
-	p.AwaitText("#workstream-head [data-field=chief-status]", "The chief coordinates both repos.")
-	p.AwaitText("#workstream-head [data-ask-chief]", "Ask the chief about this repo")
+	p.AwaitText("#workstream-head [data-field=manager-status]", "The manager coordinates both repos.")
+	p.AwaitText("#workstream-head [data-ask-manager]", "Ask the manager about this repo")
 	p.Await("the member has only its own decisions and no chat", `!document.querySelector('#workstreams .composer, #workstreams [data-kind=message], #workstreams [data-kind=response], #workstreams [data-kind=action], #workstreams [data-kind=status], #workstreams [data-kind=escalation]') && document.querySelector('#workstreams [data-kind=contested]') !== null`)
 	for _, tab := range []string{"documents", "trace", "activity", "conversation"} {
 		p.Click(`[data-tab="` + tab + `"]`)
@@ -266,7 +266,7 @@ func TestBrowserWorkgroupPhoneLayout(t *testing.T) {
 	t.Parallel()
 	f := newWorkgroupPageFixture(t, false)
 	longGoal := strings.Repeat("UnbrokenGoal", 20)
-	_, err := f.repo.SetStatus(context.Background(), trace.Manager, f.manager, trace.StatusContent{Goal: longGoal, Note: "The chief coordinates both repos.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	_, err := f.repo.SetStatus(context.Background(), trace.Manager, f.manager, trace.StatusContent{Goal: longGoal, Note: "The manager coordinates both repos.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	must(t, err)
 	p := openOutcomePage(t, f.s)
 	openWorkgroup(p, f.group.ID)

@@ -181,8 +181,8 @@ func TestBrowserMarkdownStatusAndReportsStayExpanded(t *testing.T) {
 	assertMarkdown(p, card+`[data-latest=true] [data-field=note] > .markdown`)
 	assertMarkdown(p, card+`[data-latest=true] [data-field=attention] > .markdown`)
 	p.OpenActivity()
-	p.Click(card + `[data-kind=session][data-role=chief_of_staff] summary`)
-	report := card + `[data-kind=session][data-role=chief_of_staff] [data-field=summary] > .markdown`
+	p.Click(card + `[data-kind=session][data-role=manager] summary`)
+	report := card + `[data-kind=session][data-role=manager] [data-field=summary] > .markdown`
 	assertMarkdown(p, report)
 	assertMarkdownPhone(p, report)
 	p.Eval(`window.feedEvents.length = 0`, nil)
@@ -191,7 +191,7 @@ func TestBrowserMarkdownStatusAndReportsStayExpanded(t *testing.T) {
 	awaitFeedEvent(p, stream)
 	p.Await("the new reply in Conversation", `[...document.querySelectorAll(`+quote(card+`[data-kind=response]`)+`)].some(n => n.textContent.includes('A new reply.'))`)
 	p.OpenActivity()
-	p.Await("report stays open after an update", `document.querySelector(`+quote(card+`[data-kind=session][data-role=chief_of_staff] details`)+`).open`)
+	p.Await("report stays open after an update", `document.querySelector(`+quote(card+`[data-kind=session][data-role=manager] details`)+`).open`)
 	assertMarkdown(p, report)
 	p.Await("session anchor", `document.getElementById(`+quote("feed-turn-"+f.manager.Turn)+`)?.querySelector('details').open`)
 }

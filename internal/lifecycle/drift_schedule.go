@@ -55,7 +55,7 @@ func (f *Foreman) History(stream config.WorkstreamID) (DriftHistory, error) {
 				}
 			case DriftRequestSubject:
 				if !r.At.Before(request) {
-					request, h.RequestedBy = r.At, rulerName(r.Actor)
+					request, h.RequestedBy = r.At, trace.DisplayRuler(rulerName(r.Actor))
 				}
 			}
 		case trace.Document:

@@ -353,7 +353,7 @@ func agentStatusesOn(repository *trace.Repository, stream config.WorkstreamID, n
 			if turn.Response != nil {
 				end = turn.Response.At
 			}
-			entry := AgentStatus{Role: thread.Identity.Role, Unit: string(turn.Request.Unit), State: thread.Status, StartedAt: turn.Claim.At,
+			entry := AgentStatus{Role: trace.DisplayRole(thread.Identity.Role), Unit: string(turn.Request.Unit), State: thread.Status, StartedAt: turn.Claim.At,
 				Elapsed: max(0, int64(end.Sub(turn.Claim.At)/time.Second)), Profile: turn.Request.Profile.Name}
 			if thread.Parked() {
 				entry.State = "waiting"
@@ -402,14 +402,14 @@ func (s *Service) statusList() StatusResponse {
 	}
 	capacity := s.capacityStatus(list)
 	if api != nil {
-		return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: append(diagnostics, Diagnostic{Field: "workstreams", Code: api.Code, Message: api.Message}), Workspaces: workspaces}
+		return StatusResponse{Workstreams: list, Profiles: displayProfiles(profiles), ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: append(diagnostics, Diagnostic{Field: "workstreams", Code: api.Code, Message: api.Message}), Workspaces: workspaces}
 	}
 	for _, w := range list {
 		if d, ok := unreadable[w.Workstream]; ok {
 			diagnostics = append(diagnostics, d)
 		}
 	}
-	return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: diagnostics, Workspaces: workspaces}
+	return StatusResponse{Workstreams: list, Profiles: displayProfiles(profiles), ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: diagnostics, Workspaces: workspaces}
 }
 
 func (s *Service) failureStreaks() ([]FailureStreak, error) {
@@ -456,7 +456,7 @@ func (s *Service) failureStreaks() ([]FailureStreak, error) {
 		if a.Result != nil && a.Result.Client != "" && !slices.Contains(clients, a.Result.Client) {
 			clients = append(slices.Clone(clients), a.Result.Client)
 		}
-		streaks[key] = FailureStreak{Role: a.role, Profile: a.Profile.Name, Consecutive: streak.Consecutive + 1, LastFailure: a.Failure, LastAt: a.At, Clients: clients}
+		streaks[key] = FailureStreak{Role: trace.DisplayRole(a.role), Profile: a.Profile.Name, Consecutive: streak.Consecutive + 1, LastFailure: a.Failure, LastAt: a.At, Clients: clients}
 	}
 	var out []FailureStreak
 	for _, key := range slices.SortedFunc(maps.Keys(streaks), func(a, b [2]string) int { return strings.Compare(a[0]+"\x00"+a[1], b[0]+"\x00"+b[1]) }) {

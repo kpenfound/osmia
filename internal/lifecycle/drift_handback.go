@@ -134,7 +134,7 @@ func DriftHandbackNote(repo *trace.Repository, stream config.WorkstreamID, k int
 		if err := json.Unmarshal([]byte(d.Content), &handback); err != nil {
 			return "", fmt.Errorf("%s: %w", d.Path, err)
 		}
-		return fmt.Sprintf("\n\nDrift rebase %d was held for the owner, and the %s handed it back with this note, which this drift rebase answers: %s", handback.Held, handback.By, handback.Note), nil
+		return fmt.Sprintf("\n\nDrift rebase %d was held for the owner, and the %s handed it back with this note, which this drift rebase answers: %s", handback.Held, trace.DisplayRuler(handback.By), handback.Note), nil
 	}
 	return "", nil
 }

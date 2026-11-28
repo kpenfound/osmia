@@ -156,7 +156,7 @@ func unitActivity(r *trace.Repository, stream config.WorkstreamID, docs []trace.
 			a = UnitActivity{Unit: unit, State: state.Value, Transitions: []ActivityTransition{}, Turns: []ActivityTurn{}}
 			for _, t := range transitions {
 				if t.Unit == unit && !router.IsJournal(t.Subject) {
-					a.Transitions = append(a.Transitions, ActivityTransition{At: t.At.UTC().Format(time.RFC3339), Subject: t.Subject, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + t.Actor.ID, Reason: t.Reason, DecidedBy: t.DecidedBy, Judgment: t.Judgment, DefaultTo: t.DefaultTo})
+					a.Transitions = append(a.Transitions, ActivityTransition{At: t.At.UTC().Format(time.RFC3339), Subject: t.Subject, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + trace.DisplayRole(t.Actor.ID), Reason: t.Reason, DecidedBy: trace.DisplayRole(t.DecidedBy), Judgment: t.Judgment, DefaultTo: t.DefaultTo})
 				}
 			}
 			a.Transitions = a.Transitions[max(len(a.Transitions)-activityTransitions, 0):]
@@ -182,7 +182,7 @@ func unitActivity(r *trace.Repository, stream config.WorkstreamID, docs []trace.
 			}
 		}
 		for _, q := range th.Turns[max(len(th.Turns)-activityTurns, 0):] {
-			turn := ActivityTurn{Agent: th.Identity.ID, Turn: q.Request.TurnID, Status: q.Status(), Refused: refused[q.Request.TurnID]}
+			turn := ActivityTurn{Agent: trace.DisplayRole(th.Identity.ID), Turn: q.Request.TurnID, Status: q.Status(), Refused: refused[q.Request.TurnID]}
 			if q.Response != nil {
 				turn.FinalResponse = clip(q.Response.Result.FinalResponse)
 				turn.Failure = q.Response.Failure

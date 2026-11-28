@@ -31,7 +31,7 @@ func unitProposalPolicy(repo *trace.Repository, stream config.WorkstreamID, unit
 	p.Facts["earlier_moves"] = len(moves)
 	for i := max(0, len(moves)-proposalHistory); i < len(moves); i++ {
 		m := moves[i]
-		p.Records = append(p.Records, router.Entry{Kind: "earlier move", ID: docs[i].ID, Text: fmt.Sprintf("%s moved the unit from %s to %s: %s", m.By, m.From, m.To, m.Note)})
+		p.Records = append(p.Records, router.Entry{Kind: "earlier move", ID: docs[i].ID, Text: fmt.Sprintf("%s moved the unit from %s to %s: %s", trace.DisplayRuler(m.By), m.From, m.To, m.Note)})
 	}
 	_, decisions, err := ManagerDecisions(repo, stream, unit)
 	if err != nil {

@@ -214,7 +214,7 @@ func (s *Controller) unitMoveRecords(ctx context.Context, repo *trace.Repository
 	move := UnitMove{From: state.Value, To: to, Note: note, By: by, Turn: turn}
 	id := moveDocument(unit, state.Version)
 	var docs []trace.Document
-	reason := fmt.Sprintf("%s moved unit %s from %s to %s", by, unit, state.Value, to)
+	reason := fmt.Sprintf("%s moved unit %s from %s to %s", trace.DisplayRuler(by), unit, state.Value, to)
 	switch to {
 	case UnitImplementing:
 		th, err := repo.Thread(stream, masonAgent(unit))

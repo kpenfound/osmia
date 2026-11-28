@@ -123,7 +123,7 @@ func (s *Service) sendManager(ctx context.Context, stream config.WorkstreamID, r
 	cfg := s.current()
 	name, profile, err := s.managerOverride(cfg)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("role %s has no usable profile %q; check osmia profiles", trace.Manager, name)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("role %s has no usable profile %q; check osmia profiles", trace.ManagerDisplay, name)}
 	}
 	target, host, bundleStream, closeTarget, err := resolve()
 	if err != nil {

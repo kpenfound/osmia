@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/trace"
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 )
@@ -198,8 +199,9 @@ func Bool(key string, value bool) Attr {
 	return Attr{attribute.Bool(key, value)}
 }
 
-// Role is the role whose work or capacity the span describes.
-func Role(role string) Attr { return String(KeyRole, role) }
+// Role is the role whose work or capacity the span describes. The manager's
+// stored role name is reported as its display name.
+func Role(role string) Attr { return String(KeyRole, trace.DisplayRole(role)) }
 
 // Backend is the agent backend that ran a turn.
 func Backend(backend string) Attr { return String(KeyBackend, backend) }
@@ -314,10 +316,10 @@ func GenAIProvider(provider string) Attr {
 func GenAIModel(model string) Attr { return String(KeyGenAIModel, model) }
 
 // GenAIAgentName is the gen_ai.agent.name of a turn span.
-func GenAIAgentName(name string) Attr { return String(KeyGenAIAgentName, name) }
+func GenAIAgentName(name string) Attr { return String(KeyGenAIAgentName, trace.DisplayRole(name)) }
 
 // GenAIAgentID is the gen_ai.agent.id of a turn span.
-func GenAIAgentID(id string) Attr { return String(KeyGenAIAgentID, id) }
+func GenAIAgentID(id string) Attr { return String(KeyGenAIAgentID, trace.DisplayRole(id)) }
 
 // VerifyCount is one of the integer measures of verification, given by its
 // key: a run count, a flow count or a unit count.

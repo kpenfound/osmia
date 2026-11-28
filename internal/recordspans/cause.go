@@ -115,7 +115,7 @@ func UnitCause(t trace.Transition) string {
 // the state.
 const (
 	CauseOwner   = "owner"
-	CauseManager = "chief"
+	CauseManager = trace.ManagerDisplay
 	CauseService = "service"
 	CauseAgent   = "agent"
 )

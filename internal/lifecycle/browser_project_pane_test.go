@@ -115,7 +115,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.Contains(req.Prompt, "Report the shared workgroup goal.") {
 			_, err := fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Ship resumable uploads.", "note": "Both repos share one design.", "agents": []string{}})
-			return intakefixture.QuestionResult(req, "pane-chief-status", "Reported the shared goal."), err
+			return intakefixture.QuestionResult(req, "pane-manager-status", "Reported the shared goal."), err
 		}
 		return managerTurn(ctx, req, turn, tools)
 	}
@@ -302,7 +302,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	p.Click("#project-home")
 	p.Click(`[data-drilldown="` + string(f.Stream2) + `"]`)
 	p.Await("the member excludes the shared decision and composer", `!document.querySelector('[data-view=workstream]').hidden && !document.querySelector('#workstreams [data-kind=escalation], #workstreams .composer')`)
-	p.Click("#workstream-head [data-ask-chief]")
+	p.Click("#workstream-head [data-ask-manager]")
 	p.AwaitText("#workgroup-content [data-kind=escalation]", "May the acknowledged offset contract change?")
 	p.TypeInto("#workgroup-content [data-kind=escalation] textarea", "Keep the acknowledged offset contract stable.")
 	p.Click("#workgroup-content [data-kind=escalation] button[type=submit]")

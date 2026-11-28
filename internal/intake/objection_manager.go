@@ -97,10 +97,16 @@ func (s *Controller) ObjectionSubject(repository *trace.Repository, stream confi
 // subject enters: dismissed on the owner's behalf, or escalated to the owner.
 const (
 	ObjectionMachine         = "objection"
-	TriggerObjectionDecision = "objection.chief_decision"
+	TriggerObjectionDecision = storedObjectionDecisionTrigger
 	ObjectionDismissed       = "dismissed"
 	ObjectionEscalated       = "escalated"
 )
+
+// storedObjectionDecisionTrigger is a stored name of the manager role: the
+// trigger of the exit the manager's decision on a committee objection raises.
+// Saved routing records hold it and route spans are built from it, so the
+// value must not change.
+const storedObjectionDecisionTrigger = "objection.chief_decision"
 
 func objectionSubject(objection string) string { return "objection-" + objection }
 

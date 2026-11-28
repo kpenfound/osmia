@@ -20,7 +20,7 @@ func (s *Controller) workstreamMoveRecords(ctx context.Context, repo *trace.Repo
 	} else if action != "" {
 		return workstreamMoveRecord{}, &APIError{Code: Conflict, Message: "the workstream's publication is in flight; it moves once the publication has an outcome"}
 	}
-	by := "the " + rulerName(actor)
+	by := "the " + trace.DisplayRuler(rulerName(actor))
 	var reason string
 	switch to {
 	case BuildingState:

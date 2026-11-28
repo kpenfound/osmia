@@ -8,6 +8,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/fleet"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // clientFailureLimit bounds the failed turns listed for one client.
@@ -52,7 +53,7 @@ func (s *Service) readClientTrace(want map[string]bool) clientTrace {
 				for _, q := range th.Turns {
 					id := q.Request.TurnID
 					if want[id] && q.Response == nil {
-						turn := api.ClientTurn{Turn: id, Project: p.id, Workstream: stream, Unit: q.Request.Unit, Role: th.Identity.Role, Agent: th.Identity.ID, Profile: q.Request.Profile.Name}
+						turn := api.ClientTurn{Turn: id, Project: p.id, Workstream: stream, Unit: q.Request.Unit, Role: trace.DisplayRole(th.Identity.Role), Agent: trace.DisplayRole(th.Identity.ID), Profile: q.Request.Profile.Name}
 						if q.Claim != nil {
 							at := q.Claim.At
 							turn.StartedAt = &at
@@ -69,7 +70,7 @@ func (s *Service) readClientTrace(want map[string]bool) clientTrace {
 						entry := seen{at: a.At}
 						if a.Failure != "" {
 							entry.failed = true
-							entry.failure = api.ClientFailure{Turn: id, Project: p.id, Workstream: stream, Unit: q.Request.Unit, Role: th.Identity.Role, Profile: a.Profile.Name, Failure: a.Failure, Class: string(a.FailureClass), At: a.At}
+							entry.failure = api.ClientFailure{Turn: id, Project: p.id, Workstream: stream, Unit: q.Request.Unit, Role: trace.DisplayRole(th.Identity.Role), Profile: a.Profile.Name, Failure: a.Failure, Class: string(a.FailureClass), At: a.At}
 						}
 						attempts[a.Result.Client] = append(attempts[a.Result.Client], entry)
 					}
@@ -164,7 +165,7 @@ func skippedFallbacks(h api.ProfileHandout, c fleet.Client) []api.ClientSkip {
 		}
 		for _, name := range role.Chain[1:] {
 			if !c.CanRun(name) {
-				out = append(out, api.ClientSkip{Role: role.Role, Main: role.Chain[0], Profile: name})
+				out = append(out, api.ClientSkip{Role: trace.DisplayRole(role.Role), Main: role.Chain[0], Profile: name})
 			}
 		}
 	}

@@ -425,15 +425,15 @@ type BaseUpstreamResponse struct {
 // when the workstream's own base was abandoned: continue from upstream.
 const BaseDecisionUpstream = "upstream"
 
-// The actors that archive a workstream: the owner by request, or the manager of
-// staff once the workstream's own pull request merged.
+// The actors that archive a workstream: the owner by request, or the manager
+// once the workstream's own pull request merged.
 const (
 	ArchivedByOwner   = "owner"
-	ArchivedByManager = trace.Manager
+	ArchivedByManager = trace.ManagerDisplay
 )
 
 // ArchiveResponse reports whether a workstream is archived after the
-// owner's request. ArchivedBy names who archived it, owner or chief_of_staff,
+// owner's request. ArchivedBy names who archived it, owner or manager,
 // and is empty while the workstream is not archived.
 type ArchiveResponse struct {
 	Project    config.ProjectID    `json:"project"`
@@ -759,7 +759,7 @@ type DailyBudgetStatus struct {
 // per-workstream worker-turn limit in force.
 type CapacityStatus struct {
 	PerWorkstream int            `json:"per_workstream" description:"Maximum concurrent worker turns per workstream; check slots are independent."`
-	Roles         []RoleCapacity `json:"roles" description:"Factory-wide mason, reviewer, committee, architect, checks and chief slot pools, in that order."`
+	Roles         []RoleCapacity `json:"roles" description:"Factory-wide mason, reviewer, committee, architect, checks and manager slot pools, in that order."`
 	Clients       []ClientStatus `json:"clients" description:"The local client and every connected client, in the order new turns rotate through them. Each client's slots are a second bound next to the role pools."`
 }
 
@@ -874,13 +874,13 @@ type ClientFailure struct {
 // Limit, and says in Scope and Note how it is bounded instead.
 // Waiting lists work waiting for a slot and never paused work.
 type RoleCapacity struct {
-	Role      string     `json:"role" description:"Slot pool: mason, reviewer, committee, architect, checks or chief. The checks pool uses capacity.checks (default 2) across all projects and workstreams. The chief pool uses capacity.manager (default 3) across all projects and workstreams and holds background chief-of-staff turns only; turns the owner starts take no chief slot."`
+	Role      string     `json:"role" description:"Slot pool: mason, reviewer, committee, architect, checks or manager. The checks pool uses capacity.checks (default 2) across all projects and workstreams. The manager pool uses capacity.manager (default 3) across all projects and workstreams and holds background manager turns only; turns the owner starts take no manager slot."`
 	Used      int        `json:"used" description:"Number of slots currently in use."`
-	Limit     *int       `json:"limit,omitempty" description:"Configured factory-wide slot limit from config.toml. Present only for bounded pools (mason, reviewer, committee, checks, chief). Absent when unbounded is true: that pool has no factory-wide limit, which is not a limit of 0."`
+	Limit     *int       `json:"limit,omitempty" description:"Configured factory-wide slot limit from config.toml. Present only for bounded pools (mason, reviewer, committee, checks, manager). Absent when unbounded is true: that pool has no factory-wide limit, which is not a limit of 0."`
 	Unbounded bool       `json:"unbounded,omitempty" description:"True when the pool has no factory-wide limit (architect). Such an entry has no limit field, scope is per_workstream and note explains it; there is no configuration setting to raise."`
 	Scope     string     `json:"scope,omitempty" description:"How an unbounded pool is bounded instead: per_workstream means at most one turn runs per workstream. Absent for bounded pools."`
 	Note      string     `json:"note,omitempty" description:"Plain-words explanation of an unbounded pool: no factory-wide limit, at most one turn per workstream, no configuration setting. Absent for bounded pools."`
-	Waiting   []SlotWait `json:"waiting" description:"Work waiting for a slot. Check runs identify their project, workstream and unit, final review or session. Background chief turns identify their project, workstream, agent and turn, oldest first."`
+	Waiting   []SlotWait `json:"waiting" description:"Work waiting for a slot. Check runs identify their project, workstream and unit, final review or session. Background manager turns identify their project, workstream, agent and turn, oldest first."`
 }
 
 // UnboundedScope is RoleCapacity.Scope of a pool that runs at most one turn
@@ -905,7 +905,7 @@ type SlotWait struct {
 	Unit       string              `json:"unit,omitempty"`
 	Review     int                 `json:"review,omitempty" description:"Final review number for a waiting final-review check run."`
 	Session    bool                `json:"session,omitempty" description:"True for a waiting session check run; workstream identifies the session."`
-	Preview    bool                `json:"preview,omitempty" description:"True for a waiting service-run chief preview."`
+	Preview    bool                `json:"preview,omitempty" description:"True for a waiting service-run manager preview."`
 	Verify     bool                `json:"verify,omitempty" description:"True for a waiting service-run verify call."`
 	Agent      string              `json:"agent,omitempty"`
 	Turn       string              `json:"turn,omitempty"`
@@ -996,7 +996,7 @@ type WorkstreamStatus struct {
 	// Archived is set when the owner archived the workstream, which takes a
 	// delivered or abandoned workstream out of the list of work.
 	Archived bool `json:"archived,omitempty"`
-	// ArchivedBy names who archived the workstream: owner, or chief_of_staff
+	// ArchivedBy names who archived the workstream: owner, or manager
 	// when it archived the workstream because its pull request merged.
 	ArchivedBy string `json:"archived_by,omitempty"`
 	// TraceDeleted is set after permanent archive cleanup completes.
@@ -1393,7 +1393,7 @@ type WorkgroupMemberSummary struct {
 	PRLink       string              `json:"pr_link"`
 	Running      bool                `json:"running"`
 	Archived     bool                `json:"archived"`
-	// ArchivedBy names who archived the member, owner or chief_of_staff.
+	// ArchivedBy names who archived the member, owner or manager.
 	ArchivedBy string `json:"archived_by,omitempty"`
 }
 

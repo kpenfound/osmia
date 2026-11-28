@@ -8,7 +8,7 @@ import (
 const recoveryOccurrence = "unit-index@4/unit.stalled/stalled-20260101T000000Z"
 
 func recoveryMoveJSON(origin string) string {
-	return fmt.Sprintf(`{"occurrence":%q,"machine":"unit","subject":"unit-index","unit":"index","from":"checking","version":4,"target":"checking","origin":%q,"reason":"unit index has made no progress and neither Jev nor the chief of staff cleared the stall within a further 45 minutes, so starting checking again is yours to approve"}`, recoveryOccurrence, origin)
+	return fmt.Sprintf(`{"occurrence":%q,"machine":"unit","subject":"unit-index","unit":"index","from":"checking","version":4,"target":"checking","origin":%q,"reason":"unit index has made no progress and neither Jev nor the manager cleared the stall within a further 45 minutes, so starting checking again is yours to approve"}`, recoveryOccurrence, origin)
 }
 
 func recoveryEntry() string {
@@ -26,7 +26,7 @@ func TestBrowserRecoveryCardShowsAndSendsThePinnedMove(t *testing.T) {
 	for field, want := range map[string]string{"subject": "Unit index", "from": "checking, version 4", "target": "checking"} {
 		f.p.awaitText(card+"[data-field=move] [data-field="+field+"]", want)
 	}
-	f.p.awaitText(card+"[data-field=move] [data-field=reason]", "neither Jev nor the chief of staff cleared the stall")
+	f.p.awaitText(card+"[data-field=move] [data-field=reason]", "neither Jev nor the manager cleared the stall")
 	f.p.awaitText(card+"[data-field=pins]", "version 4")
 	f.p.click(card + `[data-decision-choice="approve"]`)
 	f.p.awaitGone("the approved card", card)

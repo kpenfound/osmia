@@ -275,7 +275,7 @@ func TestBounceRulingsReachTheNextRole(t *testing.T) {
 					fixturekit.Must(t, err)
 					by := "owner"
 					if entry == "chief" {
-						by = "chief of staff"
+						by = "manager"
 					}
 					if !found || execution.ContestRuler(ruling) != by {
 						t.Fatalf("ruling attribution: %+v", ruling)

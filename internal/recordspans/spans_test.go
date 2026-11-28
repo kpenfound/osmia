@@ -408,3 +408,31 @@ func TestObserverPanicNeverFailsACommit(t *testing.T) {
 		t.Fatalf("state %v %v", state, err)
 	}
 }
+
+func TestAManagerTurnSpanReportsTheManagerRole(t *testing.T) {
+	h := newHarness(t)
+	h.turnOf(trace.Manager, "m1", minute(1), minute(2), func(req *trace.TurnRequest, resp *trace.TurnResponse) {
+		req.Unit, resp.Unit = "", ""
+	})
+
+	turns := named(h.spans(), "invoke_agent "+trace.ManagerDisplay)
+	if len(turns) != 1 {
+		t.Fatalf("%d manager turn spans: %v", len(turns), h.spans())
+	}
+	for key, want := range map[string]string{
+		"gen_ai.agent.name": trace.ManagerDisplay, "gen_ai.agent.id": trace.ManagerDisplay, "osmia.role": trace.ManagerDisplay,
+	} {
+		if got := str(turns[0], key); got != want {
+			t.Errorf("attribute %s = %q, want %q", key, got, want)
+		}
+	}
+	if len(named(h.spans(), "invoke_agent "+trace.Manager)) != 0 {
+		t.Fatal("a turn span carries the stored name of the manager")
+	}
+}
+
+func TestAManagerEndingAWorkstreamStateIsTheManagerCause(t *testing.T) {
+	if got := FeatureCause(trace.Transition{Header: trace.Header{Actor: trace.Actor{Kind: "agent", ID: trace.Manager}}}); got != trace.ManagerDisplay {
+		t.Fatalf("cause %q, want %q", got, trace.ManagerDisplay)
+	}
+}

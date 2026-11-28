@@ -425,7 +425,7 @@ func (p *conversationPath) discover(ctx context.Context, targets map[config.Work
 		t, err := p.target(wt, func() { wt.Close() })
 		if err != nil {
 			wt.Close()
-			return fmt.Errorf("workgroup chief: %w", err)
+			return fmt.Errorf("workgroup manager: %w", err)
 		}
 		targets[id] = t
 	}
@@ -497,7 +497,7 @@ func (p *conversationPath) streams(repository *trace.Repository) ([]config.Works
 			return []config.WorkstreamID{group.Members[0]}, nil
 		}
 	}
-	return nil, fmt.Errorf("shared chief has no workgroup host")
+	return nil, fmt.Errorf("shared manager has no workgroup host")
 }
 
 func (p *conversationPath) publish(ctx context.Context, repository *trace.Repository, c scheduler.Candidate) error {

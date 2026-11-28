@@ -129,7 +129,14 @@ func RulerName(actor trace.Actor) string {
 	case actor.Kind == "service":
 		return "service"
 	}
-	return "chief of staff"
+	return trace.ManagerRulerName
+}
+
+// shownRuling is ruling as the response to its caller reports it: the stored
+// ruler name of the manager becomes the manager's display name.
+func shownRuling(ruling ContestedRuling) ContestedRuling {
+	ruling.By = trace.DisplayRuler(ruling.By)
+	return ruling
 }
 
 func ContestRuler(r ContestedRuling) string {
@@ -139,7 +146,7 @@ func ContestRuler(r ContestedRuling) string {
 	case trace.DecidedByJev:
 		return "decision maker Jev"
 	}
-	return r.By
+	return trace.DisplayRuler(r.By)
 }
 
 func contestActor(r ContestedRuling) trace.Actor {
@@ -193,7 +200,7 @@ func (s *Controller) RecordContestedRulingJudged(ctx context.Context, repo *trac
 		if api != nil {
 			return ContestedRulingResponse{}, api
 		}
-		return ContestedRulingResponse{Workstream: stream, Unit: unit, Ruling: ContestedRuling{Decision: req.Decision, Note: out.Move.Note, By: by, Judgment: judgment, Contest: contest.ID}}, nil
+		return ContestedRulingResponse{Workstream: stream, Unit: unit, Ruling: ContestedRuling{Decision: req.Decision, Note: out.Move.Note, By: trace.DisplayRuler(by), Judgment: judgment, Contest: contest.ID}}, nil
 	}
 	if FailedReview(contest, unit) {
 		if req.Decision != "review" {
@@ -201,12 +208,12 @@ func (s *Controller) RecordContestedRulingJudged(ctx context.Context, repo *trac
 		}
 		ruling := ContestedRuling{Decision: "review", Note: strings.TrimSpace(req.Note), By: by, Judgment: judgment, Contest: contest.ID}
 		id := trace.EventID(contest.ID, "ruling")
-		reason := fmt.Sprintf("%s ruled review on contest %s, raised when the reviewer's turn failed; a new review turn runs: %s", by, contest.ID, ruling.Note)
+		reason := fmt.Sprintf("%s ruled review on contest %s, raised when the reviewer's turn failed; a new review turn runs: %s", trace.DisplayRuler(by), contest.ID, ruling.Note)
 		if api := s.routeRuling(ctx, false, UnitExitInput{Repo: repo, Stream: stream, Unit: unit, State: state, Cause: contest.ID, Default: UnitReviewing, Targets: []string{UnitReviewing, UnitImplementing},
 			Actor: actor, Note: ruling.Note, ID: id, HeaderCause: contest.ID, Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", reason)}}, ruling); api != nil {
 			return ContestedRulingResponse{}, api
 		}
-		return ContestedRulingResponse{Workstream: stream, Unit: unit, Ruling: ruling}, nil
+		return ContestedRulingResponse{Workstream: stream, Unit: unit, Ruling: shownRuling(ruling)}, nil
 	}
 	if mason {
 		if req.Decision == "review" {
@@ -224,13 +231,13 @@ func (s *Controller) RecordContestedRulingJudged(ctx context.Context, repo *trac
 		data, _ := json.MarshalIndent(ruling, "", "  ")
 		id := fmt.Sprintf("%s-mason-ruling-%d", trace.UnitSubject(unit), last.Sequence)
 		doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.Now(), Actor: actor, Cause: contest.ID}, Path: masonRulingPath(unit, last.Sequence), Content: string(data) + "\n"}
-		reason := fmt.Sprintf("%s ruled revise on mason contest %s; clean-turn attempts reset to zero: %s", by, contest.ID, ruling.Note)
+		reason := fmt.Sprintf("%s ruled revise on mason contest %s; clean-turn attempts reset to zero: %s", trace.DisplayRuler(by), contest.ID, ruling.Note)
 		tid := id + "-implementing"
 		if api := s.routeRuling(ctx, false, UnitExitInput{Repo: repo, Stream: stream, Unit: unit, State: state, Cause: contest.ID, Default: UnitImplementing, Targets: []string{UnitImplementing, UnitReviewing},
 			Actor: actor, Note: ruling.Note, ID: tid, HeaderCause: id, Reason: reason, Events: []trace.Event{trace.Notice(tid, "unit", reason)}, Documents: []trace.Document{doc}}, ruling); api != nil {
 			return ContestedRulingResponse{}, api
 		}
-		return ContestedRulingResponse{Workstream: stream, Unit: unit, Ruling: ruling}, nil
+		return ContestedRulingResponse{Workstream: stream, Unit: unit, Ruling: shownRuling(ruling)}, nil
 	}
 	r := &reviewers{masons: &masons{s: s, cfg: s.About(repo), repository: repo}}
 	result, ok, err := r.StoredResult(stream, unit, state)
@@ -265,7 +272,7 @@ func (s *Controller) RecordContestedRulingJudged(ctx context.Context, repo *trac
 		}
 		return ContestedRulingResponse{}, &APIError{Code: Internal, Message: "cannot record contested ruling"}
 	}
-	return ContestedRulingResponse{Workstream: stream, Unit: unit, Ruling: ruling}, nil
+	return ContestedRulingResponse{Workstream: stream, Unit: unit, Ruling: shownRuling(ruling)}, nil
 }
 
 func (r *reviewers) resumeContested(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, contests ...trace.Transition) error {

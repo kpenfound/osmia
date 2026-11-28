@@ -24,3 +24,19 @@ func ContestDecisionPrefix(subject string) string {
 func ContestDecisionPath(subject, contest string) string {
 	return ContestDecisionPrefix(subject) + ContestDecisionID(contest) + ".json"
 }
+
+// ManagerRulerName is a stored name of the manager role: the By of the unit
+// and workstream move documents and of the contest rulings the manager made.
+// Saved traces hold it and their readers recognise the manager's moves and
+// rulings by it, so the value must not change.
+const ManagerRulerName = "chief of staff"
+
+// DisplayRuler maps the By of a saved move or ruling to the name shown
+// outside the service: the manager's stored ruler name becomes ManagerDisplay
+// and every other value is returned as it is.
+func DisplayRuler(by string) string {
+	if by == ManagerRulerName {
+		return ManagerDisplay
+	}
+	return by
+}

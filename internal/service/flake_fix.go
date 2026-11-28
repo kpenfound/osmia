@@ -305,10 +305,10 @@ func (s *Service) closeFlakeDestination(ctx context.Context, store *flakes.Store
 	by := archivedBy(archive)
 	who := "the owner"
 	if by == api.ArchivedByManager {
-		who = "the chief of staff, through archive-on-merge"
+		who = "the manager, through archive-on-merge"
 	}
 	note := fmt.Sprintf("closed as moot: workstream %s was archived by %s, which deletes the trace and feed this announcement of the %s decision would be written to", workstream, who, o.Decision.State)
-	return store.MarkMoot(ctx, group, o.Run, flakes.Moot{Destination: destination, Workstream: workstream, ArchivedBy: by, Note: note})
+	return store.MarkMoot(ctx, group, o.Run, flakes.Moot{Destination: destination, Workstream: workstream, ArchivedBy: trace.StoredRole(by), Note: note})
 }
 
 func (s *Service) announceToOrigin(ctx context.Context, repository *trace.Repository, store *flakes.Store, group string, o flakes.Occurrence) error {

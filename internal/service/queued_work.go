@@ -56,7 +56,7 @@ func queuedWork(s *Service, r *trace.Repository, stream config.WorkstreamID) (qu
 			if q.Claim != nil {
 				state = "running"
 			}
-			out.Items = append(out.Items, queuedItem{Role: t.Identity.Role, Unit: q.Request.Unit, What: fmt.Sprintf("%s %s turn", state, t.Identity.Role)})
+			out.Items = append(out.Items, queuedItem{Role: trace.DisplayRole(t.Identity.Role), Unit: q.Request.Unit, What: fmt.Sprintf("%s %s turn", state, trace.DisplayRole(t.Identity.Role))})
 			busy[q.Request.Unit] = true
 			break
 		}
@@ -155,7 +155,7 @@ func queuedWork(s *Service, r *trace.Repository, stream config.WorkstreamID) (qu
 		if role == "" {
 			role = q.Asked.AskedBy.ID
 		}
-		out.Items = append(out.Items, queuedItem{Role: role, Unit: q.Asked.Unit, What: "the answer to question " + q.Asked.ID + " is delivered as the asker's next turn"})
+		out.Items = append(out.Items, queuedItem{Role: trace.DisplayRole(role), Unit: q.Asked.Unit, What: "the answer to question " + q.Asked.ID + " is delivered as the asker's next turn"})
 	}
 	if working && pause == "" {
 		requests, err := trace.Read[trace.Amendment](r, stream)

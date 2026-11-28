@@ -122,7 +122,7 @@ func TestAutoArchiveRecordsTheManagerAndMatchesTheOwnersArchive(t *testing.T) {
 		manager.Publication.PullRequest != autoArchivePullRequest || manager.Publication.Branch != intake.FeatureBranch(fixturekit.Stream) || manager.MergeCommit != "merge-commit" || manager.MergeReference == "" {
 		t.Fatalf("automatic archive=%+v", manager)
 	}
-	if lifecycle.ArchivedBy(manager) != "chief_of_staff" {
+	if lifecycle.ArchivedBy(manager) != "manager" {
 		t.Fatalf("archived by %q", lifecycle.ArchivedBy(manager))
 	}
 	byOwner, _ := owner.archive()
@@ -136,7 +136,7 @@ func TestAutoArchiveRecordsTheManagerAndMatchesTheOwnersArchive(t *testing.T) {
 	if auto.host.Finds != 0 {
 		t.Fatalf("the automatic archive looked up pull requests %d times", auto.host.Finds)
 	}
-	if resp, apiFault := auto.s.Lifecycle().Archive(string(fixturekit.Stream)); apiFault != nil || resp.ArchivedBy != "chief_of_staff" {
+	if resp, apiFault := auto.s.Lifecycle().Archive(string(fixturekit.Stream)); apiFault != nil || resp.ArchivedBy != "manager" {
 		t.Fatalf("repeated owner archive reports %+v %v", resp, apiFault)
 	}
 }

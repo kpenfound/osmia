@@ -107,7 +107,7 @@ func TestInboxPrintsEveryEscalationWithItsAnswerCommand(t *testing.T) {
 
 func TestAnswerRecordsTheRuling(t *testing.T) {
 	root := startInbox(t)
-	if got, want := successful(t, root, "answer", "1", "Both are part of the contract."), "Ruling recorded on inbox entry 1 ("+stream+", questions 1, 2)\nThe chief of staff relays it to the askers.\n"; got != want {
+	if got, want := successful(t, root, "answer", "1", "Both are part of the contract."), "Ruling recorded on inbox entry 1 ("+stream+", questions 1, 2)\nThe manager relays it to the askers.\n"; got != want {
 		t.Fatalf("answer: %q", got)
 	}
 }

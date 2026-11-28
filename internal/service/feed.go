@@ -65,7 +65,7 @@ func FeedEntries(repository, manager *trace.Repository, stream config.Workstream
 		if router.IsJournal(t.Subject) {
 			continue
 		}
-		out = append(out, FeedEntry{Kind: "transition", At: t.At, Transition: &api.FeedTransition{Subject: t.Subject, Unit: t.Unit, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + t.Actor.ID, Reason: t.Reason, DecidedBy: t.DecidedBy, Judgment: t.Judgment, DefaultTo: t.DefaultTo, Departed: t.Departed()}})
+		out = append(out, FeedEntry{Kind: "transition", At: t.At, Transition: &api.FeedTransition{Subject: t.Subject, Unit: t.Unit, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + trace.DisplayRole(t.Actor.ID), Reason: t.Reason, DecidedBy: trace.DisplayRole(t.DecidedBy), Judgment: t.Judgment, DefaultTo: t.DefaultTo, Departed: t.Departed()}})
 	}
 	threads, err := repository.Threads(stream)
 	if err != nil {
@@ -151,7 +151,7 @@ func managerFeedEntries(manager *trace.Repository, stream config.WorkstreamID, e
 }
 
 func feedSession(th trace.Thread, q trace.QueuedTurn) *FeedSession {
-	out := &FeedSession{Agent: th.Identity.ID, Role: th.Identity.Role, Unit: string(q.Request.Unit), Turn: q.Request.TurnID, Profile: q.Request.Profile.Name, StartedAt: q.Claim.At}
+	out := &FeedSession{Agent: trace.DisplayRole(th.Identity.ID), Role: trace.DisplayRole(th.Identity.Role), Unit: string(q.Request.Unit), Turn: q.Request.TurnID, Profile: q.Request.Profile.Name, StartedAt: q.Claim.At}
 	if n := len(q.Attempts); n > 0 {
 		out.Profile = q.Attempts[n-1].Profile.Name
 	}

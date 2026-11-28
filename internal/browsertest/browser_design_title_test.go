@@ -177,7 +177,7 @@ func browserDesignTitles(t *testing.T, workgroup bool) {
 		p.Await("the project pane lists the started work by its goal", textOf(pane)+` === `+quote(designTitleHandoff))
 	}
 	if got := handoffTurns.Load(); got != 1 {
-		t.Fatalf("%d hand-off turns reached the chief of staff, want 1", got)
+		t.Fatalf("%d hand-off turns reached the manager, want 1", got)
 	}
 	mu.Lock()
 	defer mu.Unlock()

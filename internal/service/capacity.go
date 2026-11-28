@@ -129,9 +129,9 @@ func (s *Service) providerUsage(state runtime.State, profiles map[string]Effecti
 			}
 			switch p := profiles[role]; p.Source {
 			case "provider_fallback":
-				usage.Fallbacks = append(usage.Fallbacks, RoleFallback{Role: role, Configured: configured, Profile: p.Name})
+				usage.Fallbacks = append(usage.Fallbacks, RoleFallback{Role: trace.DisplayRole(role), Configured: configured, Profile: p.Name})
 			case "provider_pause":
-				usage.PausedRoles = append(usage.PausedRoles, role)
+				usage.PausedRoles = append(usage.PausedRoles, trace.DisplayRole(role))
 			}
 		}
 		out.Providers = append(out.Providers, usage)

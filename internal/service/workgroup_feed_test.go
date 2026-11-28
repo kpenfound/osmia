@@ -325,7 +325,7 @@ func TestMemberFeedManagerSessionsFollowMembership(t *testing.T) {
 			}
 			for _, kind := range []string{"message", "session"} {
 				if !slices.ContainsFunc(single.Entries, func(e FeedEntry) bool {
-					return e.Kind == kind && (e.Session == nil || e.Session.Role == trace.Manager)
+					return e.Kind == kind && (e.Session == nil || e.Session.Role == trace.ManagerDisplay)
 				}) {
 					t.Fatalf("single-member %s missing", kind)
 				}

@@ -16,7 +16,7 @@ type ActivityContest struct {
 	ID                 string                  `json:"id"`
 	Reason             string                  `json:"reason"`
 	Rulings            []string                `json:"rulings"`
-	ManagerRulingsLeft int                     `json:"chief_rulings_left"`
+	ManagerRulingsLeft int                     `json:"manager_rulings_left"`
 	Decided            *ManagerContestDecision `json:"decided,omitempty"`
 }
 

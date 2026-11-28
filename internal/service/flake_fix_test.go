@@ -346,7 +346,7 @@ func TestTheFeedNamesTheWorkstreamAFlakeDecisionOpened(t *testing.T) {
 	o := openFlakeFix(t)
 	feed := intakefixture.ReadFeed(t, o.c, o.stream)
 	if !slices.ContainsFunc(feed.Entries, func(e FeedEntry) bool {
-		return e.Transition != nil && strings.HasPrefix(e.Transition.Subject, "flake-decision-") && strings.Contains(e.Transition.Reason, string(o.want)) && e.Transition.Actor == managerActor.Kind+":"+managerActor.ID
+		return e.Transition != nil && strings.HasPrefix(e.Transition.Subject, "flake-decision-") && strings.Contains(e.Transition.Reason, string(o.want)) && e.Transition.Actor == managerActor.Kind+":"+trace.DisplayRole(managerActor.ID)
 	}) {
 		t.Fatalf("the feed does not name %s: %+v", o.want, feed.Entries)
 	}

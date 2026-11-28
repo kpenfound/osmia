@@ -119,7 +119,7 @@ func (s *Service) recoverWorkgroupManagerSessions(ctx context.Context, projects 
 			}
 			seen[id] = true
 			if err := s.recoverWorkgroupManagerSession(ctx, id); err != nil {
-				return fmt.Errorf("recover workgroup %s chief-of-staff thread: %w", id, err)
+				return fmt.Errorf("recover workgroup %s manager thread: %w", id, err)
 			}
 		}
 	}

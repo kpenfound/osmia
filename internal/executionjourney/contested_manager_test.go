@@ -26,7 +26,7 @@ func TestManagerResolvesAContestOnTheOwnersBehalf(t *testing.T) {
 	c := journey.NewContestFixture(t, "chief-resolves")
 	contest := c.Contest(t)
 	if raised, _ := c.Raised(t, contest); raised {
-		t.Fatal("a contest the chief of staff has not seen was raised to the owner")
+		t.Fatal("a contest the manager has not seen was raised to the owner")
 	}
 	if out := c.Resolve(t, `{"unit":"resume","decision":"revise","note":"Rebuild it."}`); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "use review") {
 		t.Fatalf("a ruling the contest does not take was recorded: %s", out)
@@ -36,13 +36,13 @@ func TestManagerResolvesAContestOnTheOwnersBehalf(t *testing.T) {
 	}
 	note := "Record a verdict citing spec#1 by its plan ID."
 	out := c.Resolve(t, `{"unit":"resume","decision":"review","note":"`+note+`"}`)
-	if !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"by":"chief of staff"`) {
+	if !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"by":"manager"`) {
 		t.Fatalf("resolve_contested: %s", out)
 	}
 	state := intakefixture.UnitWorkflow(t, c.Repo, c.Stream, "resume")
 	transitions := intakefixture.WorkTransitions(t, c.Repo, c.Stream)
 	last := transitions[len(transitions)-1]
-	if state.Value != intake.UnitReviewing || last.Actor != intake.ManagerActor || !strings.Contains(last.Reason, "chief of staff ruled review") {
+	if state.Value != intake.UnitReviewing || last.Actor != intake.ManagerActor || !strings.Contains(last.Reason, "manager ruled review") {
 		t.Fatalf("resolved unit %s by %+v", state.Value, last)
 	}
 	if out := c.Resolve(t, `{"unit":"resume","decision":"review","note":"Again."}`); !strings.Contains(out, "is not contested") {
@@ -51,7 +51,7 @@ func TestManagerResolvesAContestOnTheOwnersBehalf(t *testing.T) {
 	fixturekit.Must(t, c.R.One(context.Background(), c.Stream, "resume", state, false))
 	th, err := c.Repo.Thread(c.Stream, intake.ReviewerAgent("resume"))
 	fixturekit.Must(t, err)
-	if prompt := th.Turns[len(th.Turns)-1].Request.Prompt; th.Turns[len(th.Turns)-1].Request.TurnID != execution.ReviewTurnID("resume", state.Version) || !strings.Contains(prompt, note) || !strings.Contains(prompt, "chief of staff ruled review") {
+	if prompt := th.Turns[len(th.Turns)-1].Request.Prompt; th.Turns[len(th.Turns)-1].Request.TurnID != execution.ReviewTurnID("resume", state.Version) || !strings.Contains(prompt, note) || !strings.Contains(prompt, "manager ruled review") {
 		t.Fatalf("the resumed review lacks the ruling:\n%s", prompt)
 	}
 	actions, err := service.ManagerActions(c.Repo, c.Stream)

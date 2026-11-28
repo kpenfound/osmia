@@ -1392,7 +1392,7 @@
     },
     "/v1/conversation/{workstream}": {
       "get": {
-        "summary": "List a workstream's conversation with the chief of staff",
+        "summary": "List a workstream's conversation with the manager",
         "operationId": "getConversationByWorkstream",
         "parameters": [
           {
@@ -1430,7 +1430,7 @@
         }
       },
       "post": {
-        "summary": "Send a message to a workstream's chief of staff",
+        "summary": "Send a message to a workstream's manager",
         "operationId": "postConversationByWorkstream",
         "parameters": [
           {
@@ -1985,7 +1985,7 @@
     },
     "/v1/design/{workstream}/start": {
       "post": {
-        "summary": "Start a workgroup from a design session's drafted brief; the chief of staff opens a new thread from the brief and the design transcript",
+        "summary": "Start a workgroup from a design session's drafted brief; the manager opens a new thread from the brief and the design transcript",
         "operationId": "postDesignByWorkstreamStart",
         "parameters": [
           {
@@ -2240,8 +2240,8 @@
     },
     "/v1/feed/{workstream}": {
       "get": {
-        "summary": "List member sessions, state changes, unit, final and session checks and final reviews; shared chief entries and turns are included only for single-member workgroups",
-        "description": "Oldest-first entries from the workstream trace and its chief-of-staff\nconversation. Kinds message, response, action, status and session retain their\nconversation, status and agent-turn payloads. Every claimed turn is a session,\nincluding final-review readers. Transition identifies every recorded workflow\nsubject, its from/to states, actor and reason.\n\nunit_checks has one entry per unit and run. It is running once its selection is\nrecorded, then shows only its recorded result: passed, failed, incomplete or\nsuperseded, with failed check links or an error. Selection gives selected and\njudged counts, the optional listed total, or a full-run reason and detail.\nAbsent historical selections and totals remain absent.\n\nfinal_checks has one entry per started attempt of a review's check run,\njoining its durable start with its recorded result. Requested reviews, preparation\nand retry delays do not imply running checks. Historical results without start\nevidence have no attempt or started_at; each result revision remains visible.\nfinal_review gives each review's outcome, reader and turn, blocking finding and\nuncovered criterion counts, or its failure reason. Reader turns also appear as\nsessions. session_checks summarizes each exploratory session check run: its result, or while it has none (still going, or interrupted) a running entry that carries the link the run printed, with no finished_at.\nUnit, final and session check entries carry one optional trace_url, the\nDagger Cloud trace link the CLI printed. It comes from the result record or,\nwhen the result has none or does not exist yet, from the start record. Captured check output remains in the trace.\n\nbrief is the delivery brief the chief of staff recorded for a final review: its\ntext, before_you_ship items and screenshots. It appears once per review and\nshows the latest brief when it was replaced.\n\nA started entry keeps its original place when its result arrives. Unfinished\nstarts survive restart without implying success or failure. Workstream events\non /v1/events tell an open client to read this feed again.",
+        "summary": "List member sessions, state changes, unit, final and session checks and final reviews; shared manager entries and turns are included only for single-member workgroups",
+        "description": "Oldest-first entries from the workstream trace and its manager\nconversation. Kinds message, response, action, status and session retain their\nconversation, status and agent-turn payloads. Every claimed turn is a session,\nincluding final-review readers. Transition identifies every recorded workflow\nsubject, its from/to states, actor and reason.\n\nunit_checks has one entry per unit and run. It is running once its selection is\nrecorded, then shows only its recorded result: passed, failed, incomplete or\nsuperseded, with failed check links or an error. Selection gives selected and\njudged counts, the optional listed total, or a full-run reason and detail.\nAbsent historical selections and totals remain absent.\n\nfinal_checks has one entry per started attempt of a review's check run,\njoining its durable start with its recorded result. Requested reviews, preparation\nand retry delays do not imply running checks. Historical results without start\nevidence have no attempt or started_at; each result revision remains visible.\nfinal_review gives each review's outcome, reader and turn, blocking finding and\nuncovered criterion counts, or its failure reason. Reader turns also appear as\nsessions. session_checks summarizes each exploratory session check run: its result, or while it has none (still going, or interrupted) a running entry that carries the link the run printed, with no finished_at.\nUnit, final and session check entries carry one optional trace_url, the\nDagger Cloud trace link the CLI printed. It comes from the result record or,\nwhen the result has none or does not exist yet, from the start record. Captured check output remains in the trace.\n\nbrief is the delivery brief the manager recorded for a final review: its\ntext, before_you_ship items and screenshots. It appears once per review and\nshows the latest brief when it was replaced.\n\nA started entry keeps its original place when its result arrives. Unfinished\nstarts survive restart without implying success or failure. Workstream events\non /v1/events tell an open client to read this feed again.",
         "operationId": "getFeedByWorkstream",
         "parameters": [
           {
@@ -4922,7 +4922,7 @@
     },
     "/v1/workgroups/{id}/feed": {
       "get": {
-        "summary": "List shared chief conversation, statuses, actions and member summaries for a single-member or multi-member workgroup",
+        "summary": "List shared manager conversation, statuses, actions and member summaries for a single-member or multi-member workgroup",
         "operationId": "getWorkgroupsByIdFeed",
         "parameters": [
           {
@@ -5311,7 +5311,7 @@
             "type": "integer"
           },
           "roles": {
-            "description": "Factory-wide mason, reviewer, committee, architect, checks and chief slot pools, in that order.",
+            "description": "Factory-wide mason, reviewer, committee, architect, checks and manager slot pools, in that order.",
             "items": {
               "$ref": "#/components/schemas/RoleCapacity"
             },
@@ -6184,7 +6184,7 @@
       "ClimbConcludeRequest": {
         "properties": {
           "note": {
-            "description": "Why the climb is concluded, which the chief of staff reads.",
+            "description": "Why the climb is concluded, which the manager reads.",
             "type": "string"
           }
         },
@@ -9885,7 +9885,7 @@
             ]
           },
           "flake_fixes": {
-            "description": "True turns flake-fix workstreams on for the project: a flaky check is recorded and the chief of staff may open a workstream to fix its cause. Those workstreams' pull requests go out under the owner's name. Default false.",
+            "description": "True turns flake-fix workstreams on for the project: a flaky check is recorded and the manager may open a workstream to fix its cause. Those workstreams' pull requests go out under the owner's name. Default false.",
             "type": [
               "null",
               "boolean"
@@ -10438,7 +10438,7 @@
       "RoleCapacity": {
         "properties": {
           "limit": {
-            "description": "Configured factory-wide slot limit from config.toml. Present only for bounded pools (mason, reviewer, committee, checks, chief). Absent when unbounded is true: that pool has no factory-wide limit, which is not a limit of 0.",
+            "description": "Configured factory-wide slot limit from config.toml. Present only for bounded pools (mason, reviewer, committee, checks, manager). Absent when unbounded is true: that pool has no factory-wide limit, which is not a limit of 0.",
             "type": [
               "null",
               "integer"
@@ -10449,7 +10449,7 @@
             "type": "string"
           },
           "role": {
-            "description": "Slot pool: mason, reviewer, committee, architect, checks or chief. The checks pool uses capacity.checks (default 2) across all projects and workstreams. The chief pool uses capacity.manager (default 3) across all projects and workstreams and holds background chief-of-staff turns only; turns the owner starts take no chief slot.",
+            "description": "Slot pool: mason, reviewer, committee, architect, checks or manager. The checks pool uses capacity.checks (default 2) across all projects and workstreams. The manager pool uses capacity.manager (default 3) across all projects and workstreams and holds background manager turns only; turns the owner starts take no manager slot.",
             "type": "string"
           },
           "scope": {
@@ -10465,7 +10465,7 @@
             "type": "integer"
           },
           "waiting": {
-            "description": "Work waiting for a slot. Check runs identify their project, workstream and unit, final review or session. Background chief turns identify their project, workstream, agent and turn, oldest first.",
+            "description": "Work waiting for a slot. Check runs identify their project, workstream and unit, final review or session. Background manager turns identify their project, workstream, agent and turn, oldest first.",
             "items": {
               "$ref": "#/components/schemas/SlotWait"
             },
@@ -11261,7 +11261,7 @@
             "type": "string"
           },
           "preview": {
-            "description": "True for a waiting service-run chief preview.",
+            "description": "True for a waiting service-run manager preview.",
             "type": "boolean"
           },
           "project": {

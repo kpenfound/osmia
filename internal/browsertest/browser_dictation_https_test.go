@@ -127,7 +127,7 @@ func TestBrowserTailnetHTTPSDictationJourney(t *testing.T) {
 		t.Fatalf("dictation sent before Send: %+v", before.Entries)
 	}
 	p.Click(form + ` [aria-label=Send]`)
-	p.AwaitText(form+" .result", "Sent; the chief of staff answers in its next turn")
+	p.AwaitText(form+" .result", "Sent; the manager answers in its next turn")
 	p.Await("cleared draft", `document.querySelector(`+quote(form+" textarea")+`).value === ''`)
 	select {
 	case response := <-responses:

@@ -268,7 +268,7 @@ func refOf(r trace.Record) TraceRef {
 	case trace.PriorityChange:
 		ref.Kind, h = "priority", v.Header
 	}
-	ref.ID, ref.Revision, ref.At, ref.Actor, ref.Cause = h.ID, h.Revision, h.At, h.Actor, h.Cause
+	ref.ID, ref.Revision, ref.At, ref.Actor, ref.Cause = h.ID, h.Revision, h.At, h.Actor.Display(), h.Cause
 	return ref
 }
 
@@ -479,7 +479,7 @@ func (w *traceWalk) unitRulings(unit string) []TraceRuling {
 }
 
 func (w *traceWalk) questionRuling(v trace.Ruling) TraceRuling {
-	ruling := TraceRuling{Kind: rulingQuestion, Ref: refOf(v), Unit: v.Unit, Decision: v.Decision, Owner: v.OwnerResponse, Answer: v.ReturnedAnswer, Citations: v.Citations, DecidedBy: trace.Decider(v.DecidedBy, questionDecider(v)), Judgment: v.Judgment}
+	ruling := TraceRuling{Kind: rulingQuestion, Ref: refOf(v), Unit: v.Unit, Decision: v.Decision, Owner: v.OwnerResponse, Answer: v.ReturnedAnswer, Citations: v.Citations, DecidedBy: trace.DisplayRole(trace.Decider(v.DecidedBy, questionDecider(v))), Judgment: v.Judgment}
 	for _, r := range w.records {
 		if q, ok := r.(trace.Question); ok && q.ID == v.QuestionID && q.Revision == v.QuestionRevision {
 			ref := refOf(q)
@@ -498,7 +498,7 @@ func (w *traceWalk) unitTurns(t *UnitTrace) {
 				continue
 			}
 			index[v.AgentID+"/"+v.TurnID] = len(t.Turns)
-			t.Turns = append(t.Turns, TraceTurn{Agent: v.AgentID, Role: w.roles[v.AgentID], Turn: v.TurnID, Status: "running", Request: refOf(v)})
+			t.Turns = append(t.Turns, TraceTurn{Agent: trace.DisplayRole(v.AgentID), Role: trace.DisplayRole(w.roles[v.AgentID]), Turn: v.TurnID, Status: "running", Request: refOf(v)})
 		case trace.TurnResponse:
 			i, ok := index[v.AgentID+"/"+v.TurnID]
 			if !ok {
@@ -539,7 +539,7 @@ func (w *traceWalk) unitHistory(t *UnitTrace) {
 				continue
 			}
 			summary = fmt.Sprintf("%s: %s -> %s: %s", v.Subject, orNone(v.From), v.To, v.Reason)
-			event.DecidedBy, event.Judgment, event.DefaultTo, event.Departed = v.DecidedBy, v.Judgment, v.DefaultTo, v.Departed()
+			event.DecidedBy, event.Judgment, event.DefaultTo, event.Departed = trace.DisplayRole(v.DecidedBy), v.Judgment, v.DefaultTo, v.Departed()
 		case trace.Document:
 			summary = fmt.Sprintf("%s revision %d", v.Path, v.Revision)
 		case trace.Question:
@@ -547,11 +547,11 @@ func (w *traceWalk) unitHistory(t *UnitTrace) {
 		case trace.Ruling:
 			summary = fmt.Sprintf("ruling %s on question %s revision %d", v.Decision, v.QuestionID, v.QuestionRevision)
 		case trace.Agent:
-			summary = fmt.Sprintf("agent %s (%s)", v.ID, v.Role)
+			summary = fmt.Sprintf("agent %s (%s)", trace.DisplayRole(v.ID), trace.DisplayRole(v.Role))
 		case trace.TurnRequest:
-			summary = fmt.Sprintf("turn %s requested of %s", v.TurnID, v.AgentID)
+			summary = fmt.Sprintf("turn %s requested of %s", v.TurnID, trace.DisplayRole(v.AgentID))
 		case trace.TurnResponse:
-			summary = fmt.Sprintf("turn %s of %s ended", v.TurnID, v.AgentID)
+			summary = fmt.Sprintf("turn %s of %s ended", v.TurnID, trace.DisplayRole(v.AgentID))
 		case trace.Cost:
 			summary = fmt.Sprintf("cost of turn %s attempt %s: $%.4f (known=%t)", v.Entry.Scope.Turn, v.Entry.AttemptID, v.Entry.Usage.CostUSD, v.Entry.Usage.CostKnown)
 		default:
@@ -695,7 +695,7 @@ func (w *traceWalk) ratification() (TraceRuling, *TraceGap) {
 		if err != nil || r.Revision != w.sealed.Revision {
 			break
 		}
-		return TraceRuling{Kind: RulingRatification, Ref: refOf(d), Decision: "ratified", DecidedBy: trace.Decider(r.DecidedBy, trace.DecidedByOwner), Judgment: r.Judgment, Owner: fmt.Sprintf("spec.md revision %d and plan.json revision %d", r.Revision.Spec, r.Revision.Plan)}, nil
+		return TraceRuling{Kind: RulingRatification, Ref: refOf(d), Decision: "ratified", DecidedBy: trace.DisplayRole(trace.Decider(r.DecidedBy, trace.DecidedByOwner)), Judgment: r.Judgment, Owner: fmt.Sprintf("spec.md revision %d and plan.json revision %d", r.Revision.Spec, r.Revision.Plan)}, nil
 	}
 	return TraceRuling{}, &TraceGap{Link: path, State: LinkUnavailable, Reason: fmt.Sprintf("seal %d names round %d and the trace holds no ratification of spec.md revision %d and plan.json revision %d there", w.sealed.Seal, w.sealed.Round, w.sealed.Revision.Spec, w.sealed.Revision.Plan)}
 }
@@ -1001,8 +1001,8 @@ func contestDecider(by string) string {
 	switch by {
 	case "", "owner":
 		return trace.DecidedByOwner
-	case "chief of staff":
-		return trace.DecidedByManager
+	case trace.ManagerRulerName:
+		return trace.ManagerDisplay
 	}
 	return by
 }
