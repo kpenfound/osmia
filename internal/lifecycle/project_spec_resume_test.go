@@ -320,7 +320,7 @@ func TestProjectSpecDraftServiceStopKeepsRefusalHistory(t *testing.T) {
 
 	note := "Cite no charter rule; neither charter numbers any."
 	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
-	if _, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, mustRepo(t, f.S, f.Project), f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "chief-turn-1"); apiFault != nil {
+	if _, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, mustRepo(t, f.S, f.Project), f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "manager-turn-1"); apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	scriptProjectSpecTurn(f, "project-spec-draft-7", refuse)

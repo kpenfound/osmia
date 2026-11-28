@@ -377,7 +377,7 @@ func TestAnnouncementMarkersAndMootNotesArePerDestinationAndSurviveARestart(t *t
 	if _, err := f.store.Decline(ctx, groupA, o.Run, "added by the unit"); err != nil {
 		t.Fatal(err)
 	}
-	moot := Moot{Destination: DestinationTarget, Workstream: "w_00000000000000000000000000000002", ArchivedBy: "chief_of_staff", Note: "archived"}
+	moot := Moot{Destination: DestinationTarget, Workstream: "w_00000000000000000000000000000002", ArchivedBy: trace.Manager, Note: "archived"}
 	for range 2 {
 		if err := f.store.MarkAnnounced(ctx, groupA, o.Run, DestinationOrigin); err != nil {
 			t.Fatal(err)
@@ -395,7 +395,7 @@ func TestAnnouncementMarkersAndMootNotesArePerDestinationAndSurviveARestart(t *t
 	if len(got.Announced) != 1 || !got.IsAnnounced(DestinationOrigin) || got.IsAnnounced(DestinationTarget) {
 		t.Fatalf("announced %+v", got.Announced)
 	}
-	if len(got.Moot) != 1 || !got.IsMoot(DestinationTarget) || got.IsMoot(DestinationOrigin) || got.Moot[0].ArchivedBy != "chief_of_staff" || got.Moot[0].At.IsZero() {
+	if len(got.Moot) != 1 || !got.IsMoot(DestinationTarget) || got.IsMoot(DestinationOrigin) || got.Moot[0].ArchivedBy != trace.Manager || got.Moot[0].At.IsZero() {
 		t.Fatalf("moot %+v", got.Moot)
 	}
 	if got.Decision.State != Declined || got.Decision.Reason != "added by the unit" {

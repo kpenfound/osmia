@@ -539,7 +539,7 @@ func TestRepeatedlyInterruptedReviewContestsTheUnit(t *testing.T) {
 	}
 
 	if _, apiErr := f.S.Execution().MoveUnit(ctx, repository, stream, "resume", (api.UnitMoveRequest{To: intake.UnitReviewing, Note: "The service is stable again; review it."}), intake.ManagerActor, ""); apiErr != nil {
-		t.Fatalf("the chief's move: %+v", apiErr)
+		t.Fatalf("the manager's move: %+v", apiErr)
 	}
 	state, err = repository.Workflow(stream, subject)
 	fixturekit.Must(t, err)

@@ -115,7 +115,7 @@ func TestSkillsLoadOnlyOnTheListedTurns(t *testing.T) {
 			t.Errorf("hill-climb loads no skills on %s", turn)
 		}
 	}
-	if k.LoadsSkillsOn("attempt-mason") || k.LoadsSkillsOn("chief") || k.LoadsSkillsOn("") {
+	if k.LoadsSkillsOn("attempt-mason") || k.LoadsSkillsOn("manager") || k.LoadsSkillsOn("") {
 		t.Fatal("hill-climb loads skills on a turn it does not list")
 	}
 	f, _ := Lookup(Feature)

@@ -270,7 +270,7 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 		return nil
 	}
 	defer closeTarget()
-	if err := d.step("chief-target-resolved"); err != nil {
+	if err := d.step("manager-target-resolved"); err != nil {
 		return err
 	}
 	turn := TurnID(token)

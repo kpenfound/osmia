@@ -27,8 +27,8 @@ import (
 const managerLimitTwo = "[capacity]\nmanager = 2\n"
 
 func TestManagerSlotsCapAFakeHearsayNoticeReachingFourteenProjects(t *testing.T) {
-	t.Setenv("CHIEF_OWNER_TOKEN", "owner-secret")
-	t.Setenv("CHIEF_AGENT_TOKEN", "agent-secret")
+	t.Setenv("MANAGER_OWNER_TOKEN", "owner-secret")
+	t.Setenv("MANAGER_AGENT_TOKEN", "agent-secret")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var args struct {
 			After string `json:"after"`
@@ -46,18 +46,18 @@ func TestManagerSlotsCapAFakeHearsayNoticeReachingFourteenProjects(t *testing.T)
 	defer server.Close()
 	agents := ""
 	for _, class := range []string{"worker", "orchestrator", "observer"} {
-		agents += fmt.Sprintf("[hearsay.agents.%s]\nid = %q\ntoken_env = \"CHIEF_AGENT_TOKEN\"\n", class, class+"-agent")
+		agents += fmt.Sprintf("[hearsay.agents.%s]\nid = %q\ntoken_env = \"MANAGER_AGENT_TOKEN\"\n", class, class+"-agent")
 	}
-	top := fmt.Sprintf("[capacity]\nmanager = 3\n[hearsay]\nurl = %q\nprincipal = \"owner\"\ntoken_env = \"CHIEF_OWNER_TOKEN\"\n%s", server.URL, agents)
+	top := fmt.Sprintf("[capacity]\nmanager = 3\n[hearsay]\nurl = %q\nprincipal = \"owner\"\ntoken_env = \"MANAGER_OWNER_TOKEN\"\n%s", server.URL, agents)
 	f := newManagerFleet(t, 14, top, "hearsay_scope = \"work:osmia:project\"\n")
 	s, _ := start(t, f.opts)
 
-	intakefixture.Soon(t, "three chief turns running and eleven waiting", func() bool {
+	intakefixture.Soon(t, "three manager turns running and eleven waiting", func() bool {
 		st := s.ManagerSlots()
 		return st.Used == 3 && len(st.Waiting) == 11 && f.agent.runningCount() == 3
 	})
 	if running := f.agent.runningCount(); running != 3 {
-		t.Fatalf("%d chief turns running with the pool full", running)
+		t.Fatalf("%d manager turns running with the pool full", running)
 	}
 	if st := s.ManagerSlots(); len(st.Unslotted) != 0 {
 		t.Fatalf("a notice wave ran without a slot: %+v", st.Unslotted)
@@ -392,7 +392,7 @@ func TestManagerSlotsSharedWorkgroupManagerTakesFromTheSamePool(t *testing.T) {
 		<-done
 	})
 	host := group.Members[0]
-	intakefixture.Soon(t, "the shared chief target", func() bool {
+	intakefixture.Soon(t, "the shared manager target", func() bool {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		return len(p.controllers) == 2
@@ -408,19 +408,19 @@ func TestManagerSlotsSharedWorkgroupManagerTakesFromTheSamePool(t *testing.T) {
 	_, err = wt.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, Revision: 1, ID: "request_shared", Project: wt.Project(), Workstream: host, At: managerAt(1), Actor: serviceActor, Cause: "event"}, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "shared", Profile: profile, Prompt: "ok"})
 	fixturekit.Must(t, err)
 	s.conversationSignal.wake()
-	intakefixture.Soon(t, "the shared chief turn to wait for a slot", func() bool {
+	intakefixture.Soon(t, "the shared manager turn to wait for a slot", func() bool {
 		return slices.Equal(managerTurns(s.ManagerSlots().Waiting), []string{"shared"})
 	})
 	th, err := wt.Thread(host, trace.Manager)
 	fixturekit.Must(t, err)
 	if reason := s.queuedReason(th, th.Turns[0]); reason != "waiting for a manager slot" || agent.hasStarted("shared@"+string(host)) {
-		t.Fatalf("shared chief turn: reason %q", reason)
+		t.Fatalf("shared manager turn: reason %q", reason)
 	}
 	s.manager.resize(1)
 	awaitStarted(t, agent, "shared@"+string(host))
 	st := s.ManagerSlots()
 	if st.Used != 1 || len(st.Active) != 1 || st.Active[0].Project != wt.Project() || st.Active[0].Turn != "shared" {
-		t.Fatalf("shared chief turn did not hold a slot of the factory pool: %+v", st)
+		t.Fatalf("shared manager turn did not hold a slot of the factory pool: %+v", st)
 	}
 	agent.releaseAll()
 	intakefixture.Soon(t, "the slot to be released", func() bool { return s.ManagerSlots().Used == 0 })
@@ -502,7 +502,7 @@ func TestManagerSlotsFullPoolIsReportedByTheCapacityToolAndStatus(t *testing.T) 
 		}
 		manager := fixturekit.RoleCapacityEntry(t, doc.Capacity, managerRole)
 		if fixturekit.LimitOf(t, manager) != 2 || manager.Used != 2 || len(manager.Waiting) != 2 {
-			t.Fatalf("%s chief entry %+v", name, manager)
+			t.Fatalf("%s manager entry %+v", name, manager)
 		}
 		for i, want := range []struct {
 			stream config.WorkstreamID
@@ -510,7 +510,7 @@ func TestManagerSlotsFullPoolIsReportedByTheCapacityToolAndStatus(t *testing.T) 
 		}{{f.streams[2], "W1"}, {f.streams[3], "W2"}} {
 			w := manager.Waiting[i]
 			if w.Project != f.ids[i+2] || w.Workstream != want.stream || w.Agent != trace.Manager || w.Turn != want.turn || w.Reason != DeferCapacity {
-				t.Fatalf("%s chief waiting[%d] %+v", name, i, w)
+				t.Fatalf("%s manager waiting[%d] %+v", name, i, w)
 			}
 		}
 	}

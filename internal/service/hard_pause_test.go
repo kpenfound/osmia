@@ -125,11 +125,11 @@ func TestHardPauseStopsATurnBeforeItStarts(t *testing.T) {
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	_, err := repo.EnsureManager(ctx, fixturekit.Stream, clock.Now(), owner)
 	fixturekit.Must(t, err)
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_chief", Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "message_chief", Depth: 1},
-		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "chief", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message: pause everything, I'm travelling"}
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_manager", Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "message_manager", Depth: 1},
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "manager", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message: pause everything, I'm travelling"}
 	_, err = repo.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
-	backend := &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "chief"}, FinalResponse: "Paused everything"}})}
+	backend := &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "manager"}, FinalResponse: "Paused everything"}})}
 	s, a := hardPauseService(t, cfg, repo, clock, backend)
 	fixturekit.Must(t, s.setPause(runtime.Pause{Target: runtime.Target{Scope: "factory"}, Mode: "hard", Source: runtime.PauseOwner, Reason: "Travelling", SetAt: clock.Now()}))
 
@@ -147,7 +147,7 @@ func TestHardPauseStopsATurnBeforeItStarts(t *testing.T) {
 		t.Fatalf("a turn stopped before it started records attempts: %+v", th.Turns[0].Attempts)
 	}
 
-	op, err = thread.TurnOperation(fixturekit.Project, "event-chief", thread.TurnInput{Workstream: fixturekit.Stream, Agent: trace.Manager, Turn: "chief"})
+	op, err = thread.TurnOperation(fixturekit.Project, "event-manager", thread.TurnInput{Workstream: fixturekit.Stream, Agent: trace.Manager, Turn: "manager"})
 	fixturekit.Must(t, err)
 	result, err = a.Apply(ctx, op)
 	fixturekit.Must(t, err)
@@ -231,7 +231,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	reply := func(id string, cancelled bool) adaptertest.Reply[coreadapter.SessionResult] {
 		return adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: id}, FinalResponse: "Answer " + id, Cancelled: cancelled}}
 	}
-	turns := &fixturekit.BlockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply("first", true), reply("chief", false), reply("second", false))}, Hooks: map[string]func(context.Context){}}
+	turns := &fixturekit.BlockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply("first", true), reply("manager", false), reply("second", false))}, Hooks: map[string]func(context.Context){}}
 	lives := make(chan *trace.Repository, 1)
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		lives <- r
@@ -315,20 +315,20 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: factory, Mode: "hard", Reason: "Travelling", Source: "owner"})
 	managerEntered, managerRelease := make(chan struct{}), make(chan struct{})
 	var managerErr error
-	turns.Hooks["chief"] = func(ctx context.Context) {
+	turns.Hooks["manager"] = func(ctx context.Context) {
 		close(managerEntered)
 		<-managerRelease
 		managerErr = ctx.Err()
 	}
 	queueTurn(t, repo, "second", clock.Now())
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_chief", Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "message_chief", Depth: 1},
-		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "chief", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message: how is it going?"}
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_manager", Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "message_manager", Depth: 1},
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "manager", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message: how is it going?"}
 	_, err = repo.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
 	await(managerEntered, "the manager did not answer during a factory hard pause")
 	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "project", Project: fixturekit.Project}, Mode: "hard", Reason: "Really stop", Source: "owner"})
 	close(managerRelease)
-	manager := completed(trace.Manager, "chief")
+	manager := completed(trace.Manager, "manager")
 	if managerErr != nil || manager.Status() != "idle" || manager.Response.Stop != nil {
 		t.Fatalf("manager turn under a hard pause: %v %+v", managerErr, manager)
 	}
@@ -349,7 +349,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	for _, call := range turns.Fake.Calls() {
 		ran = append(ran, call.Scope.Turn)
 	}
-	if !slices.Equal(ran, []string{"first", "chief", "second"}) {
+	if !slices.Equal(ran, []string{"first", "manager", "second"}) {
 		t.Fatalf("backend runs %v", ran)
 	}
 	fixturekit.Must(t, s.Close())

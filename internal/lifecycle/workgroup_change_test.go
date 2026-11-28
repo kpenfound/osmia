@@ -340,7 +340,7 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 			_, err = fixturekit.CallTool(ctx, tools, lifecycle.RequestChangeTool, toolMap(lifecycle.ChangeRequest{Key: key, Kind: "amend", Scope: "workgroup", Change: "Offset is encoded as a string."}))
 			return intakefixture.QuestionResult(req, "session-owner-amend", "The committee will debate the delta."), err
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Following the approved workgroup."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Following the approved workgroup."), nil
 	}
 	f.Engine.Mu.Unlock()
 	_, err = f.C.Send(ctx, f.Origin, "Amend the offset contract to string.")

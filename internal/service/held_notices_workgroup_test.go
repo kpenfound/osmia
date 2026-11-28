@@ -24,7 +24,7 @@ func TestHeldNoticesOfACrossRepoMemberHaveTheirInboxCard(t *testing.T) {
 
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "held-notice", Revision: 1, Project: repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "test"}
 	_, err := repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: "held-notice", To: "changed", Reason: "seeded"},
-		Events: []trace.Event{trace.Notice("held-notice", trace.ManagerKey, "The notice the chief cannot take")}})
+		Events: []trace.Event{trace.Notice("held-notice", trace.ManagerKey, "The notice the manager cannot take")}})
 	fixturekit.Must(t, err)
 	d, err := events.New(repo, events.Options{Now: clock.Now,
 		Profile: func() (coreadapter.Profile, error) {
@@ -42,12 +42,12 @@ func TestHeldNoticesOfACrossRepoMemberHaveTheirInboxCard(t *testing.T) {
 			t.Fatalf("after %d failed deliveries the notices card is open=%v, %v", i, open, err)
 		}
 		fixturekit.Must(t, d.Pass(ctx))
-		q, err := manager.ClaimTurn(ctx, host, trace.Manager, fmt.Sprintf("held-%d", i), filepath.Join(t.TempDir(), "chief"), clock.Now())
+		q, err := manager.ClaimTurn(ctx, host, trace.Manager, fmt.Sprintf("held-%d", i), filepath.Join(t.TempDir(), "manager"), clock.Now())
 		fixturekit.Must(t, err)
 		rh := q.Request.Header
 		rh.Schema, rh.ID, rh.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), clock.Now()
 		fixturekit.Must(t, manager.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: rh, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision, Failure: "the provider is down",
-			Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "chief-session"}, StartedAt: q.Claim.At, SessionDirectory: q.Claim.SessionDirectory, IsError: true}}))
+			Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "manager-session"}, StartedAt: q.Claim.At, SessionDirectory: q.Claim.SessionDirectory, IsError: true}}))
 		fixturekit.Must(t, manager.CompleteTurn(ctx, host, trace.Manager, q.Request.TurnID, q.Claim.Token, clock.Now()))
 		clock.Mu.Lock()
 		clock.At = clock.At.Add(time.Hour)

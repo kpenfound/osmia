@@ -131,7 +131,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 		authority.Close()
 		fixturekit.Must(t, err)
 		if !reflect.DeepEqual(sharedManager.Identity, manager.Identity) {
-			t.Fatal("startup replaced the shared chief thread")
+			t.Fatal("startup replaced the shared manager thread")
 		}
 		for _, member := range []membership{{f.Project, f.Stream1}, {f.Project2, f.Stream2}} {
 			r, err := f.S.Repository(member.repo)
@@ -143,7 +143,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 			}
 			memberships[member] = append(memberships[member], sharedID)
 			if _, err := r.ManagerThread(member.stream); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("member %v has an independent chief: %v", member, err)
+				t.Fatalf("member %v has an independent manager: %v", member, err)
 			}
 		}
 		want := []membership{{f.Project, live}, {f.Project, retained}, {f.Project, cleaned}, {f.Project, f.Stream1}, {f.Project2, f.Stream2}}
@@ -166,7 +166,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 			if i == 0 {
 				sharedEntries = conversation.Entries
 			} else if !reflect.DeepEqual(sharedEntries, conversation.Entries) {
-				t.Fatal("member conversations no longer resolve to the shared chief")
+				t.Fatal("member conversations no longer resolve to the shared manager")
 			}
 		}
 		r, err := f.S.Repository(f.Project)
@@ -175,14 +175,14 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 			current, err := r.ManagerThread(stream)
 			fixturekit.Must(t, err)
 			if !reflect.DeepEqual(current.Identity, original.Identity) {
-				t.Fatalf("original chief changed for %s", stream)
+				t.Fatalf("original manager changed for %s", stream)
 			}
 		}
 		if fixturekit.TraceCommits(t, sessionPath) != sessionBefore {
 			t.Fatal("startup changed the exploratory session")
 		}
 		if _, err := r.ManagerThread(cleaned); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("cleaned archive gained a chief thread: %v", err)
+			t.Fatalf("cleaned archive gained a manager thread: %v", err)
 		}
 		if _, err := f.C.Conversation(ctx, cleaned); !intakefixture.Failed(err, api.Conflict) {
 			t.Fatalf("cleaned archive gained a conversation: %v", err)

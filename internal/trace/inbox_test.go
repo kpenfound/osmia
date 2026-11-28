@@ -38,7 +38,7 @@ func newEscalatedInbox(t *testing.T) escalatedInbox {
 	ctx := context.Background()
 	r, root, p := create(t)
 	scoped := mustScoped(t, r, streamID)
-	manager := managerThread(t, r, "chief1")
+	manager := managerThread(t, r, "manager1")
 	for i, agent := range []string{"mason1", "mason2", "mason3", "mason4"} {
 		scope := askerThread(t, r, agent, "mason", "build_"+agent)
 		if _, err := r.Ask(ctx, agent, scope, "Question from "+agent, at.Add(time.Duration(i)*time.Second)); err != nil {
@@ -49,7 +49,7 @@ func newEscalatedInbox(t *testing.T) escalatedInbox {
 	batch := EscalationRequest{Questions: []string{"2", "1"}, Rephrasing: "Should uploads resume after a restart?", Blocked: "The upload unit.", Options: []string{"Resume", "Restart"}, Recommendation: "Resume."}
 	single := EscalationRequest{Questions: []string{"3"}, Rephrasing: "Is the log format fixed?", Blocked: "The review.", Recommendation: "Yes."}
 	for _, req := range []EscalationRequest{batch, single} {
-		if _, err := r.EscalateQuestions(ctx, "chief", manager, req, escalated); err != nil {
+		if _, err := r.EscalateQuestions(ctx, "manager", manager, req, escalated); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -104,7 +104,7 @@ func TestEscalatedQuestionsAreNumberedInboxEntries(t *testing.T) {
 func TestRelayingBeforeTheOwnerRulesIsRefused(t *testing.T) {
 	i := newEscalatedInbox(t)
 	for id, reason := range map[string]string{"1": "question 1 has no ruling from the owner to relay", "4": "question 4 has no ruling from the owner to relay", "9": "there is no question 9 in this workstream"} {
-		if got := refusal(t, second(i.r.RelayRuling(context.Background(), "chief", i.manager, id, "Resume.", ScopeLocal, i.when()))); got != reason {
+		if got := refusal(t, second(i.r.RelayRuling(context.Background(), "manager", i.manager, id, "Resume.", ScopeLocal, i.when()))); got != reason {
 			t.Fatalf("relay of question %s: %s", id, got)
 		}
 	}
@@ -198,7 +198,7 @@ func TestASecondRulingIsRefusedAndTheFirstStands(t *testing.T) {
 
 func TestAnAnswerToARuledQuestionIsRefusedInFavourOfRelaying(t *testing.T) {
 	i := newEscalatedInbox(t).ruled(t)
-	if got := refusal(t, second(i.r.AnswerQuestion(context.Background(), "chief", i.manager, "1", "Resume.", []string{"charter#1"}, i.when()))); got != "question 1 has the owner's ruling; relay it with relay_ruling" {
+	if got := refusal(t, second(i.r.AnswerQuestion(context.Background(), "manager", i.manager, "1", "Resume.", []string{"charter#1"}, i.when()))); got != "question 1 has the owner's ruling; relay it with relay_ruling" {
 		t.Fatalf("answer to a ruled question: %s", got)
 	}
 }
@@ -210,10 +210,10 @@ func TestRefusedRelayChangesNothing(t *testing.T) {
 	failure(t, second(i.r.RelayRuling(ctx, "mason1", mason, "1", "Resume.", ScopeLocal, i.relayedAt())), "only a manager turn may choose what happens to a question")
 	for reason, call := range map[string]func() error{
 		"text is required: the owner's ruling as the askers should read it": func() error {
-			return second(i.r.RelayRuling(ctx, "chief", i.manager, "1", " ", ScopeLocal, i.relayedAt()))
+			return second(i.r.RelayRuling(ctx, "manager", i.manager, "1", " ", ScopeLocal, i.relayedAt()))
 		},
 		"scope must be local, for the askers only, or notify, for a notice to the whole project": func() error {
-			return second(i.r.RelayRuling(ctx, "chief", i.manager, "1", "Resume.", "everyone", i.relayedAt()))
+			return second(i.r.RelayRuling(ctx, "manager", i.manager, "1", "Resume.", "everyone", i.relayedAt()))
 		},
 	} {
 		if got := refusal(t, call()); got != reason {
@@ -228,11 +228,11 @@ func TestRefusedRelayChangesNothing(t *testing.T) {
 func TestManagerRelaysARulingOnceAndItSurvivesReopening(t *testing.T) {
 	ctx := context.Background()
 	i := newEscalatedInbox(t).ruled(t)
-	questions, err := i.r.RelayRuling(ctx, "chief", i.manager, "1", "Uploads resume after a restart.", ScopeNotify, i.relayedAt())
+	questions, err := i.r.RelayRuling(ctx, "manager", i.manager, "1", "Uploads resume after a restart.", ScopeNotify, i.relayedAt())
 	if err != nil || !slices.Equal(questions, []string{"2", "1"}) {
 		t.Fatalf("relayed questions %v: %v", questions, err)
 	}
-	if got := refusal(t, second(i.r.RelayRuling(ctx, "chief", i.manager, "2", "Again.", ScopeLocal, i.relayedAt()))); got != "question 2 is already answered" {
+	if got := refusal(t, second(i.r.RelayRuling(ctx, "manager", i.manager, "2", "Again.", ScopeLocal, i.relayedAt()))); got != "question 2 is already answered" {
 		t.Fatalf("second relay: %s", got)
 	}
 	if _, err := i.r.Rule(ctx, 1, "Restart uploads.", inboxOwner, i.relayedAt()); !errors.Is(err, ErrRuled) {
@@ -241,7 +241,7 @@ func TestManagerRelaysARulingOnceAndItSurvivesReopening(t *testing.T) {
 	if _, err := i.r.Rule(ctx, 2, "Fixed.", inboxOwner, i.relayedAt()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := i.r.RelayRuling(ctx, "chief", i.manager, "3", "The log format is fixed.", ScopeLocal, i.relayedAt()); err != nil {
+	if _, err := i.r.RelayRuling(ctx, "manager", i.manager, "3", "The log format is fixed.", ScopeLocal, i.relayedAt()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -250,7 +250,7 @@ func TestManagerRelaysARulingOnceAndItSurvivesReopening(t *testing.T) {
 		s := questionStates(t, r)
 		for _, id := range []string{"1", "2"} {
 			want := i.wantRuling(id)
-			want.Revision, want.At, want.Actor, want.Cause, want.Depth = 2, i.relayedAt(), Actor{Kind: "agent", ID: "chief"}, "request_chief1", 3
+			want.Revision, want.At, want.Actor, want.Cause, want.Depth = 2, i.relayedAt(), Actor{Kind: "agent", ID: "manager"}, "request_manager1", 3
 			want.ReturnedAnswer, want.Scope = "Uploads resume after a restart.", ScopeNotify
 			if q := s[id]; q.State != QuestionAnswered || !reflect.DeepEqual(*q.Ruling, want) {
 				t.Fatalf("relayed question %s: %+v", id, q.Ruling)

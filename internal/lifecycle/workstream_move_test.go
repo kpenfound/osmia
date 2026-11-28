@@ -118,7 +118,7 @@ func TestMoveToAssembledRerunsAFailedFinalReview(t *testing.T) {
 
 func TestManagerMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := journey.NewFinalFixtureWith(t, "chief-move", "")
+	f, stream, repository, a := journey.NewFinalFixtureWith(t, "manager-move", "")
 	journey.HostFinalReviews(t, f, stream)
 	f.S.SetSole(&journey.ActiveProject{Repository: repository})
 	ctx := context.Background()
@@ -191,7 +191,7 @@ func TestManagerMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 
 func TestManagerRelaysTheOwnersAbandonment(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, _ := journey.NewFinalFixtureWith(t, "chief-relay", "")
+	f, stream, repository, _ := journey.NewFinalFixtureWith(t, "manager-relay", "")
 	f.S.SetSole(&journey.ActiveProject{Repository: repository})
 	tool := managerMoveTool(t, f, repository, stream, "message_1", true)
 	if out := intakefixture.Handle(t, tool, `{"to":"abandoned","note":"Stop this one.","owner_decided":true}`); !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"state":"abandoned"`) {
@@ -428,7 +428,7 @@ func atTheFinalRoundLimit(t *testing.T, key string) (*journey.ShedFixture, *trac
 
 func TestTheManagerReopensAWorkstreamPastTheFinalRoundLimit(t *testing.T) {
 	t.Parallel()
-	f, repository, stream, tool := atTheFinalRoundLimit(t, "limit-chief")
+	f, repository, stream, tool := atTheFinalRoundLimit(t, "limit-manager")
 	jev := &jevfixture.Transitions{}
 	journey.InspectForTest(f.S).SetRouterJudge(jevfixture.TransitionJudge(f.S.Now, jev))
 	out := intakefixture.Handle(t, tool, `{"to":"building","note":"Reopen it."}`)
@@ -446,7 +446,7 @@ func TestTheManagerReopensAWorkstreamPastTheFinalRoundLimit(t *testing.T) {
 
 func TestARevisionCommissionedOnAnAssembledWorkstreamReopensIt(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := journey.NewFinalFixtureWith(t, "chief-revision", "")
+	f, stream, repository, a := journey.NewFinalFixtureWith(t, "manager-revision", "")
 	journey.HostFinalReviews(t, f, stream)
 	f.S.SetSole(&journey.ActiveProject{Repository: repository})
 	_, op := journey.AssembleBoth(t, f, repository, a, stream,

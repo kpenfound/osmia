@@ -250,8 +250,8 @@ func (s *Service) conversationTarget(ctx context.Context, repository *trace.Repo
 	return target, stream, closeTarget, err
 }
 
-// ConversationEntries lists the owner's conversation of stream: the manager of
-// staff's thread and, when stream holds or held a design session, the design
+// ConversationEntries lists the owner's conversation of stream: the manager's
+// thread and, when stream holds or held a design session, the design
 // thread. A session opened before design sessions had a thread of their own
 // holds its first messages on the manager's thread, so both are read and the
 // turns merged by when they were sent.

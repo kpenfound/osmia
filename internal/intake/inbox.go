@@ -371,8 +371,8 @@ func (s *Controller) LoopEntry(repository *trace.Repository, stream config.Works
 
 // HeldNoticesEntry is the workstream's notices the manager no longer
 // receives because events.MaxDeliveryFailures turns delivering them failed,
-// opened when the first of them was recorded. A message to the manager of
-// staff answers it: once the manager completes a turn answering the owner,
+// opened when the first of them was recorded. A message to the manager
+// answers it: once the manager completes a turn answering the owner,
 // they are delivered again. The notices wait in the workstream's own outbox
 // and are judged against the thread they are delivered to: the shared manager's
 // thread in the workgroup trace for a member of a cross-repo workgroup. A

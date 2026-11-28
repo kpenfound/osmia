@@ -107,8 +107,8 @@ replaced by a hash of the same inputs.
 
 - **Owner rulings.** Only the owner's own ruling, the first revision of the
   question's ruling, is posted, on the owner source. A ruling Jev made is posted
-  on the work source instead ([Jev's decisions](#jevs-decisions)). The question is the manager
-  of staff's rephrasing the owner read, and the context carries the passage in
+  on the work source instead ([Jev's decisions](#jevs-decisions)). The question is the manager's
+  rephrasing the owner read, and the context carries the passage in
   tension, the conflict, what was blocked and the options put to the owner. The
   manager's relay of the ruling to the askers is a later revision and is
   never posted, as a ruling or in any other form.
@@ -150,8 +150,8 @@ supersedes, and not while that one was refused.
 
 ### Jev's decisions
 
-Jev decides the owner's gates when it is confident and some of the manager of
-staff's own decisions ([how Jev decides](design.md)). A record Jev wrote carries
+Jev decides the owner's gates when it is confident and some of the manager's
+own decisions ([how Jev decides](design.md)). A record Jev wrote carries
 `jev` as its decider and the judgment record it comes from, and the trace
 guarantees that only Jev's own actor writes such a record. The publisher reads
 that, so a decision Jev made is never posted as the owner's, whatever kind of

@@ -48,7 +48,7 @@ const (
 	// driftHeld is the drift subject's value, held-<k>, once drift rebase
 	// k's conflict resolution stopped: the drift rebase is over, and the
 	// workstream takes no other until the owner asks for one or the manager
-	// of staff hands it back.
+	// hands it back.
 	DriftHeld = "held"
 )
 

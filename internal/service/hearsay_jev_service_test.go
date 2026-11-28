@@ -45,7 +45,7 @@ func TestPublishPostsTheRulingTheGateWorkerRecordedForJev(t *testing.T) {
 	if !ok {
 		t.Fatal("the gate recorded no judgment")
 	}
-	if _, err := repo.RelayRuling(ctx, "chief", manager, "1", "Restart the upload.", trace.ScopeLocal, f.now()); err != nil {
+	if _, err := repo.RelayRuling(ctx, "manager", manager, "1", "Restart the upload.", trace.ScopeLocal, f.now()); err != nil {
 		t.Fatal(err)
 	}
 

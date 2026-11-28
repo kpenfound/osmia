@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	a "github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 func TestTurnsRunOnTheBuiltInLocalClientByDefaultAndTheResultNamesIt(t *testing.T) {
@@ -178,7 +179,7 @@ func reflectZero(settings a.ExecutionSettings) bool {
 }
 
 func TestWhatTheServiceSeedsIsInTheViewARemoteClientReceives(t *testing.T) {
-	r, _, _, _, input := fixture(t, "chief_of_staff", "none")
+	r, _, _, _, input := fixture(t, trace.Manager, "none")
 	stub := &remoteStub{view: &memView{files: map[string]string{}}}
 	r.Clients = func(context.Context, a.Scope, a.Profile) (Client, error) { return stub, nil }
 	var seeded View

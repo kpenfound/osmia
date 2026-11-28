@@ -133,7 +133,7 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 	p.Await("the member card opens its member", `!document.querySelector('[data-view=workstream]').hidden && location.hash === `+quote("#workstream="+string(stream)))
 	p.OpenActivity()
 	p.Await("the member actually has detail events", `document.querySelector('#workstream-activity [data-kind=session]') !== null && document.querySelector('#workstream-activity [data-kind=transition]') !== null && document.querySelector('#workstream-activity [data-kind=unit_checks]') !== null && document.querySelector('#workstream-activity [data-kind=final_review]') !== null`)
-	p.Await("no shared conversation in the member's Activity", `!document.querySelector('#workstream-activity [data-kind=message], #workstream-activity [data-kind=response], #workstream-activity [data-kind=action], #workstream-activity [data-kind=status], #workstream-activity [data-kind=session][data-role=chief_of_staff]')`)
+	p.Await("no shared conversation in the member's Activity", `!document.querySelector('#workstream-activity [data-kind=message], #workstream-activity [data-kind=response], #workstream-activity [data-kind=action], #workstream-activity [data-kind=status], #workstream-activity [data-kind=session][data-role=manager]')`)
 	p.OpenConversation()
 	p.Await("no session or check in the member's Conversation", `!document.querySelector('#workstreams [data-kind=session], #workstreams [data-kind=transition], #workstreams [data-kind=unit_checks]')`)
 	p.AwaitText("#workstream-head [data-field=manager-status]", "The manager coordinates both repos.")
@@ -166,10 +166,10 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 		if q.Request.Prompt == "Coordinate the whole group" {
 			break
 		}
-		fixturekit.AnswerManager(t, f.repo, stream, q.Request.TurnID, "Chief activity recorded.")
+		fixturekit.AnswerManager(t, f.repo, stream, q.Request.TurnID, "Manager activity recorded.")
 	}
 	if q.Request.Prompt != "Coordinate the whole group" {
-		t.Fatal("owner message did not follow the queued chief activity")
+		t.Fatal("owner message did not follow the queued manager activity")
 	}
 	fixturekit.AnswerManager(t, f.repo, stream, q.Request.TurnID, "The group will coordinate.")
 	p.AwaitText("#workgroup-content .feed", "The group will coordinate.")
@@ -366,8 +366,8 @@ func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
 		must(t, err)
 		return coreadapter.Scope{Project: string(repo.Project()), Workstream: string(ws), Role: role, Thread: agent, Turn: turn}
 	}
-	cs := claim(manager, host, trace.Manager, trace.Manager, "shared-question-chief")
-	_, err = manager.SetStatus(ctx, trace.Manager, cs, trace.StatusContent{Goal: "Coordinate two repositories", Note: "One chief owns the shared question.", Agents: []string{}}, demoStart, func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	cs := claim(manager, host, trace.Manager, trace.Manager, "shared-question-manager")
+	_, err = manager.SetStatus(ctx, trace.Manager, cs, trace.StatusContent{Goal: "Coordinate two repositories", Note: "One manager owns the shared question.", Agents: []string{}}, demoStart, func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	must(t, err)
 	qs := []string{}
 	for i, m := range members {

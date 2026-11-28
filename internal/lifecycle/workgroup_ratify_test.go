@@ -312,12 +312,12 @@ func TestCrossRepoWorkgroupDraftAndRatify(t *testing.T) {
 		}
 	}
 
-	b, err := f.S.Context().Assemble(ctx, f.Project, bundle.Scope{Role: "chief_of_staff", Workstream: f.Stream1})
+	b, err := f.S.Context().Assemble(ctx, f.Project, bundle.Scope{Role: trace.Manager, Workstream: f.Stream1})
 	fixturekit.Must(t, err)
 	if b.ProjectSpec == nil || b.ProjectSpec.Workgroup != id || b.ProjectSpec.Slice == nil || b.ProjectSpec.Slice.Workstream != f.Stream1 {
 		t.Fatalf("manager's context of member1 does not carry the ratified project spec: %+v", b.ProjectSpec)
 	}
-	b2, err := f.S.Context().Assemble(ctx, f.Project2, bundle.Scope{Role: "chief_of_staff", Workstream: f.Stream2})
+	b2, err := f.S.Context().Assemble(ctx, f.Project2, bundle.Scope{Role: trace.Manager, Workstream: f.Stream2})
 	fixturekit.Must(t, err)
 	if b2.ProjectSpec == nil || b2.ProjectSpec.Workgroup != id || b2.ProjectSpec.Slice == nil || b2.ProjectSpec.Slice.Workstream != f.Stream2 {
 		t.Fatalf("manager's context of member2 does not carry the ratified project spec: %+v", b2.ProjectSpec)
@@ -460,7 +460,7 @@ func TestDraftWorkgroupRefusesReadinessWithNothingRecordedOnAnyMember(t *testing
 		t.Fatal("member2's workgroup was retracted despite the refused join")
 	}
 	if _, err := repo1.ManagerThread(f.Stream1); err != nil {
-		t.Fatalf("member1's chief thread changed: %v", err)
+		t.Fatalf("member1's manager thread changed: %v", err)
 	}
 	entries, err := os.ReadDir(filepath.Join(f.S.Current().Root.String(), "workgroups"))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {

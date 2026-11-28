@@ -340,7 +340,7 @@ func (f *ArchitectFixture) AwaitRetry(t *testing.T, stream config.WorkstreamID, 
 }
 
 // Notice returns the body of the notice the given transition told the manager
-// of staff with.
+// with.
 func (f *ArchitectFixture) Notice(t *testing.T, stream config.WorkstreamID, transition string) string {
 	t.Helper()
 	return intakefixture.Notice(t, f.Repository(), stream, transition)

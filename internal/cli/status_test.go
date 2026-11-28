@@ -66,18 +66,18 @@ func withStatus(t *testing.T) service.Options {
 	defer repo.Close()
 	must(t, repo.CreateWorkstream(ctx, stream, written, owner))
 	must(t, repo.CreateWorkstream(ctx, quiet, written, owner))
-	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, ID: "chief", Revision: 1, Project: project, Workstream: stream, At: written, Actor: owner, Cause: "workstream-create"}
-	must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: "chief_of_staff", ThreadID: "chief_thread"}))
+	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, ID: "manager", Revision: 1, Project: project, Workstream: stream, At: written, Actor: owner, Cause: "workstream-create"}
+	must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: trace.Manager, ThreadID: "manager_thread"}))
 	h.Schema, h.ID, h.Cause = "osmia.trace.turn-request", "request_one", "message_one"
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: "chief", ThreadID: "chief_thread", TurnID: "one", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, Prompt: "Owner message"})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: "manager", ThreadID: "manager_thread", TurnID: "one", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, Prompt: "Owner message"})
 	must(t, err)
-	_, err = repo.ClaimTurn(ctx, stream, "chief", "token", "/owned", written)
+	_, err = repo.ClaimTurn(ctx, stream, "manager", "token", "/owned", written)
 	must(t, err)
 	h.Schema, h.ID, h.Cause = "osmia.trace.transition", "handed", "handin"
 	_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, To: "handed", Reason: "Owner handed in a design"}})
 	must(t, err)
-	scope := coreadapter.Scope{Project: project, Workstream: stream, Thread: "chief_thread", Turn: "one", Role: "chief_of_staff"}
-	tool, err := status.Tool(repo, "chief", scope, func() time.Time { return written })
+	scope := coreadapter.Scope{Project: project, Workstream: stream, Thread: "manager_thread", Turn: "one", Role: trace.Manager}
+	tool, err := status.Tool(repo, "manager", scope, func() time.Time { return written })
 	must(t, err)
 	out, err := tool.Handle(ctx, json.RawMessage(`{"goal":"Ship resumable uploads.","note":"The plan is drafted. Review is underway.","agents":["The architect is preparing the packet.","A reviewer is idle."]}`))
 	if err != nil || string(out) != `{"stored":true,"revision":1}` {

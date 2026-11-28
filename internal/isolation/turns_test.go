@@ -73,7 +73,7 @@ func fixture(t *testing.T, role, mode string) (*Turns, *provider, *host, *adapte
 
 func TestCurrentInstructionsReachQueuedAndResumedTurns(t *testing.T) {
 	for _, resumed := range []bool{false, true} {
-		r, _, _, engine, input := fixture(t, "chief_of_staff", "container")
+		r, _, _, engine, input := fixture(t, trace.Manager, "container")
 		input.SystemPrompt = "Saved role instructions."
 		if resumed {
 			input.Resume = &a.BackendSession{Backend: "claude", ID: "saved-session"}
@@ -98,7 +98,7 @@ func TestCurrentInstructionsReachQueuedAndResumedTurns(t *testing.T) {
 
 func TestServiceTurnsApplyRoleCeilingAndFreshViews(t *testing.T) {
 	for _, mode := range []string{"none", "claude", "container"} {
-		for _, role := range []string{"committee", "reviewer", "architect", "chief_of_staff", "foreman", "mason"} {
+		for _, role := range []string{"committee", "reviewer", "architect", trace.Manager, "foreman", "mason"} {
 			t.Run(mode+"/"+role, func(t *testing.T) {
 				r, p, h, engine, input := fixture(t, role, mode)
 				writable := role == "mason"
@@ -386,7 +386,7 @@ func TestReviewerGrantIsReadOnly(t *testing.T) {
 }
 
 func TestKnowledgeToolsFollowTheRole(t *testing.T) {
-	for _, role := range []string{"chief_of_staff", "architect", "mason", "reviewer", "committee", "foreman", "session"} {
+	for _, role := range []string{trace.Manager, "architect", "mason", "reviewer", "committee", "foreman", "session"} {
 		grant, err := roleGrant(role, a.Capabilities{Tools: []string{"project_context"}})
 		if err != nil {
 			t.Fatal(err)
@@ -405,13 +405,13 @@ func TestRoleGrantRefusesAnUnknownRole(t *testing.T) {
 
 func TestManagerToolsOnlyReachManager(t *testing.T) {
 	for _, name := range []string{"set_status", "prioritise", "decide_amendment", "decide_charter", "move_unit", "move_workstream", "hand_back_drift", "flake_fix", "record_delivery_brief", "pull_request_checks", "ask_owner_about_checks"} {
-		for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason"} {
+		for _, role := range []string{trace.Manager, "committee", "reviewer", "architect", "foreman", "mason"} {
 			t.Run(name+"/"+role, func(t *testing.T) {
 				r, _, h, engine, input := fixture(t, role, "container")
 				r.Grants[role] = a.Capabilities{Tools: []string{"file_read", name}}
 				handle := func(context.Context, json.RawMessage) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }
 				r.Scoped = func(_ context.Context, scope a.Scope) ([]a.Tool, error) {
-					if scope.Role != "chief_of_staff" {
+					if scope.Role != trace.Manager {
 						return nil, nil
 					}
 					return []a.Tool{{Name: name, Effect: a.ToolMemory, Handle: handle}}, nil
@@ -424,7 +424,7 @@ func TestManagerToolsOnlyReachManager(t *testing.T) {
 					names = append(names, tool.Name)
 				}
 				want, allowed := []string{"file_read"}, []string{"mcp__osmia_0__file_read"}
-				if role == "chief_of_staff" {
+				if role == trace.Manager {
 					want, allowed = append(want, name), append(allowed, "mcp__osmia_0__"+name)
 				}
 				if !reflect.DeepEqual(names, want) || !reflect.DeepEqual(h.requests[0].Capabilities.Tools, want) || !reflect.DeepEqual(engine.Requests[0].Profile.AllowedTools, allowed) {
@@ -437,7 +437,7 @@ func TestManagerToolsOnlyReachManager(t *testing.T) {
 
 func TestQuestionToolsFollowTheRole(t *testing.T) {
 	manager := []string{"answer", "escalate", "relay_ruling", "route_amendment", "propose_charter", "decide"}
-	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason"} {
+	for _, role := range []string{trace.Manager, "committee", "reviewer", "architect", "foreman", "mason"} {
 		t.Run(role, func(t *testing.T) {
 			r, _, h, engine, input := fixture(t, role, "container")
 			granted := append([]string{"ask", "amend"}, manager...)
@@ -458,7 +458,7 @@ func TestQuestionToolsFollowTheRole(t *testing.T) {
 				names = append(names, tool.Name)
 			}
 			want := []string{"ask"}
-			if role == "chief_of_staff" {
+			if role == trace.Manager {
 				want = manager
 			} else if role == "mason" {
 				want = []string{"ask", "amend"}
@@ -475,7 +475,7 @@ func TestQuestionToolsFollowTheRole(t *testing.T) {
 }
 
 func TestWorkstreamDiffOnlyReachesReviewers(t *testing.T) {
-	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason"} {
+	for _, role := range []string{trace.Manager, "committee", "reviewer", "architect", "foreman", "mason"} {
 		t.Run(role, func(t *testing.T) {
 			r, _, h, _, input := fixture(t, role, "container")
 			r.Grants[role] = a.Capabilities{Tools: []string{"workstream_diff"}}
@@ -494,7 +494,7 @@ func TestWorkstreamDiffOnlyReachesReviewers(t *testing.T) {
 }
 
 func TestShedToolsOnlyReachTheCommittee(t *testing.T) {
-	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason"} {
+	for _, role := range []string{trace.Manager, "committee", "reviewer", "architect", "foreman", "mason"} {
 		t.Run(role, func(t *testing.T) {
 			r, _, h, engine, input := fixture(t, role, "container")
 			r.Grants[role] = a.Capabilities{Tools: []string{"file_read", "file_write", "object", "concede"}, WriteFiles: role == "committee", Execute: role == "committee", Network: role == "committee"}
@@ -531,7 +531,7 @@ func TestShedToolsOnlyReachTheCommittee(t *testing.T) {
 }
 
 func TestReplyToolOnlyReachesTheArchitect(t *testing.T) {
-	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason"} {
+	for _, role := range []string{trace.Manager, "committee", "reviewer", "architect", "foreman", "mason"} {
 		t.Run(role, func(t *testing.T) {
 			r, _, h, _, input := fixture(t, role, "container")
 			r.Grants[role] = a.Capabilities{Tools: []string{"file_read", "reply"}}
@@ -560,7 +560,7 @@ func TestReplyToolOnlyReachesTheArchitect(t *testing.T) {
 type verifyOnlyEngine struct{ a.Engine }
 
 func TestVerdictToolOnlyReachesReviewer(t *testing.T) {
-	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason"} {
+	for _, role := range []string{trace.Manager, "committee", "reviewer", "architect", "foreman", "mason"} {
 		t.Run(role, func(t *testing.T) {
 			r, _, h, _, input := fixture(t, role, "container")
 			r.Grants[role] = a.Capabilities{Tools: []string{"file_read", "verdict"}}
@@ -589,7 +589,7 @@ func TestVerdictToolOnlyReachesReviewer(t *testing.T) {
 }
 
 func TestFinalReportToolOnlyReachesCommittee(t *testing.T) {
-	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason"} {
+	for _, role := range []string{trace.Manager, "committee", "reviewer", "architect", "foreman", "mason"} {
 		t.Run(role, func(t *testing.T) {
 			r, _, h, _, input := fixture(t, role, "container")
 			r.Grants[role] = a.Capabilities{Tools: []string{"file_read", "final_report"}}
@@ -655,16 +655,16 @@ func TestServiceTurnsForwardResumeChecksToEngine(t *testing.T) {
 }
 
 func TestPreviewIsManagerServiceTool(t *testing.T) {
-	for _, role := range []string{"chief_of_staff", "architect", "mason", "reviewer", "committee", "foreman", "session"} {
+	for _, role := range []string{trace.Manager, "architect", "mason", "reviewer", "committee", "foreman", "session"} {
 		grant, err := roleGrant(role, a.Capabilities{Tools: []string{"preview"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if slices.Contains(grant.Tools, "preview") != (role == "chief_of_staff") {
+		if slices.Contains(grant.Tools, "preview") != (role == trace.Manager) {
 			t.Fatalf("preview grant for %s: %+v", role, grant)
 		}
-		if role == "chief_of_staff" && (grant.Execute || grant.WriteFiles || grant.Network || !a.ToolPermitted(grant, a.Tool{Name: "preview", Effect: a.ToolMemory})) {
-			t.Fatalf("chief service capability %+v", grant)
+		if role == trace.Manager && (grant.Execute || grant.WriteFiles || grant.Network || !a.ToolPermitted(grant, a.Tool{Name: "preview", Effect: a.ToolMemory})) {
+			t.Fatalf("manager service capability %+v", grant)
 		}
 	}
 }
@@ -683,7 +683,7 @@ func TestVerifyIsOnlyForTheManagerAndTheReviewingRoles(t *testing.T) {
 }
 
 func TestRoleGrantKeepsWebOnlyForPlanningRoles(t *testing.T) {
-	for role, keeps := range map[string]bool{"chief_of_staff": true, "architect": true, "committee": true, "session": true,
+	for role, keeps := range map[string]bool{trace.Manager: true, "architect": true, "committee": true, "session": true,
 		"mason": false, "reviewer": false, "foreman": false} {
 		grant, err := roleGrant(role, a.Capabilities{Tools: []string{"file_read"}, Web: true})
 		if err != nil || grant.Web != keeps {
@@ -716,7 +716,7 @@ func TestNarrowIntersectsWeb(t *testing.T) {
 
 func TestWebTurnsStayReadOnly(t *testing.T) {
 	webTools := []string{"WebSearch", "WebFetch"}
-	for _, role := range []string{"chief_of_staff", "architect", "committee"} {
+	for _, role := range []string{trace.Manager, "architect", "committee"} {
 		t.Run(role, func(t *testing.T) {
 			r, _, h, engine, input := fixture(t, role, "container")
 			r.Grants[role] = a.Capabilities{Tools: []string{"file_read", "file_write", "shell", "fetch"}, WriteFiles: true, Execute: true, Network: true, Web: true}

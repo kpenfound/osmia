@@ -187,7 +187,7 @@ func TestFeatureArchitectAndCommitteeStillReceivePlanAdvice(t *testing.T) {
 		t.Errorf("a final committee turn receives unit-review wording: %s", final)
 	}
 	if got := policyFor(t, trace.Manager, kindreg.Feature, ""); !strings.Contains(got, "do not commission a revision only to widen one") || !strings.Contains(got, "approving a candidate stay the owner's") {
-		t.Errorf("feature chief lost its footprint or approval rule: %s", got)
+		t.Errorf("feature manager lost its footprint or approval rule: %s", got)
 	}
 }
 
@@ -245,16 +245,8 @@ func TestTurnContextCarriesTheOperatingPolicyOfTheWorkstreamsKind(t *testing.T) 
 	}
 }
 
-func TestFactoryPolicyNamesTheManagerAndNeverTheChief(t *testing.T) {
+func TestFactoryPolicyNamesTheManager(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []string{kindreg.Feature, kindreg.HillClimb} {
-		for _, role := range policyRoles {
-			text := policyFor(t, role, kind, "turn-1")
-			if strings.Contains(strings.ToLower(text), "chief") {
-				t.Errorf("%s policy of a %s workstream names the chief: %s", role, kind, text)
-			}
-		}
-	}
 	if text := policyFor(t, trace.Manager, kindreg.Feature, "turn-1"); !strings.Contains(text, "## Manager: investigating and deciding") {
 		t.Errorf("the manager's policy has no manager section: %s", text)
 	}

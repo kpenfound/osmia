@@ -15,9 +15,9 @@ import (
 func TestEventDeliveryRechecksManagerTransferredAfterResolution(t *testing.T) {
 	t.Parallel()
 	for _, transfer := range []bool{true, false} {
-		name := "unexplained-missing-chief"
+		name := "unexplained-missing-manager"
 		if transfer {
-			name = "transferred-chief"
+			name = "transferred-manager"
 		}
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
@@ -44,7 +44,7 @@ func TestEventDeliveryRechecksManagerTransferredAfterResolution(t *testing.T) {
 			must(t, err)
 			fired := false
 			d.boundary = func(step string) error {
-				if step != "chief-target-resolved" || fired {
+				if step != "manager-target-resolved" || fired {
 					return nil
 				}
 				fired = true
@@ -55,7 +55,7 @@ func TestEventDeliveryRechecksManagerTransferredAfterResolution(t *testing.T) {
 			}
 			err = d.Pass(ctx)
 			if !fired {
-				t.Fatal("delivery did not resolve its chief")
+				t.Fatal("delivery did not resolve its manager")
 			}
 			if !transfer {
 				if !errors.Is(err, os.ErrNotExist) {

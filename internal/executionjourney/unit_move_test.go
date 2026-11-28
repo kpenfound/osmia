@@ -185,11 +185,11 @@ func TestMoveRefusals(t *testing.T) {
 func TestManagerRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	m := journey.NewMoveFixture(t, "chief-moves")
+	m := journey.NewMoveFixture(t, "manager-moves")
 	if out := intakefixture.Handle(t, m.Move, `{"unit":"resume","to":"checking","note":"Run the checks again.","owner_decided":true}`); !strings.Contains(out, "only for a move the owner asked for") {
 		t.Fatalf("an event turn recorded an owner move: %s", out)
 	}
-	if out := intakefixture.Handle(t, m.Move, `{"unit":"resume","to":"checking","note":"Run the checks again."}`); !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"by":"chief of staff"`) {
+	if out := intakefixture.Handle(t, m.Move, `{"unit":"resume","to":"checking","note":"Run the checks again."}`); !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"by":"manager"`) {
 		t.Fatalf("move_unit: %s", out)
 	}
 	if out := intakefixture.Handle(t, m.Move, `{"unit":"resume","to":"reviewing","note":"Review it again."}`); !strings.Contains(out, `"recorded":true`) {
@@ -242,11 +242,11 @@ func TestManagerRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 func TestManagerRecordsTheOwnersMove(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f, stream, repo := newCheckingFixture(t, "chief-owner-move")
+	f, stream, repo := newCheckingFixture(t, "manager-owner-move")
 	_, err := repo.EnsureManager(ctx, stream, fixturekit.DemoStart, intake.ServiceActor)
 	fixturekit.Must(t, err)
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_message_1", Revision: 1, Project: f.Project, Workstream: stream, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: "owner-message"},
-		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "message_1", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "chief", Prompt: "Send resume back to the mason."})
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "message_1", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "manager", Prompt: "Send resume back to the mason."})
 	fixturekit.Must(t, err)
 	_, err = repo.ClaimTurn(ctx, stream, trace.Manager, "token-message", filepath.Join(t.TempDir(), "message"), fixturekit.DemoStart)
 	fixturekit.Must(t, err)

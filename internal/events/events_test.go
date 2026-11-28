@@ -749,7 +749,7 @@ func TestRepeatedlyFailedEventIsHeldUntilTheManagerAnswersTheOwner(t *testing.T)
 	f.finish(t, repo, f.claimNext(t, repo), true)
 	must(t, d.Pass(ctx))
 	if got := deliveries(t, repo, "first"); got != MaxDeliveryFailures+1 {
-		t.Fatalf("the held event went out %d times after the chief answered the owner", got)
+		t.Fatalf("the held event went out %d times after the manager answered the owner", got)
 	}
 }
 
@@ -906,7 +906,7 @@ func TestCrossRepoWorkgroupEventDeliveredToSharedManagerOnceAcrossRestartMidDeli
 		}
 	}
 	if len(queued) != 1 {
-		t.Fatalf("shared chief thread has %d event turns queued, want 1: %+v", len(queued), queued)
+		t.Fatalf("shared manager thread has %d event turns queued, want 1: %+v", len(queued), queued)
 	}
 	if !strings.Contains(queued[0].Request.Prompt, "Notice cross-repo-event") {
 		t.Fatalf("queued turn is missing the notice: %+v", queued[0])
@@ -925,7 +925,7 @@ func TestCrossRepoWorkgroupEventDeliveredToSharedManagerOnceAcrossRestartMidDeli
 	must(t, d.Pass(ctx))
 
 	if n := unacknowledged(t, repo); n != 0 {
-		t.Fatalf("%d events left unacknowledged after the chief's turn completed", n)
+		t.Fatalf("%d events left unacknowledged after the manager's turn completed", n)
 	}
 	entries, err := repo.Outbox(stream)
 	must(t, err)

@@ -167,8 +167,8 @@ func (d *Drafter) Pass(ctx context.Context) error {
 }
 
 // Reconcile requests the first draft of a handed workstream, the next draft
-// after an invalid or failed one while drafts remain, and tells the manager of
-// staff once they are exhausted. A draft parked on the architect's question
+// after an invalid or failed one while drafts remain, and tells the manager
+// once they are exhausted. A draft parked on the architect's question
 // resumes once the answer is queued on the architect's thread. A draft in
 // progress, a parked draft whose answer is not queued and a workstream in any
 // other feature state need nothing.
@@ -250,8 +250,8 @@ func (d *Drafter) EnsureThread(ctx context.Context, stream config.WorkstreamID) 
 }
 
 // Run returns the first draft of the workstream's current run of drafts and
-// the note it carries: draft 1 with no note until the owner or the manager of
-// staff asks for another run after drafting stopped.
+// the note it carries: draft 1 with no note until the owner or the manager
+// asks for another run after drafting stopped.
 func (d *Drafter) Run(stream config.WorkstreamID) (int, string, error) {
 	transitions, err := trace.Read[trace.Transition](d.Repository, stream)
 	if err != nil {

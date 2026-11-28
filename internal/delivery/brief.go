@@ -27,8 +27,8 @@ const (
 	MaxBriefScreenshots = 3
 )
 
-// NoBriefRecorded is what the delivery entry and card say when the manager of
-// staff's turn for a final review's notice ended without recording a brief.
+// NoBriefRecorded is what the delivery entry and card say when the manager's
+// turn for a final review's notice ended without recording a brief.
 const NoBriefRecorded = api.NoBriefRecorded
 
 // Brief is the delivery brief recorded for one final review. Review and

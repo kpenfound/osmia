@@ -85,7 +85,7 @@ func TestStartupRecoversClaimedAndUnclaimedSessionsForEveryRole(t *testing.T) {
 		}
 		if role == trace.Manager {
 			if len(th.Turns) != 2 || !strings.Contains(th.Turns[1].Request.Prompt, "service stopped") || th.Turns[1].Request.Cause != th.Turns[0].Response.ID {
-				t.Fatalf("chief continuation: %+v", th)
+				t.Fatalf("manager continuation: %+v", th)
 			}
 		} else if len(th.Turns) != 1 {
 			t.Fatalf("%s is re-derived by its role pass: %+v", role, th)
@@ -95,7 +95,7 @@ func TestStartupRecoversClaimedAndUnclaimedSessionsForEveryRole(t *testing.T) {
 	manager, err := repo.ManagerThread(fixturekit.Stream)
 	fixturekit.Must(t, err)
 	if len(manager.Turns) != 2 {
-		t.Fatalf("repeated startup queued another chief turn: %+v", manager.Turns)
+		t.Fatalf("repeated startup queued another manager turn: %+v", manager.Turns)
 	}
 }
 
@@ -133,10 +133,10 @@ func TestServiceStartRunsManagerInterruptionTurn(t *testing.T) {
 	select {
 	case call := <-calls:
 		if call.Scope.Role != trace.Manager || !strings.Contains(call.Prompt, "service stopped") || !strings.Contains(call.Prompt, "Remember this request") {
-			t.Fatalf("chief recovery call: %+v", call)
+			t.Fatalf("manager recovery call: %+v", call)
 		}
 	case <-time.After(fixturekit.DemoTimeout):
-		t.Fatal("chief recovery turn was not dispatched")
+		t.Fatal("manager recovery turn was not dispatched")
 	}
 }
 

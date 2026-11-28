@@ -406,7 +406,7 @@ The member view is laid out like a chat client:
   **Conversation** is the default. It lists, in the order they happened, your
   messages and the manager's answers and actions, images, delivery
   briefs, the outcomes of your commands, and only the latest status the manager
-  of staff wrote, with its attention note highlighted. Machine events appear
+  wrote, with its attention note highlighted. Machine events appear
   only as one quiet line each: the workstream becoming ratified, building,
   assembled or delivered, and the result of each final review. Selecting a
   line opens Activity at that entry. Sessions, unit changes and check runs,
@@ -423,8 +423,8 @@ The member view is laid out like a chat client:
   address shows the same view and Back and Forward step through it. The dot on
   a sidebar row follows Conversation, the status and what waits on you; events
   only Activity shows never mark a workstream. Its inbox entries sit below
-  Conversation's entries, above the message field: what each asks, what waits on it, its options and the manager
-  of staff's recommendation. A ratification also shows the objections the
+  Conversation's entries, above the message field: what each asks, what waits on it, its options and the manager's
+  recommendation. A ratification also shows the objections the
   manager escalated and your own, with the ones it dismissed and why
   folded below them; a
   delivery shows the manager's delivery brief first (its text,

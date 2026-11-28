@@ -36,8 +36,8 @@ func TestManagerDecisionsRoundTripAndRefuseInvalidContent(t *testing.T) {
 			t.Fatalf("%s was encoded", name)
 		}
 	}
-	if _, err := shed.Encode(record(1, "chief", one, 1)); err == nil {
-		t.Fatal("a member named chief was encoded")
+	if _, err := shed.Encode(record(1, trace.ManagerKey, one, 1)); err == nil {
+		t.Fatal("a member named manager was encoded")
 	}
 }
 

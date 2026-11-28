@@ -77,7 +77,7 @@ func TestTheOwnersWorkstreamMoveIsAPinnedMove(t *testing.T) {
 
 func TestAManagerProposalToAGateLeavesAPendingOwnerDecision(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := journey.NewFinalFixtureWith(t, "route-chief-gate", "")
+	f, stream, repository, a := journey.NewFinalFixtureWith(t, "route-manager-gate", "")
 	journey.HostFinalReviews(t, f, stream)
 	f.S.SetSole(&journey.ActiveProject{Repository: repository})
 	p := &jevfixture.Transitions{Script: func(ask jevfixture.Ask) jevfixture.Reply {
@@ -92,7 +92,7 @@ func TestAManagerProposalToAGateLeavesAPendingOwnerDecision(t *testing.T) {
 	for _, to := range []string{intake.AbandonedState, intake.RatifiedState} {
 		out := intakefixture.Handle(t, tool, `{"to":"`+to+`","note":"Nothing else is moving it."}`)
 		if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "the owner's decision") || strings.Contains(out, "say") {
-			t.Fatalf("the chief proposal to %s: %s", to, out)
+			t.Fatalf("the manager proposal to %s: %s", to, out)
 		}
 	}
 	if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != intake.AssembledState {
@@ -135,7 +135,7 @@ func TestAManagerProposalToAGateLeavesAPendingOwnerDecision(t *testing.T) {
 
 func TestAManagerMoveToBuildingIsPinnedAndCommitted(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := journey.NewFinalFixtureWith(t, "route-chief-building", "")
+	f, stream, repository, a := journey.NewFinalFixtureWith(t, "route-manager-building", "")
 	journey.HostFinalReviews(t, f, stream)
 	f.S.SetSole(&journey.ActiveProject{Repository: repository})
 	p := &jevfixture.Transitions{}

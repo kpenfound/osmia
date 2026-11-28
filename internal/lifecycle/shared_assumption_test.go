@@ -51,7 +51,7 @@ func TestDesignProductionSharedManagerAssumptionsReachMemberDraftsAcrossRestart(
 				return nil, fmt.Errorf("assumption refused: %s", result)
 			}
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Retry judgments recorded."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Retry judgments recorded."), nil
 	}
 	f.Engine.Mu.Unlock()
 	sent, err := f.C.Send(ctx, f.Stream2, marker)

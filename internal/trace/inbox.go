@@ -562,7 +562,7 @@ func (r *Repository) RelayRuling(ctx context.Context, agent string, scope coread
 		}(); err != nil {
 			return nil, err
 		}
-		if err := project.afterQuestionCommit(ws, "chief-relay-member"); err != nil {
+		if err := project.afterQuestionCommit(ws, "manager-relay-member"); err != nil {
 			return nil, err
 		}
 		if relayInterrupt != nil {

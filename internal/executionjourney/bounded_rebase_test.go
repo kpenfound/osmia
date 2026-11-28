@@ -118,7 +118,7 @@ func TestRebaseThatKeepsFailingIsRefusedOnceItsCommitIsConfirmedAbsent(t *testin
 		t.Fatalf("notices of the refusal: %q", got)
 	}
 	if got := b.notices(t, "The rebase of unit resume has failed"); len(got) != 1 {
-		t.Fatalf("the streak notified the chief %d times: %q", len(got), got)
+		t.Fatalf("the streak notified the manager %d times: %q", len(got), got)
 	}
 }
 

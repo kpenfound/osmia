@@ -231,7 +231,7 @@ func TestRetiredFirstOriginPreservesPartialRulingAndHoldsRemainingRelay(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := claimCrossRepoTurn(t, wg, wg.Project(), g.Members[0], Manager, Manager, "", "chief1")
+	manager := claimCrossRepoTurn(t, wg, wg.Project(), g.Members[0], Manager, Manager, "", "manager1")
 	_, err = wg.EscalateQuestions(ctx, Manager, manager, EscalationRequest{Questions: []string{string(crossMember1) + ":" + first.ID, string(crossMember2) + ":" + second.ID}, Rephrasing: "One decision for both origins.", Blocked: "Both origins.", Recommendation: "Keep the contract."}, at)
 	if err != nil {
 		t.Fatal(err)
@@ -365,7 +365,7 @@ func TestRetirementPreservesQuestionRoutedToPendingAmendment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := claimCrossRepoTurn(t, group, group.Project(), g.Members[0], Manager, Manager, "", "chief1")
+	manager := claimCrossRepoTurn(t, group, group.Project(), g.Members[0], Manager, Manager, "", "manager1")
 	if _, err := group.FileAmendment(ctx, Manager, manager, AmendmentRequest{
 		QuestionID: string(crossMember2) + ":" + q.ID, Citations: []string{"plan#resume"},
 		Change: "Widen the retry window", Reason: "The reviewer found a gap",

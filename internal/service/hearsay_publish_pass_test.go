@@ -37,7 +37,7 @@ func newPublisherFixture(t *testing.T, mutate ...func(*config.Config)) *publishe
 	hooks := fixturekit.NewHooks(t)
 	_, cfg := conversationFixture(t, "hearsay-publish-")
 	cfg.Hearsay = config.Hearsay{URL: "https://memory.example", Principal: "owner", TokenEnv: "PUBLISH_TEST_OWNER", Agents: map[string]config.HearsayAgent{
-		"worker": {ID: "osmia-worker", TokenEnv: "PUBLISH_TEST_WORKER"}, "orchestrator": {ID: "osmia-chief", TokenEnv: "PUBLISH_TEST_CHIEF"}, "observer": {ID: "osmia-observer", TokenEnv: "PUBLISH_TEST_OBSERVER"}},
+		"worker": {ID: "osmia-worker", TokenEnv: "PUBLISH_TEST_WORKER"}, "orchestrator": {ID: "osmia-manager", TokenEnv: "PUBLISH_TEST_MANAGER"}, "observer": {ID: "osmia-observer", TokenEnv: "PUBLISH_TEST_OBSERVER"}},
 		Publish: &config.HearsayPublish{WorkSource: "osmia-work", OwnerSource: "osmia-owner", HooksURL: hooks.URL, Agent: "osmia-publisher", TokenEnv: "PUBLISH_TEST_TOKEN"}}
 	cfg.Projects = slices.Clone(cfg.Projects)
 	for _, m := range mutate {

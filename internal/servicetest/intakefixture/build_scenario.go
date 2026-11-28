@@ -184,9 +184,9 @@ func (f *TurnScenario) ManagerRecordsAnswer(t *testing.T, repository *trace.Repo
 		_, err := repository.EnsureManager(ctx, stream, f.Now(), fixturekit.OwnerActor)
 		return err
 	}())
-	turn := "chief-answer-" + id
+	turn := "manager-answer-" + id
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.Now(), Actor: f.ForemanActor, Cause: "test", Depth: 1},
-		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "chief", Prompt: "Answer question " + id}
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "manager", Prompt: "Answer question " + id}
 	_, err := repository.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
 	token := "claim-" + turn
@@ -530,7 +530,7 @@ func RaiseFixtureContest(t *testing.T, r *trace.Repository, stream config.Workst
 	fixturekit.Must(t, err)
 	h := header
 	h.Schema = "osmia.trace.document"
-	h.ID = trace.UnitSubject(unit) + "-chief-" + header.ID
+	h.ID = trace.UnitSubject(unit) + "-manager-" + header.ID
 	h.Revision = 1
 	h.Actor = actor
 	h.Cause = header.ID

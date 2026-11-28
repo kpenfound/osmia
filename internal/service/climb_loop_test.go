@@ -140,7 +140,7 @@ func TestAClimbRunsAttemptsOnOneMasonThreadAndLandsTheKeptOneAsASquashedCommit(t
 		t.Fatal("no approval card")
 	}
 	evaluator := card.Answer.Body["commit"].(string)
-	if _, err := climb.Steer(context.Background(), c.repository(), stream, "prefer caching over parallelism", "chief", time.Now()); err != nil {
+	if _, err := climb.Steer(context.Background(), c.repository(), stream, "prefer caching over parallelism", trace.ManagerKey, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.c.ApproveClimb(context.Background(), stream, api.ClimbApprovalRequest{Decision: "approve", Commit: evaluator, SpecRevision: 1}); err != nil {
@@ -219,13 +219,13 @@ func TestAClimbRunsAttemptsOnOneMasonThreadAndLandsTheKeptOneAsASquashedCommit(t
 		t.Fatalf("terminal records %v", records)
 	}
 	if kept := c.managerNotices(t, stream, trace.ProgressKind); !slices.ContainsFunc(kept, func(b string) bool { return strings.Contains(b, "Attempt 1 was kept") }) {
-		t.Fatalf("the chief was not told of the kept attempt: %v", kept)
+		t.Fatalf("the manager was not told of the kept attempt: %v", kept)
 	}
 	stops := c.managerNotices(t, stream, trace.NoticeKind)
 	if !slices.ContainsFunc(stops, func(b string) bool {
 		return strings.Contains(b, "The climb concludes after attempt 3") && strings.Contains(b, "max_attempts")
 	}) {
-		t.Fatalf("the chief was not told of the stop: %v", stops)
+		t.Fatalf("the manager was not told of the stop: %v", stops)
 	}
 	running, found, err := climb.ReadRunning(c.repository(), stream)
 	fixturekit.Must(t, err)
@@ -328,7 +328,7 @@ func TestTheOwnerConcludesAndExtendsAClimbAndTheManagerSteersAndConcludesIt(t *t
 		t.Fatalf("the progress read shows %+v after the owner added two attempts to a limit of three", got)
 	}
 	if notices := c.managerNotices(t, stream, trace.ProgressKind); !slices.ContainsFunc(notices, func(b string) bool { return strings.Contains(b, "extended the climb's budget") }) {
-		t.Fatalf("the chief was not told of the extension: %v", notices)
+		t.Fatalf("the manager was not told of the extension: %v", notices)
 	}
 	if _, err := c.c.ConcludeClimb(ctx, stream, api.ClimbConcludeRequest{Note: "enough"}); err != nil {
 		t.Fatal(err)

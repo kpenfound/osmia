@@ -14,7 +14,7 @@ func IsSession(repository *trace.Repository, stream config.WorkstreamID) (bool, 
 
 // ManagerSkip reports whether a workstream's events stay undelivered to
 // its manager: an abandoned workstream, or a session, which has no manager
-// of staff to deliver them to.
+// to deliver them to.
 func ManagerSkip(repository *trace.Repository) func(config.WorkstreamID) (bool, error) {
 	return func(stream config.WorkstreamID) (bool, error) {
 		if session, err := IsSession(repository, stream); err != nil || session {

@@ -149,9 +149,9 @@ func (l *flakeFixLive) settledFootprint(t *testing.T, target config.WorkstreamID
 
 func TestFlakeDecisionIsAnnouncedAfterAMissedWrite(t *testing.T) {
 	t.Parallel()
-	for _, decision := range []string{"opened", "declined", "joined by the recorder", "joined by the chief"} {
+	for _, decision := range []string{"opened", "declined", "joined by the recorder", "joined by the manager"} {
 		for _, how := range []string{"write fails", "service restarts"} {
-			if decision == "joined by the chief" && how == "service restarts" {
+			if decision == "joined by the manager" && how == "service restarts" {
 				continue
 			}
 			t.Run(decision+"/"+how, func(t *testing.T) {
@@ -186,7 +186,7 @@ func TestFlakeDecisionIsAnnouncedAfterAMissedWrite(t *testing.T) {
 					run := recordUnitFlakyRun(t, l.repository(), l.stream, "extra", 1, flakyTraceOther)
 					decided = l.awaitState(t, l.occurrence(t, l.stream, run), flakes.Joined)
 					target, reasonPart = want, string(want)
-				case "joined by the chief":
+				case "joined by the manager":
 					run := recordUnitFlakyRun(t, l.repository(), l.stream, "extra", 1, flakyTraceOther)
 					second := l.occurrence(t, l.stream, run)
 					l.awaitNoticeOf(t, l.stream, second.ID)

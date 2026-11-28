@@ -187,7 +187,7 @@ func TestADesignSessionOpenedBeforeTheDesignerRoleKeepsItsMessagesAndMovesItsNex
 	manager, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	if len(design.Turns) != 1 || len(manager.Turns) != 1 {
-		t.Fatalf("the new turn is on thread %d turns, the chief's has %d, want 1 and 1", len(design.Turns), len(manager.Turns))
+		t.Fatalf("the new turn is on thread %d turns, the manager's has %d, want 1 and 1", len(design.Turns), len(manager.Turns))
 	}
 }
 
@@ -221,11 +221,11 @@ func TestStartingAfterDesignGivesTheManagerANewThreadAndCarriesTheKindThrough(t 
 	manager, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	if manager.Identity.Role != trace.Manager {
-		t.Fatalf("chief thread: %+v", manager.Identity)
+		t.Fatalf("manager thread: %+v", manager.Identity)
 	}
 	for _, q := range manager.Turns {
 		if q.Request.AgentID != trace.Manager || q.Request.Prompt == "Draft it" || q.Request.SystemPrompt == intake.DesignRolePrompt {
-			t.Fatalf("the design conversation reached the chief's thread: %+v", q.Request)
+			t.Fatalf("the design conversation reached the manager's thread: %+v", q.Request)
 		}
 	}
 	design, err := repository.DesignerThread(stream)
@@ -237,7 +237,7 @@ func TestStartingAfterDesignGivesTheManagerANewThreadAndCarriesTheKindThrough(t 
 
 func TestADesignTurnWithoutADesignerRoleRunsOnTheDefaultProfileWhicheverManagerKeyIsSet(t *testing.T) {
 	t.Parallel()
-	managerSettings := "profile = \"chief\"\nsandbox = \"container\"\nimage = \"chief-image\"\nskills = [\"" + designerSkillRef + "\"]\n"
+	managerSettings := "profile = \"manager\"\nsandbox = \"container\"\nimage = \"manager-image\"\nskills = [\"" + designerSkillRef + "\"]\n"
 	for name, roles := range map[string]string{
 		"canonical key":    "[roles.manager]\n" + managerSettings,
 		"deprecated alias": "[roles.chief_of_staff]\n" + managerSettings,
@@ -245,7 +245,7 @@ func TestADesignTurnWithoutADesignerRoleRunsOnTheDefaultProfileWhicheverManagerK
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			d := servicetest.PrepareDesignEnforcementRoles(t, "[profiles.chief]\nagent = \"claude\"\nmodel = \"chief-model\"\n", roles)
+			d := servicetest.PrepareDesignEnforcementRoles(t, "[profiles.manager]\nagent = \"claude\"\nmodel = \"manager-model\"\n", roles)
 			s, c := journey.StartT(t, journey.Enforce(journey.Options{Options: d.Options}, d.Enforcement))
 			home := servicetest.AddDesignProject(t, c.Client, d.Clone)
 			ctx := context.Background()
@@ -256,7 +256,7 @@ func TestADesignTurnWithoutADesignerRoleRunsOnTheDefaultProfileWhicheverManagerK
 			fixturekit.Must(t, err)
 			th, err := s.Sole().Repository.DesignerThread(stream)
 			fixturekit.Must(t, err)
-			if len(th.Turns) != 1 || th.Turns[0].Request.Profile.Name != "default" || th.Turns[0].Request.Profile.Model == "chief-model" {
+			if len(th.Turns) != 1 || th.Turns[0].Request.Profile.Name != "default" || th.Turns[0].Request.Profile.Model == "manager-model" {
 				t.Fatalf("the design turn's profile: %+v", th.Turns)
 			}
 			if manager, err := s.Sole().Repository.ManagerThread(stream); err != nil || len(manager.Turns) != 0 {
@@ -293,7 +293,7 @@ func TestStartingFromASessionOpenedBeforeTheDesignerRoleNeverResumesItsBackendSe
 		if strings.Contains(req.Prompt, "osmia-owned-log") && strings.Contains(req.Prompt, "Earlier question from the owner") {
 			replayed = append(replayed, req.Name)
 		}
-		return &agent.Result{ClaudeID: "chief-session", ResultText: "Carrying on."}, nil
+		return &agent.Result{ClaudeID: "manager-session", ResultText: "Carrying on."}, nil
 	}
 	if _, err := c.DesignStart(ctx, stream); err != nil {
 		t.Fatal(err)
@@ -312,11 +312,11 @@ func TestStartingFromASessionOpenedBeforeTheDesignerRoleNeverResumesItsBackendSe
 	mu.Lock()
 	defer mu.Unlock()
 	if len(resumed) > 0 || len(replayed) > 0 {
-		t.Fatalf("a chief turn after Start resumed the design session's backend session %v or replayed its conversation %v", resumed, replayed)
+		t.Fatalf("a manager turn after Start resumed the design session's backend session %v or replayed its conversation %v", resumed, replayed)
 	}
 	manager, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	if manager.Epoch == 0 {
-		t.Fatalf("the chief's thread keeps the design conversation in its current run: %+v", manager.Identity)
+		t.Fatalf("the manager's thread keeps the design conversation in its current run: %+v", manager.Identity)
 	}
 }

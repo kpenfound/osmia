@@ -30,8 +30,8 @@ func askAs(t *testing.T, f fixture, agent, role, turn, text string) string {
 
 func rawManager(t *testing.T, f fixture, turn string) map[string]coreadapter.Tool {
 	t.Helper()
-	scope := f.turn(t, "chief-"+turn, trace.Manager, turn)
-	list, err := questions.Tools(f.repo, "chief-"+turn, scope, func() time.Time { return start })
+	scope := f.turn(t, "manager-"+turn, trace.Manager, turn)
+	list, err := questions.Tools(f.repo, "manager-"+turn, scope, func() time.Time { return start })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestOutcomeToolsRefuseBeforeDecideAndOnAnotherQuestionsResult(t *testing.T)
 	f := setup(t)
 	one := askAs(t, f, "mason1", "mason", "build1", "Where does state live?")
 	two := askAs(t, f, "mason2", "mason", "build2", "Where do logs live?")
-	manager := rawManager(t, f, "chief1")
+	manager := rawManager(t, f, "manager1")
 	before := f.head(t)
 	for name, input := range inputs(one) {
 		got := call(t, manager[name], input)
@@ -122,7 +122,7 @@ func TestABindingPickAllowsOnlyItsOutcomeWithTheManagersTextAndSurvivesARestart(
 					}
 				}
 			}
-			check(rawManager(t, f, "chief1"))
+			check(rawManager(t, f, "manager1"))
 			if err := f.repo.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -131,7 +131,7 @@ func TestABindingPickAllowsOnlyItsOutcomeWithTheManagersTextAndSurvivesARestart(
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { f.repo.Close() })
-			manager := rawManager(t, f, "chief2")
+			manager := rawManager(t, f, "manager2")
 			check(manager)
 			if got := call(t, manager[pickName], inputs(id)[pickName]); !strings.Contains(got, `"recorded":true`) {
 				t.Fatalf("the picked outcome: %s", got)
@@ -170,7 +170,7 @@ func TestABelowThresholdOrFallbackResultAllowsAnyOutcome(t *testing.T) {
 			f := setup(t)
 			id := askAs(t, f, "mason1", "mason", "build1", "Where does state live?")
 			decide(t, f, id)
-			if got := call(t, rawManager(t, f, "chief1")["answer"], inputs(id)["answer"]); !strings.Contains(got, `"recorded":true`) {
+			if got := call(t, rawManager(t, f, "manager1")["answer"], inputs(id)["answer"]); !strings.Contains(got, `"recorded":true`) {
 				t.Fatalf("answer: %s", got)
 			}
 			if r := states(t, f)[id].Ruling; r == nil || r.DecidedBy != "" || r.Actor.Kind != "agent" {
@@ -183,7 +183,7 @@ func TestABelowThresholdOrFallbackResultAllowsAnyOutcome(t *testing.T) {
 func TestAQuestionJevDoesNotRouteKeepsItsRoute(t *testing.T) {
 	f := setup(t)
 	id := askAs(t, f, "architect1", "architect", "draft1", "Does this project need a change?")
-	if got := call(t, rawManager(t, f, "chief1")["answer"], inputs(id)["answer"]); !strings.Contains(got, `"recorded":true`) {
+	if got := call(t, rawManager(t, f, "manager1")["answer"], inputs(id)["answer"]); !strings.Contains(got, `"recorded":true`) {
 		t.Fatalf("answer: %s", got)
 	}
 	if recs := f.judgments(t); len(recs) != 0 {
@@ -199,7 +199,7 @@ func TestARefusedAmendmentRoutingGoesToTheOwnerWithJevsJudgment(t *testing.T) {
 	if res.Status != jev.Binding {
 		t.Fatalf("result %+v", res)
 	}
-	got := call(t, rawManager(t, f, "chief1")["route_amendment"], inputs(id)["route_amendment"])
+	got := call(t, rawManager(t, f, "manager1")["route_amendment"], inputs(id)["route_amendment"])
 	if !strings.Contains(got, `"recorded":true`) || !strings.Contains(got, "owner's inbox") {
 		t.Fatalf("route: %s", got)
 	}
@@ -218,14 +218,14 @@ func TestARefusedAmendmentRoutingGoesToTheOwnerWithJevsJudgment(t *testing.T) {
 func TestRelayingAnOwnersRulingNeedsNoDecideResult(t *testing.T) {
 	f := setup(t)
 	id := askAs(t, f, "mason1", "mason", "build1", "Where does state live?")
-	scope := f.turn(t, "chief", trace.Manager, "chief1")
-	if _, err := f.repo.EscalateQuestions(context.Background(), "chief", scope, trace.EscalationRequest{Questions: []string{id}, Rephrasing: "Where does state live?", Blocked: "The unit.", Recommendation: "Files."}, start); err != nil {
+	scope := f.turn(t, "manager", trace.Manager, "manager1")
+	if _, err := f.repo.EscalateQuestions(context.Background(), "manager", scope, trace.EscalationRequest{Questions: []string{id}, Rephrasing: "Where does state live?", Blocked: "The unit.", Recommendation: "Files."}, start); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.repo.Rule(context.Background(), 1, "Files.", owner, start.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	manager := tools(t, f, "chief", scope, start.Add(2*time.Hour))
+	manager := tools(t, f, "manager", scope, start.Add(2*time.Hour))
 	if got := call(t, manager["relay_ruling"], `{"question":"`+id+`","text":"Keep state in files.","scope":"local"}`); !strings.Contains(got, `"recorded":true`) {
 		t.Fatalf("relay: %s", got)
 	}

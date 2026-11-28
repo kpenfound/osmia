@@ -389,7 +389,7 @@ func TestAttemptsRunOneAtATimeFromTheCurrentBestWithTheLogSteeringAndRejectionNo
 	if got := r.tip(); got != a1.Commit {
 		t.Fatalf("a rejected attempt moved the climb branch to %s", got)
 	}
-	if _, err := Steer(context.Background(), r.repo, fixturekit.Stream, "try batching the reads", "chief", r.now); err != nil {
+	if _, err := Steer(context.Background(), r.repo, fixturekit.Stream, "try batching the reads", trace.ManagerKey, r.now); err != nil {
 		t.Fatal(err)
 	}
 	extension, _, err := BudgetDocument(r.repo, fixturekit.Stream, Extension{Attempts: 1}, r.now)
@@ -516,7 +516,7 @@ func TestAnApprovedAttemptLandsAsOneSquashedCommitAndMovesTheBest(t *testing.T) 
 	}
 	notices := outbox(t, r.repo, trace.ProgressKind)
 	if !slices.ContainsFunc(notices, func(body string) bool { return strings.Contains(body, "Attempt 1 was kept") }) {
-		t.Fatalf("the chief was not told: %v", notices)
+		t.Fatalf("the manager was not told: %v", notices)
 	}
 	running, found, err := ReadRunning(r.repo, fixturekit.Stream)
 	fixturekit.Must(t, err)
@@ -655,7 +655,7 @@ func TestARestartAtAnyPointEndsTheAttemptWithOneRecordOneChargeAndTheRightBest(t
 				t.Fatalf("attempt 1 has %d terminal records", records)
 			}
 			if got := len(outbox(t, r.repo, trace.ProgressKind)); tc.keep && got != 2 || !tc.keep && got != 1 {
-				t.Fatalf("%d kept-attempt events to the chief", got)
+				t.Fatalf("%d kept-attempt events to the manager", got)
 			}
 		})
 	}
@@ -681,7 +681,7 @@ func TestThreeAttemptsInARowWithoutACandidateRaiseOneStallToTheManager(t *testin
 	}
 	stalls := outbox(t, r.repo, trace.NoticeKind)
 	if len(stalls) != 1 || !strings.Contains(stalls[0], "3 attempts in a row ended without a candidate") {
-		t.Fatalf("notices to the chief: %v", stalls)
+		t.Fatalf("notices to the manager: %v", stalls)
 	}
 	if attempts[3].Cause == CauseNoCandidate {
 		t.Fatalf("attempt 4 %+v", attempts[3])
@@ -876,11 +876,11 @@ func TestSteeringNotesAndBudgetExtensionsAreRecorded(t *testing.T) {
 	t.Parallel()
 	repo := newAttemptStore(t)
 	ctx := context.Background()
-	if _, err := Steer(ctx, repo, fixturekit.Stream, "  ", "chief", fixturekit.DemoStart); err == nil {
+	if _, err := Steer(ctx, repo, fixturekit.Stream, "  ", trace.ManagerKey, fixturekit.DemoStart); err == nil {
 		t.Fatal("an empty note was accepted")
 	}
 	for i, text := range []string{"avoid the cache", "try batching"} {
-		n, err := Steer(ctx, repo, fixturekit.Stream, text, "chief", fixturekit.DemoStart)
+		n, err := Steer(ctx, repo, fixturekit.Stream, text, trace.ManagerKey, fixturekit.DemoStart)
 		fixturekit.Must(t, err)
 		if n.Number != i+1 {
 			t.Fatalf("note %+v", n)

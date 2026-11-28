@@ -24,7 +24,7 @@ func TestTraceRulingsNameTheirDecider(t *testing.T) {
 			t.Errorf("%s: decided by %q with judgment %q, want %q and %q", c.name, got.DecidedBy, got.Judgment, c.decider, c.ruling.Judgment)
 		}
 	}
-	for by, want := range map[string]string{"": trace.DecidedByOwner, "owner": trace.DecidedByOwner, "chief of staff": trace.ManagerDisplay, "jev": trace.DecidedByJev} {
+	for by, want := range map[string]string{"": trace.DecidedByOwner, "owner": trace.DecidedByOwner, trace.ManagerRulerName: trace.ManagerDisplay, "jev": trace.DecidedByJev} {
 		if got := contestDecider(by); got != want {
 			t.Errorf("contestDecider(%q) = %q, want %q", by, got, want)
 		}

@@ -150,7 +150,7 @@ type managerFleet struct {
 func newManagerFleet(t *testing.T, projects int, topConfig, projectConfig string) *managerFleet {
 	t.Helper()
 	ctx := context.Background()
-	home, err := os.MkdirTemp("", "chief-")
+	home, err := os.MkdirTemp("", "manager-")
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	root := filepath.Join(home, "root")

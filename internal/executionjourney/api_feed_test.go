@@ -58,7 +58,7 @@ func TestFeedOrdersEverythingThatHappened(t *testing.T) {
 
 	_, err = repo.EnsureManager(ctx, fixturekit.Stream, at(0), intake.ServiceActor)
 	fixturekit.Must(t, err)
-	managerProfile := coreadapter.Profile{Name: "chief", Backend: "fake", Model: "test"}
+	managerProfile := coreadapter.Profile{Name: "manager", Backend: "fake", Model: "test"}
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: header("osmia.trace.turn-request", "request_events", 4), AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "events", Profile: managerProfile, Prompt: "Events"})
 	fixturekit.Must(t, err)
 	manager, err := repo.ClaimTurn(ctx, fixturekit.Stream, trace.Manager, "token_events", filepath.Join(t.TempDir(), "events"), at(5))
@@ -100,7 +100,7 @@ func TestFeedOrdersEverythingThatHappened(t *testing.T) {
 		{Kind: "transition", At: at(1), Transition: &api.FeedTransition{Subject: trace.FeatureSubject, From: "", To: intake.BuildingState, Actor: "service:osmia", Reason: "because " + intake.BuildingState}},
 		{Kind: "transition", At: at(2), Transition: &api.FeedTransition{Subject: trace.UnitSubject("upload"), Unit: "upload", From: "", To: intake.UnitReady, Actor: "service:osmia", Reason: "because " + intake.UnitReady}},
 		{Kind: "transition", At: at(3), Transition: &api.FeedTransition{Subject: trace.QuestionSubject("q1"), From: "", To: "asked", Actor: "service:osmia", Reason: "because asked"}},
-		{Kind: "session", At: at(5), Session: &api.FeedSession{Agent: trace.ManagerDisplay, Role: trace.ManagerDisplay, Turn: "events", Profile: "chief", State: "done", StartedAt: at(5), EndedAt: &managerEnded, Summary: "Status written."}},
+		{Kind: "session", At: at(5), Session: &api.FeedSession{Agent: trace.ManagerDisplay, Role: trace.ManagerDisplay, Turn: "events", Profile: "manager", State: "done", StartedAt: at(5), EndedAt: &managerEnded, Summary: "Status written."}},
 		{Kind: "status", At: at(6), Status: &api.StatusView{Goal: "Ship uploads.", Attention: "Rule on the API.", Note: "Upload is ready.", Agents: []string{"A mason builds upload."}, Revision: 1, UpdatedAt: at(6)}},
 		{Kind: "session", At: at(9), Session: &api.FeedSession{Agent: "agent_mason_upload", Role: intake.MasonRole, Unit: "upload", Turn: "agent_mason_upload-turn", Profile: "default", State: "done", StartedAt: at(9), EndedAt: &masonEnded, Summary: "Built upload."}},
 		{Kind: "transition", At: at(10), Transition: &api.FeedTransition{Subject: trace.UnitSubject("upload"), Unit: "upload", From: intake.UnitReady, To: intake.UnitImplementing, Actor: "service:osmia", Reason: "because " + intake.UnitImplementing}},

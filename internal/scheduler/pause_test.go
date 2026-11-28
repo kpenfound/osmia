@@ -94,7 +94,7 @@ func TestPauseHoldsWorkerTurnsWhileManagerRuns(t *testing.T) {
 	must(t, err)
 	queueManager := func(turn string) {
 		t.Helper()
-		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_chief_" + turn, Project: project, Workstream: stream, At: f.clock.Now(), Actor: owner, Cause: "message_" + turn, Depth: 1},
+		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_manager_" + turn, Project: project, Workstream: stream, At: f.clock.Now(), Actor: owner, Cause: "message_" + turn, Depth: 1},
 			AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Message " + turn}
 		_, err := repo.EnqueueTurn(ctx, req)
 		must(t, err)
@@ -135,7 +135,7 @@ func TestPauseHoldsWorkerTurnsWhileManagerRuns(t *testing.T) {
 	must(t, c.Pass(ctx))
 	got := ranNow()
 	slices.Sort(got)
-	if want := []string{"chief_of_staff/one", "chief_of_staff/two", "mason/one"}; !slices.Equal(got, want) {
+	if want := []string{trace.Manager+"/one", trace.Manager+"/two", "mason/one"}; !slices.Equal(got, want) {
 		t.Fatalf("paused runs %v, want %v", got, want)
 	}
 	th, err := repo.Thread(stream, "alpha")

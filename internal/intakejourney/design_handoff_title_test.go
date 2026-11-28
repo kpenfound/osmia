@@ -60,7 +60,7 @@ func newHandoffTitleFixture(t *testing.T) *handoffTitleFixture {
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		prompt := intakefixture.OwnPrompt(req.Prompt)
 		if !strings.Contains(prompt, intake.HandoffTitleOpening) {
-			return intakefixture.QuestionResult(req, "session-chief", "Nothing to do."), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Nothing to do."), nil
 		}
 		f.mu.Lock()
 		f.calls = append(f.calls, prompt)
@@ -77,7 +77,7 @@ func newHandoffTitleFixture(t *testing.T) *handoffTitleFixture {
 		if err != nil || !strings.Contains(out, `"stored":true`) {
 			f.problem("set_status: %s %v", out, err)
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Titled."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Titled."), nil
 	}
 	engine.Mu.Unlock()
 	f.restart(t, f.window)
@@ -257,7 +257,7 @@ func TestDesignStartDeliversOneHandoffTitleTurnToTheThreadThatContinues(t *testi
 				t.Fatalf("hand-off turns on the continuing thread: %+v", turns)
 			}
 			if thread.Identity.ThreadID != before.Identity.ThreadID || thread.Identity.ID != before.Identity.ID {
-				t.Fatalf("the hand-off turn is not on the design's chief thread: before %+v, after %+v", before.Identity, thread.Identity)
+				t.Fatalf("the hand-off turn is not on the design's manager thread: before %+v, after %+v", before.Identity, thread.Identity)
 			}
 
 			selected, found, err := intake.DesignSelectionOf(r, f.origin)
@@ -274,11 +274,11 @@ func TestDesignStartDeliversOneHandoffTitleTurnToTheThreadThatContinues(t *testi
 				return
 			}
 			if _, err := r.Thread(f.origin, trace.Manager); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("the retired local chief remains: %v", err)
+				t.Fatalf("the retired local manager remains: %v", err)
 			}
 			for _, turn := range before.Turns {
 				if strings.Contains(turn.Request.Prompt, intake.HandoffTitleOpening) {
-					t.Fatal("the hand-off turn reached the local chief before it retired")
+					t.Fatal("the hand-off turn reached the local manager before it retired")
 				}
 			}
 			for _, member := range selected.Members {
@@ -290,7 +290,7 @@ func TestDesignStartDeliversOneHandoffTitleTurnToTheThreadThatContinues(t *testi
 					t.Fatalf("member %s status: %+v", member.Workstream, st)
 				}
 				if _, err := repo.Thread(member.Workstream, trace.Manager); !errors.Is(err, os.ErrNotExist) {
-					t.Fatalf("member %s keeps a local chief: %v", member.Workstream, err)
+					t.Fatalf("member %s keeps a local manager: %v", member.Workstream, err)
 				}
 			}
 			alias, err := f.c.Status(ctx, f.origin)

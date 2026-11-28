@@ -19,9 +19,6 @@ func TestEveryManagerSystemPromptCarriesTheRolePromptAndNamesNoSkill(t *testing.
 			t.Errorf("%s prompt does not open with the manager's role: %.200s", name, prompt)
 		}
 		lower := strings.ToLower(prompt)
-		if strings.Contains(lower, "chief") {
-			t.Errorf("%s prompt names the role chief", name)
-		}
 		for _, skill := range []string{"handoff-reports", "design-sketch", "hill-climb-evaluator", "behavioral-testing", "simple-code", "no-deltas", "lint-discipline", "unslop", "typescript-best-practices", "pr-review", "no-comments", "pr-writing", "skill"} {
 			if strings.Contains(lower, skill) {
 				t.Errorf("%s prompt names %q", name, skill)

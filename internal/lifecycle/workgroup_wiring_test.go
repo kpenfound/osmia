@@ -85,7 +85,7 @@ func TestWorkgroupManagerDispatchVisitsLeaderAfterRetainedSourceLocatorAcrossRes
 	ctx := context.Background()
 	f := newCrossRepoWiringFixture(t, map[string]string{trace.Manager: trace.Manager})
 	f.engine.Turns["*"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
-		return intakefixture.QuestionResult(req, "session-chief", "The agreed work continues."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "The agreed work continues."), nil
 	}
 	s, err := journey.Start(ctx, f.opts)
 	fixturekit.Must(t, err)
@@ -205,13 +205,13 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 			acted = true
 		}
 		if acted {
-			return intakefixture.QuestionResult(req, "session-chief", "Handled"), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Handled"), nil
 		}
 		if strings.Contains(req.Prompt, "asked by the mason: "+question1) || strings.Contains(req.Prompt, "asked by the mason: "+question2) {
-			return intakefixture.QuestionResult(req, "session-chief", "Nothing further"), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Nothing further"), nil
 		}
 		f.problem("unexpected manager turn:\n%s", req.Prompt)
-		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Nothing to do"), nil
 	}
 	f.engine.Turns[questions.TurnID("1")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		return intakefixture.QuestionResult(req, "session-"+req.Name, "Continued"), nil
@@ -385,7 +385,7 @@ func TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupManagerTurn
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Handled"), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Handled"), nil
 	}
 
 	s, err := journey.Start(ctx, opts)
@@ -415,18 +415,18 @@ func TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupManagerTurn
 
 	begin := time.Now()
 	if _, err := c.Send(ctx, f.stream2, "Second message, to the other member"); err != nil {
-		t.Fatalf("second owner message while the chief turn was held: %v", err)
+		t.Fatalf("second owner message while the manager turn was held: %v", err)
 	}
 	if elapsed := time.Since(begin); elapsed > time.Second {
-		t.Fatalf("owner message to the other member took %s while the chief turn was held", elapsed)
+		t.Fatalf("owner message to the other member took %s while the manager turn was held", elapsed)
 	}
 	begin = time.Now()
 	conv, err := c.Conversation(ctx, f.stream1)
 	if err != nil {
-		t.Fatalf("conversation read while the chief turn was held: %v", err)
+		t.Fatalf("conversation read while the manager turn was held: %v", err)
 	}
 	if elapsed := time.Since(begin); elapsed > time.Second {
-		t.Fatalf("conversation read took %s while the chief turn was held", elapsed)
+		t.Fatalf("conversation read took %s while the manager turn was held", elapsed)
 	}
 	if len(conv.Entries) == 0 || conv.Entries[0].Text != "First message" {
 		t.Fatalf("conversation does not show the first message: %+v", conv.Entries)
@@ -593,7 +593,7 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 
 			for _, e := range feed.Entries {
 				if e.Kind == "message" || e.Kind == "response" || e.Kind == "status" || e.Kind == "action" || e.Session != nil && e.Session.Role == trace.Manager {
-					t.Fatalf("workstream %s's member feed contains a shared chief entry: %+v", m, e)
+					t.Fatalf("workstream %s's member feed contains a shared manager entry: %+v", m, e)
 				}
 			}
 		}

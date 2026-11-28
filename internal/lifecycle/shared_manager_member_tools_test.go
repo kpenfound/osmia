@@ -66,12 +66,12 @@ func TestDesignProductionSharedManagerActsOnAMember(t *testing.T) {
 			}
 			results[i] = result
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Client work settled."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Client work settled."), nil
 	}
 	f.Engine.Mu.Unlock()
 	sent, err := f.C.Send(ctx, f.Stream1, marker)
 	fixturekit.Must(t, err)
-	f.Wait(t, "shared chief member turn completion", func() bool {
+	f.Wait(t, "shared manager member turn completion", func() bool {
 		entries, err := f.C.Conversation(ctx, f.Stream1)
 		fixturekit.Must(t, err)
 		for _, e := range entries.Entries {

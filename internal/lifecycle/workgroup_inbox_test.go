@@ -279,7 +279,7 @@ func (f *crossRepoInboxFixture) snapshot(s *journey.Service) (bool, string) {
 	}
 	target, host, _, close, err := s.Lifecycle().ManagerRepository(context.Background(), projects[0].Repository, f.stream1)
 	if err != nil {
-		return false, strings.Join(details, "; ") + fmt.Sprintf("; shared chief: %v", err)
+		return false, strings.Join(details, "; ") + fmt.Sprintf("; shared manager: %v", err)
 	}
 	inspect(target, host)
 	close()
@@ -378,7 +378,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			flagMu.Lock()
 			relayed = true
 			flagMu.Unlock()
-			return intakefixture.QuestionResult(req, "session-chief", "Relayed"), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Relayed"), nil
 		case !escalated1 && !escalated2 && strings.Contains(req.Prompt, "asked by the mason: "+question1) && strings.Contains(req.Prompt, "asked by the mason: "+question2):
 			flagMu.Unlock()
 			out, err := fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{string(f.stream1) + ":1", string(f.stream2) + ":1"},
@@ -389,7 +389,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			flagMu.Lock()
 			escalated1, escalated2 = true, true
 			flagMu.Unlock()
-			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Escalated"), nil
 		case !escalatedU1 && strings.Contains(req.Prompt, "asked by the mason: "+questionU1):
 			flagMu.Unlock()
 			out, err := fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{"1"},
@@ -400,7 +400,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			flagMu.Lock()
 			escalatedU1 = true
 			flagMu.Unlock()
-			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Escalated"), nil
 		case !escalatedU2 && strings.Contains(req.Prompt, "asked by the mason: "+questionU2):
 			flagMu.Unlock()
 			out, err := fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{"1"},
@@ -411,14 +411,14 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			flagMu.Lock()
 			escalatedU2 = true
 			flagMu.Unlock()
-			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Escalated"), nil
 		}
 		flagMu.Unlock()
 		if strings.Contains(req.Prompt, "asked by the mason:") || strings.Contains(req.Prompt, "escalation_1") {
-			return intakefixture.QuestionResult(req, "session-chief", "Nothing further"), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Nothing further"), nil
 		}
 		f.problem("unexpected manager turn:\n%s", req.Prompt)
-		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Nothing to do"), nil
 	}
 	f.engine.Turns[questions.TurnID("1")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		return intakefixture.QuestionResult(req, "session-"+req.Name, "Continued"), nil
@@ -634,7 +634,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 	f.waitCompleted(t, s, "completed state after restart")
 	afterThreads := threadsSnapshot()
 	if string(afterThreads) != string(beforeThreads) {
-		t.Fatalf("restart changed durable worker or chief threads: before=%s after=%s", beforeThreads, afterThreads)
+		t.Fatalf("restart changed durable worker or manager threads: before=%s after=%s", beforeThreads, afterThreads)
 	}
 	afterInbox, err := c.Inbox(ctx)
 	fixturekit.Must(t, err)

@@ -29,7 +29,7 @@ func ClaimManagerTurn(t *testing.T, repository *trace.Repository, project config
 	_, err := repository.EnsureManager(ctx, stream, now(), fixturekit.ServiceActor)
 	fixturekit.Must(t, err)
 	_, err = repository.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + in.Turn, Revision: 1, Project: project, Workstream: stream, At: now(), Actor: in.Actor, Cause: in.Cause},
-		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: in.Turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "chief", Prompt: in.Prompt})
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: in.Turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "manager", Prompt: in.Prompt})
 	fixturekit.Must(t, err)
 	_, err = repository.ClaimTurn(ctx, stream, trace.Manager, in.Token, filepath.Join(t.TempDir(), in.Directory), now())
 	fixturekit.Must(t, err)

@@ -17,14 +17,14 @@ func TestManagerGrantHoldsEveryKindsManagerTools(t *testing.T) {
 	t.Parallel()
 	for _, name := range kindregistry.ManagerToolNames() {
 		if !slices.Contains(managerGrant.Tools, name) || !slices.Contains(ManagerOrdinaryTools, name) {
-			t.Errorf("the chief's grant lacks the kind tool %s", name)
+			t.Errorf("the manager's grant lacks the kind tool %s", name)
 		}
 	}
 }
 
 func TestKindManagerToolsFollowTheWorkstreamsKind(t *testing.T) {
 	t.Parallel()
-	f, stream, repository := newReviewFixture(t, "kind-chief-tools")
+	f, stream, repository := newReviewFixture(t, "kind-manager-tools")
 	controls := &runtimeControls{}
 	scope := func(stream config.WorkstreamID) coreadapter.Scope {
 		return coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: "turn"}
@@ -56,16 +56,16 @@ func TestOrdinaryManagerToolsAreTheKindsOwn(t *testing.T) {
 		tools := ManagerOrdinaryToolsOf(test.kind)
 		for _, name := range test.has {
 			if !slices.Contains(tools, name) {
-				t.Errorf("%s chief tools lack %s", test.kind, name)
+				t.Errorf("%s manager tools lack %s", test.kind, name)
 			}
 		}
 		for _, name := range test.lacks {
 			if slices.Contains(tools, name) {
-				t.Errorf("%s chief tools hold %s", test.kind, name)
+				t.Errorf("%s manager tools hold %s", test.kind, name)
 			}
 		}
 		if !slices.Contains(tools, decideTool) {
-			t.Errorf("%s chief tools lack the shared tool %s", test.kind, decideTool)
+			t.Errorf("%s manager tools lack the shared tool %s", test.kind, decideTool)
 		}
 	}
 }

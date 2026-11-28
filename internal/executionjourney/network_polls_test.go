@@ -83,7 +83,7 @@ func TestNetworkPollingKeepsPassesAndConversationsRunning(t *testing.T) {
 			if archived {
 				managerStream = fixturekit.Quiet
 			}
-			manager, err := client.Send(ctx, managerStream, "Chief message")
+			manager, err := client.Send(ctx, managerStream, "Manager message")
 			fixturekit.Must(t, err)
 			designed, err := client.DesignMessage(ctx, design.Design.Workstream, "Design message")
 			fixturekit.Must(t, err)

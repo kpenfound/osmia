@@ -524,8 +524,8 @@ func Standing(open []shed.Entry) string {
 }
 
 // Conclude ends the debate after round n. The workstream stays in the shed:
-// the conclusion is a shed transition, and its notice gives the manager of
-// staff the reason, the dissent that stands and the packet to present to the
+// the conclusion is a shed transition, and its notice gives the manager
+// the reason, the dissent that stands and the packet to present to the
 // owner.
 func (d *Debate) Conclude(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, n int, cause, reason string, open []shed.Entry) error {
 	id := fmt.Sprintf("shed-concluded-%d", n)

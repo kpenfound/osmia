@@ -337,7 +337,7 @@ func checkFollowupContinuation(t *testing.T, f *journey.ProductionDesignFixture,
 			}
 		}
 		if _, err := repo.Thread(m, trace.Manager); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("member retains an independent chief: %v", err)
+			t.Fatalf("member retains an independent manager: %v", err)
 		}
 		groups, _, err := trace.Workgroups(repo)
 		fixturekit.Must(t, err)
@@ -351,7 +351,7 @@ func checkFollowupContinuation(t *testing.T, f *journey.ProductionDesignFixture,
 		fixturekit.Must(t, err)
 		for _, design := range f.Design.Turns {
 			if slices.ContainsFunc(manager.Turns, func(q trace.QueuedTurn) bool { return q.Request.ID == design.Request.ID }) {
-				t.Fatalf("design turn %s is on the chief's thread", design.Request.ID)
+				t.Fatalf("design turn %s is on the manager's thread", design.Request.ID)
 			}
 		}
 	}

@@ -235,7 +235,7 @@ func TestServiceHeldLandingAndStepAllowEveryConversation(t *testing.T) {
 	armed.Store(true)
 	f.Repository().WakeWorkflow()
 	fixturekit.AwaitPollSignal(t, step.entered)
-	manager, err := f.C.Send(context.Background(), a, "Chief message")
+	manager, err := f.C.Send(context.Background(), a, "Manager message")
 	fixturekit.Must(t, err)
 	designed, err := f.C.DesignMessage(context.Background(), design.Design.Workstream, "Design message")
 	fixturekit.Must(t, err)
@@ -299,7 +299,7 @@ func TestServiceIndependentLandingDraftAndChat(t *testing.T) {
 	})
 	sent, err := f.C.Send(context.Background(), a, "Reply while A and B are held")
 	fixturekit.Must(t, err)
-	pathAwait(t, f.S, "chief did not reply", func() bool { return pathTurnDone(f.Repository(), a, trace.Manager, sent.Turn) })
+	pathAwait(t, f.S, "manager did not reply", func() bool { return pathTurnDone(f.Repository(), a, trace.Manager, sent.Turn) })
 	state, err := f.Repository().Workflow(a, trace.UnitSubject("resume"))
 	fixturekit.Must(t, err)
 	if state.Value != intake.UnitApproved {

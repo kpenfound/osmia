@@ -270,9 +270,9 @@ func (f *managerFixture) managerTurn(ctx context.Context, req agent.Request, _ *
 		refused := map[string]any{"goal": managerDemoStatus.Goal, "note": managerDemoStatus.Note, "agents": []string{fixturekit.DemoAgent + " is building."}}
 		f.use(ctx, session, "status", "set_status", refused)
 		f.use(ctx, session, "status", "set_status", map[string]any{"goal": managerDemoStatus.Goal, "attention": managerDemoStatus.Attention, "note": managerDemoStatus.Note, "agents": managerDemoStatus.Agents})
-		return intakefixture.QuestionResult(req, "session-chief", managerDemoReply), nil
+		return intakefixture.QuestionResult(req, "session-manager", managerDemoReply), nil
 	case len(f.sent) > 1 && req.Name != f.sent[0].Turn && !strings.HasPrefix(req.Name, "events_"):
-		return intakefixture.QuestionResult(req, "session-chief", "The upload API stays as it is."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "The upload API stays as it is."), nil
 	case !strings.HasPrefix(req.Name, "events_"):
 
 	case strings.Contains(req.Prompt, "asked by the mason: Where does state live?"):
@@ -283,17 +283,17 @@ func (f *managerFixture) managerTurn(ctx context.Context, req agent.Request, _ *
 		for _, id := range []string{"1", "2"} {
 			f.use(ctx, session, "decide", "decide", map[string]any{"kind": "question-routing", "subject": id, "evidence": "The manager investigated the question."})
 		}
-		f.use(ctx, session, "chief", "answer", map[string]any{"question": "1", "text": managerDemoAnswer, "citations": []string{"charter#1"}})
-		f.use(ctx, session, "chief", "escalate", map[string]any{"questions": []string{"2"}, "rephrasing": "May the upload API's response change?",
+		f.use(ctx, session, "manager", "answer", map[string]any{"question": "1", "text": managerDemoAnswer, "citations": []string{"charter#1"}})
+		f.use(ctx, session, "manager", "escalate", map[string]any{"questions": []string{"2"}, "rephrasing": "May the upload API's response change?",
 			"blocked": "The reviewer's review of the upload unit.", "options": []string{"Change it", "Keep it and add an endpoint"}, "recommendation": "Keep it and add an endpoint."})
-		return intakefixture.QuestionResult(req, "session-chief", "Answered one, escalated one"), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Answered one, escalated one"), nil
 	case strings.Contains(req.Prompt, ", escalation_2 (questions 2): "+managerDemoRuling):
 		f.events["ruling"]++
-		f.use(ctx, session, "chief", "relay_ruling", map[string]any{"question": "2", "text": managerDemoRelayed, "scope": "notify"})
-		return intakefixture.QuestionResult(req, "session-chief", "Relayed"), nil
+		f.use(ctx, session, "manager", "relay_ruling", map[string]any{"question": "2", "text": managerDemoRelayed, "scope": "notify"})
+		return intakefixture.QuestionResult(req, "session-manager", "Relayed"), nil
 	}
 	f.problem("unexpected manager turn", req.Name, req.Prompt)
-	return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
+	return intakefixture.QuestionResult(req, "session-manager", "Nothing to do"), nil
 }
 
 func (f *managerFixture) start() {
@@ -467,7 +467,7 @@ func (f *managerFixture) await(phase string, ready func() bool) {
 		default:
 			t.Logf("service active lifetime_error=%v", s.Lifetime.Err())
 		}
-		t.Fatalf("chief demonstration did not complete %s: %s", phase, reason)
+		t.Fatalf("manager demonstration did not complete %s: %s", phase, reason)
 	}
 	for {
 		select {
@@ -711,7 +711,7 @@ func TestManagerAnswersOneQuestionAndEscalatesAnother(t *testing.T) {
 	if d := f.results["decide"]; len(d) != 2 || !strings.Contains(d[0], `"decision"`) || !strings.Contains(d[1], `"decision"`) {
 		t.Fatalf("decide results: %v", d)
 	}
-	manager := slices.Clone(f.results["chief"])
+	manager := slices.Clone(f.results["manager"])
 	if len(manager) > 0 {
 		manager[0] = strings.Replace(manager[0], `"what":"queued mason turn"`, `"what":"the answer to question 1 is delivered as the asker's next turn"`, 1)
 	}
@@ -720,7 +720,7 @@ func TestManagerAnswersOneQuestionAndEscalatesAnother(t *testing.T) {
 		`{"recorded":true,"batch":"escalation_2","questions":["2"]}`,
 	}
 	if !reflect.DeepEqual(manager, wantManager) {
-		t.Fatalf("chief tool results:\n%v\nwant\n%v", manager, wantManager)
+		t.Fatalf("manager tool results:\n%v\nwant\n%v", manager, wantManager)
 	}
 	if f.events["questions"] != 1 || f.events["ruling"] != 0 {
 		t.Fatalf("manager event turns: %v", f.events)
@@ -887,7 +887,7 @@ func TestManagerQuestionsAndInbox(t *testing.T) {
 	if prompt := questions.Prompt(trace.Question{Header: trace.Header{ID: "2"}, Question: managerDemoQuestion}, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: managerDemoRuling, ReturnedAnswer: managerDemoRelayed}); req.ResumeID != "session-review" || !strings.Contains(req.Prompt, prompt) {
 		t.Fatalf("answer_2 resumed %q with:\n%s", req.ResumeID, req.Prompt)
 	}
-	if manager := f.results["chief"]; len(manager) != 3 || manager[2] != `{"next":"The ruling is delivered to each asker as its next turn.","questions":["2"],"queued":[{"role":"reviewer","what":"the answer to question 2 is delivered as the asker's next turn"}],"recorded":true,"scope":"notify"}` {
+	if manager := f.results["manager"]; len(manager) != 3 || manager[2] != `{"next":"The ruling is delivered to each asker as its next turn.","questions":["2"],"queued":[{"role":"reviewer","what":"the answer to question 2 is delivered as the asker's next turn"}],"recorded":true,"scope":"notify"}` {
 		t.Fatalf("relay_ruling results: %v", manager)
 	}
 	if f.events["questions"] != 1 || f.events["ruling"] != 1 {

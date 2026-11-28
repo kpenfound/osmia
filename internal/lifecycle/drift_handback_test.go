@@ -97,6 +97,6 @@ func TestManagerHandsAHeldDriftRebaseBack(t *testing.T) {
 		t.Fatalf("the owner's request answers drift rebase %d: %v", k, err)
 	}
 	if n, err := lifecycle.ManagerHandbacks(repository, stream); err != nil || n != 0 {
-		t.Fatalf("chief handbacks after the owner's request: %d %v", n, err)
+		t.Fatalf("manager handbacks after the owner's request: %d %v", n, err)
 	}
 }

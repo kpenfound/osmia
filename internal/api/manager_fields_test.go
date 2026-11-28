@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/trace"
@@ -19,9 +18,6 @@ func TestAContestReportsTheManagersRulingsLeftAsAManagerField(t *testing.T) {
 	}
 	if fields["manager_rulings_left"] != float64(2) {
 		t.Fatalf("contest fields %v, want manager_rulings_left 2", fields)
-	}
-	if strings.Contains(string(body), "chief") {
-		t.Fatalf("contest body names the old role: %s", body)
 	}
 }
 

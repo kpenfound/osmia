@@ -106,7 +106,7 @@ func TestProjectSpecInitialDraftRetriesWithItsProblems(t *testing.T) {
 		t.Fatalf("refused first draft was not retried once: first=%d second=%d", first.Load(), second.Load())
 	}
 	if got := leaderNotices(t, f, "The workgroup spec is recorded"); len(got) != 0 {
-		t.Fatalf("a recorded draft whose refusals were never reported told the chief: %v", got)
+		t.Fatalf("a recorded draft whose refusals were never reported told the manager: %v", got)
 	}
 	if prompt, _ := firstPrompt.Load().(string); !strings.Contains(prompt, string(f.Project2)+" (its charter has no numbered rules") {
 		t.Fatalf("prompt offers citations of a charter without rules: %s", prompt)
@@ -158,7 +158,7 @@ func TestProjectSpecDraftStopsRetryingAndTheManagerAsksAgain(t *testing.T) {
 		t.Fatalf("drafting did not stop after %d refusals: calls=%d", lifecycle.ProjectSpecDraftAttempts, refused.Load())
 	}
 	if body := reported(); !strings.Contains(body, "last 3 drafts were refused") || !strings.Contains(body, "move_workstream to sketched") {
-		t.Fatalf("chief notice does not say what happened or what to do: %s", body)
+		t.Fatalf("manager notice does not say what happened or what to do: %s", body)
 	}
 	entries, err := mustRepo(t, f.S, leaderProject).Outbox(leader)
 	fixturekit.Must(t, err)
@@ -174,7 +174,7 @@ func TestProjectSpecDraftStopsRetryingAndTheManagerAsksAgain(t *testing.T) {
 
 	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
 	repo := mustRepo(t, f.S, f.Project)
-	_, apiFault = f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.InShedState, Note: "Start the review."}, manager, "chief-turn-1")
+	_, apiFault = f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.InShedState, Note: "Start the review."}, manager, "manager-turn-1")
 	if err := asError(apiFault); !intakefixture.Failed(err, api.Conflict) || !containsMessage(err, "stays sketched") || !containsMessage(err, "last 3 drafts were refused") {
 		t.Fatalf("in-shed move does not explain the wait: %v", apiFault)
 	}
@@ -189,14 +189,14 @@ func TestProjectSpecDraftStopsRetryingAndTheManagerAsksAgain(t *testing.T) {
 		_, err := fixturekit.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, validProjectSpecDraft(f))
 		return err
 	})
-	out, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "chief-turn-2")
+	out, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "manager-turn-2")
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	if out.State != intake.SketchedState || !strings.Contains(out.Detail, "drafts the workgroup spec again") {
-		t.Fatalf("chief's request not taken: %+v", out)
+		t.Fatalf("manager's request not taken: %+v", out)
 	}
-	if _, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "chief-turn-3"); !intakefixture.Failed(asError(apiFault), api.Conflict) || !containsMessage(asError(apiFault), "drafting the workgroup spec") {
+	if _, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "manager-turn-3"); !intakefixture.Failed(asError(apiFault), api.Conflict) || !containsMessage(asError(apiFault), "drafting the workgroup spec") {
 		t.Fatalf("second request while drafting: %v", apiFault)
 	}
 	fixturekit.Must(t, f.S.Lifecycle().DraftProjectSpecIfReady(ctx, mustRepo(t, f.S, f.Project), id))
@@ -218,7 +218,7 @@ func TestProjectSpecDraftStopsRetryingAndTheManagerAsksAgain(t *testing.T) {
 	if got := leaderNotices(t, f, recorded); len(got) != 1 {
 		t.Fatalf("recorded workgroup spec reported %d times after the reported refusals", len(got))
 	}
-	if _, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "chief-turn-4"); apiFault == nil || containsMessage(asError(apiFault), "drafts the workgroup spec again") {
+	if _, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "manager-turn-4"); apiFault == nil || containsMessage(asError(apiFault), "drafts the workgroup spec again") {
 		t.Fatalf("a recorded workgroup spec was drafted again: %v", apiFault)
 	}
 }

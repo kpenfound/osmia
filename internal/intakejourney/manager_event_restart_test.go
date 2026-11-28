@@ -64,7 +64,7 @@ func TestCancelledManagerEventRedeliversQuestionAfterRestart(t *testing.T) {
 	}
 	f.Engine.Mu.Unlock()
 	asking := f.Member(1, 1, 1, intakefixture.Asks(p, "1"))
-	stream := f.HandIn(t, "cancelled-chief", fixturekit.HandedDesign)
+	stream := f.HandIn(t, "cancelled-manager", fixturekit.HandedDesign)
 	intakefixture.AwaitStart(t, gate.entered)
 	intakefixture.Soon(t, "the asking turn to complete", func() bool {
 		return !f.AwaitTurn(t, stream, intake.CommitteeAgent(1), asking).CompletedAt.IsZero()
@@ -74,7 +74,7 @@ func TestCancelledManagerEventRedeliversQuestionAfterRestart(t *testing.T) {
 	}
 	f.Stop(t)
 	if err := <-cancelled; !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled chief session returned %v, want context.Canceled", err)
+		t.Fatalf("cancelled manager session returned %v, want context.Canceled", err)
 	}
 	f.Start(t)
 	f.AwaitQuestion(t, stream, "1", trace.QuestionEscalated)

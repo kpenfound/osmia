@@ -305,6 +305,6 @@ func TestAnObjectionDecisionIsEnteredAsTheManagerMadeIt(t *testing.T) {
 		t.Fatalf("the escalation %+v", moved)
 	}
 	if n := judged.Load(); n != 0 {
-		t.Fatalf("Jev was asked %d times about the chief's decisions", n)
+		t.Fatalf("Jev was asked %d times about the manager's decisions", n)
 	}
 }

@@ -1840,8 +1840,8 @@ token_env = "HEARSAY_OWNER_TOKEN"
 id = "osmia-worker"
 token_env = "HEARSAY_WORKER_TOKEN"
 [hearsay.agents.orchestrator]
-id = "osmia-chief"
-token_env = "HEARSAY_CHIEF_TOKEN"
+id = "osmia-manager"
+token_env = "HEARSAY_MANAGER_TOKEN"
 [hearsay.agents.observer]
 id = "osmia-observer"
 token_env = "HEARSAY_OBSERVER_TOKEN"
@@ -2248,8 +2248,8 @@ rules. Jev chooses the class and the sentence of the response that supports it,
 which becomes the recorded evidence. A class below its threshold, a stricter one
 for `gave_up`, or one no sentence supports falls back to the code rules, as does
 an outage, a cool-down or a missing key. The turn's classification records `by`
-as `jev` or `rule`, and a Jev class names its judgment, which the manager of
-staff's notice cites. A fallback leaves an unclear ending a clarify
+as `jev` or `rule`, and a Jev class names its judgment, which the manager's
+notice cites. A fallback leaves an unclear ending a clarify
 continuation, which counts toward `mason.max_clean_turns` like any other
 classified turn, so the unit is contested once the bound is reached.
 

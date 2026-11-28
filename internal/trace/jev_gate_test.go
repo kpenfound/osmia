@@ -94,7 +94,7 @@ func TestJevDecisionDocumentsAreWrittenByJevAndNeverByAnotherActor(t *testing.T)
 func TestJevRulesOnAnEscalationAndTheManagerRelaysIt(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)
-	manager := managerThread(t, r, "chief1")
+	manager := managerThread(t, r, "manager1")
 	for i, agent := range []string{"mason1", "mason2"} {
 		scope := askerThread(t, r, agent, "mason", "build_"+agent)
 		if _, err := r.Ask(ctx, agent, scope, "Question from "+agent, at.Add(time.Duration(i)*time.Second)); err != nil {
@@ -103,7 +103,7 @@ func TestJevRulesOnAnEscalationAndTheManagerRelaysIt(t *testing.T) {
 	}
 	for _, id := range []string{"1", "2"} {
 		req := EscalationRequest{Questions: []string{id}, Rephrasing: "Should uploads resume?", Blocked: "The upload unit.", Options: []string{"Resume", "Restart"}, Recommendation: "Resume."}
-		if _, err := r.EscalateQuestions(ctx, "chief", manager, req, at.Add(time.Hour)); err != nil {
+		if _, err := r.EscalateQuestions(ctx, "manager", manager, req, at.Add(time.Hour)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -153,7 +153,7 @@ func TestJevRulesOnAnEscalationAndTheManagerRelaysIt(t *testing.T) {
 	if err := second(r.RuleDecided(ctx, 1, "Resume.", JevActor, "judgment_ab12", when)); err == nil {
 		t.Fatal("an escalation ruled twice")
 	}
-	if _, err := r.RelayRuling(ctx, "chief", manager, "1", "Resume.", ScopeLocal, when.Add(time.Hour)); err != nil {
+	if _, err := r.RelayRuling(ctx, "manager", manager, "1", "Resume.", ScopeLocal, when.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	relayed := questionStates(t, r)["1"]

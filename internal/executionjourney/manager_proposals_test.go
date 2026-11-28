@@ -56,7 +56,7 @@ func TestManagerKicksAReadyUnit(t *testing.T) {
 		t.Fatalf("dedupe is %s, not ready", state.Value)
 	}
 	out := intakefixture.Handle(t, m.Move, `{"unit":"dedupe","to":"ready","note":"Nothing has picked it up; start it."}`)
-	if !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"by":"chief of staff"`) {
+	if !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"by":"manager"`) {
 		t.Fatalf("the kick: %s", out)
 	}
 	moved := latestOf(t, m.Repo, m.Stream, trace.UnitSubject("dedupe"))
@@ -97,7 +97,7 @@ func TestManagerMovesAUnitOutOfAContestItRaisedOrRuled(t *testing.T) {
 			t.Fatalf("the move's transition %+v", moved)
 		}
 		if n := len(p.TransitionRequests()); n != 0 {
-			t.Fatalf("Jev got %d transition requests about chief moves", n)
+			t.Fatalf("Jev got %d transition requests about manager moves", n)
 		}
 		recs := proposalRecords(t, m)
 		if len(recs) != 2 || recs[1].Authority != router.AuthorityManager || recs[1].Outcome != router.OutcomeFollowed {

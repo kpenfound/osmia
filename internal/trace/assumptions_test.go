@@ -25,7 +25,7 @@ func TestSharedAssumptionsSelectMembersAndRetainLocalHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	scope := claimCrossRepoTurn(t, wg, wg.Project(), host, Manager, Manager, "", "chief-assumptions")
+	scope := claimCrossRepoTurn(t, wg, wg.Project(), host, Manager, Manager, "", "manager-assumptions")
 	shared, err := wg.LogAssumption(ctx, Manager, scope, "Shared retry policy.", at)
 	if err != nil {
 		t.Fatal(err)

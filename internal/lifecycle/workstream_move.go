@@ -213,6 +213,7 @@ func (s *Controller) MoveWorkstream(ctx context.Context, repo *trace.Repository,
 				move = entered
 			}
 		}
+		move.By = trace.DisplayRuler(move.By)
 		return WorkstreamMoveResponse{Workstream: stream, State: res.State, Detail: records.reason, Move: &move}, nil
 	case res.Outcome == router.OutcomeHeld && res.Hold == router.HoldStale:
 		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s changed since it was read; read it again", stream)}

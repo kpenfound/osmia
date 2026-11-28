@@ -245,7 +245,7 @@ func managerDispatchDiagnostics(t *testing.T, c *service.Client, root string, pr
 	defer cancel()
 	logView := func(name string, value any, err error) {
 		data, encodeErr := json.Marshal(value)
-		t.Logf("chief %s: %s; error: %v", name, data, errors.Join(err, encodeErr))
+		t.Logf("manager %s: %s; error: %v", name, data, errors.Join(err, encodeErr))
 	}
 	conversation, err := c.Conversation(ctx, stream)
 	logView("conversation", conversation, err)
@@ -255,7 +255,7 @@ func managerDispatchDiagnostics(t *testing.T, c *service.Client, root string, pr
 	state, err := c.Status(ctx, stream)
 	logView("status", state, err)
 	for _, body := range traceBodies(t, workstreamDatabase(t, root, project, string(stream)), "workstreams/"+string(stream)+"/agents/"+trace.Manager+"/log.jsonl") {
-		t.Logf("durable chief log record: %s", body)
+		t.Logf("durable manager log record: %s", body)
 	}
 }
 
@@ -305,7 +305,7 @@ func manager(t *testing.T, turn *enforcertest.Turn, root, project, workstream st
 		tools = append(tools, tool)
 	}
 	if !slices.Equal(tools, granted) || slices.Contains(tools, "file_write") {
-		t.Fatalf("chief tools %v, want %v", tools, granted)
+		t.Fatalf("manager tools %v, want %v", tools, granted)
 	}
 }
 

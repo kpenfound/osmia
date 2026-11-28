@@ -47,7 +47,7 @@ func TestAManagerRequestAfterTheDebateConcludesIsPinned(t *testing.T) {
 			res, err := core.RouteExit(ctx, x)
 			fixturekit.Must(t, err)
 			if !res.Committed || res.Target != c.target || res.Outcome != router.OutcomeFollowed || res.Rule != "pinned" {
-				t.Fatalf("the chief's request: %+v", res)
+				t.Fatalf("the manager's request: %+v", res)
 			}
 			moved := f.AwaitSubjectMove(t, stream, intake.OwnerSubject, c.moved)
 			if moved.DecidedBy != trace.DecidedByManager || moved.Departed() || moved.Judgment != "" {

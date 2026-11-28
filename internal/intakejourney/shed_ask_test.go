@@ -364,7 +364,7 @@ func TestAnswerQueuedBehindAReservedTurnRuns(t *testing.T) {
 
 	f.Engine.Mu.Lock()
 	f.Engine.Turns["*"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
-		return intakefixture.QuestionResult(req, "session-chief", "Choice left for the planted turn"), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Choice left for the planted turn"), nil
 	}
 	f.Engine.Mu.Unlock()
 	member := intake.CommitteeAgent(1)

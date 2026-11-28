@@ -115,7 +115,7 @@ func (l *flakeFixLive) manager(t *testing.T, stream config.WorkstreamID, name st
 	ctx := context.Background()
 	for attempt := 0; ; attempt++ {
 		id := fmt.Sprintf("%s-%d", name, attempt)
-		agentID, thread, turn := "fix-chief-"+id, "fix-chief-thread-"+id, "fix-chief-turn-"+id
+		agentID, thread, turn := "fix-manager-"+id, "fix-manager-thread-"+id, "fix-manager-turn-"+id
 		now := time.Now().UTC()
 		h := func(schema, hid string) trace.Header {
 			return trace.Header{Schema: "osmia.trace." + schema, Version: trace.Version, ID: hid, Revision: 1, Project: repo.Project(), Workstream: stream, At: now, Actor: ownerActor, Cause: "flake-fix-test"}
@@ -291,7 +291,7 @@ func TestOpeningAFlakeFixHandsInTheEvidenceAndTheManagersNotesSeparately(t *test
 		}
 	}
 	if strings.Index(o.text, flakes.NotesHeading) < strings.Index(o.text, flakeFixUnitRun) || strings.Count(o.text, flakeFixNotes) != 1 {
-		t.Fatalf("the chief's notes are not a separate section after the evidence:\n%s", o.text)
+		t.Fatalf("the manager's notes are not a separate section after the evidence:\n%s", o.text)
 	}
 }
 

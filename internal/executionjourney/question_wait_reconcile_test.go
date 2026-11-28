@@ -408,12 +408,12 @@ func TestReviewerQuestionWaitOwnershipAndUncertainty(t *testing.T) {
 					}
 				}
 				if !found {
-					t.Fatal("contest has no notice for the chief and owner feed")
+					t.Fatal("contest has no notice for the manager and owner feed")
 				}
 				f.S.SetSole(&journey.ActiveProject{Repository: repo})
 				_, apiErr := recordContestedRuling(f.S, ctx, repo, stream, "resume", api.ContestedRulingRequest{Decision: "review", Note: "Review the same candidate again."}, intake.ManagerActor)
 				if apiErr != nil {
-					t.Fatalf("chief cannot resolve question contest: %+v", apiErr)
+					t.Fatalf("manager cannot resolve question contest: %+v", apiErr)
 				}
 			}
 		})

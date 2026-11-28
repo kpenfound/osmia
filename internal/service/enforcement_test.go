@@ -100,7 +100,7 @@ func TestSkillCacheFollowsLoadedRefreshPolicy(t *testing.T) {
 // manager's grant names every tool a manager turn is given.
 func TestManagerGrantNamesEveryManagerTool(t *testing.T) {
 	t.Parallel()
-	f, stream, repository := newReviewFixture(t, "chief-grant")
+	f, stream, repository := newReviewFixture(t, "manager-grant")
 	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: "turn"}
 	tools, err := managerTools(f.s.cfg, repository, &runtimeControls{}, scope, time.Now)
 	fixturekit.Must(t, err)
@@ -109,7 +109,7 @@ func TestManagerGrantNamesEveryManagerTool(t *testing.T) {
 	for _, tool := range tools {
 		names = append(names, tool.Name)
 		if !slices.Contains(managerGrant.Tools, tool.Name) {
-			t.Errorf("manager tool %s is not in the chief's grant", tool.Name)
+			t.Errorf("manager tool %s is not in the manager's grant", tool.Name)
 		}
 		if tool.Name == ProjectContextTool && tool.Effect != coreadapter.ToolRead {
 			t.Errorf("project context effect %v, want read", tool.Effect)
@@ -120,7 +120,7 @@ func TestManagerGrantNamesEveryManagerTool(t *testing.T) {
 	registered := slices.Clone(names)
 	slices.Sort(registered)
 	if !slices.Equal(registered, want) {
-		t.Errorf("ordinary chief handlers %v, want %v", registered, want)
+		t.Errorf("ordinary manager handlers %v, want %v", registered, want)
 	}
 	bound, err := Enforce(f.s.options, Enforcement{}).Threads(repository, f.s.cfg)
 	fixturekit.Must(t, err)
@@ -140,7 +140,7 @@ func TestManagerGrantNamesEveryManagerTool(t *testing.T) {
 	})
 	slices.Sort(all)
 	if !slices.Equal(wrappedNames, all) {
-		t.Errorf("production chief registry %v, want %v", wrappedNames, all)
+		t.Errorf("production manager registry %v, want %v", wrappedNames, all)
 	}
 	count := 0
 	for _, name := range turns.Grants[trace.Manager].Tools {
@@ -149,7 +149,7 @@ func TestManagerGrantNamesEveryManagerTool(t *testing.T) {
 		}
 	}
 	if count != 1 {
-		t.Errorf("production chief project context grants: %d, want one", count)
+		t.Errorf("production manager project context grants: %d, want one", count)
 	}
 	for _, name := range []string{moveUnitTool, handBackDriftTool, resolveContestedTool, ProjectContextTool} {
 		if !slices.Contains(names, name) {

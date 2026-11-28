@@ -100,7 +100,7 @@ func newPriorityRig(t *testing.T) *priorityRig {
 				r.problems = append(r.problems, fmt.Sprintf("event %s: %s %v", name, out, err))
 			}
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Nothing to do"), nil
 	}
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, "events_") {
@@ -139,7 +139,7 @@ func newPriorityRig(t *testing.T) *priorityRig {
 		default:
 			r.problems = append(r.problems, "unexpected turn "+req.Name)
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Done"), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Done"), nil
 	}
 
 	r.s, r.c = start(t, r.opts)
@@ -223,7 +223,7 @@ func (r *priorityRig) requireOwnerPause() {
 	r.t.Helper()
 	pauses := r.pauses()
 	if len(pauses) != 1 || pauses[0].Source != runtime.PauseOwner || pauses[0].Reason != "travel" || pauses[0].SetAt.IsZero() {
-		r.t.Fatalf("chief pause: %+v", pauses)
+		r.t.Fatalf("manager pause: %+v", pauses)
 	}
 }
 
@@ -294,7 +294,7 @@ func TestManagerResumesTheFactoryForTheOwner(t *testing.T) {
 	r.send(priorityResumePrompt)
 	r.requireNoProblems()
 	if got := r.pauses(); len(got) != 0 {
-		t.Fatalf("chief resume: %+v", got)
+		t.Fatalf("manager resume: %+v", got)
 	}
 }
 
@@ -339,7 +339,7 @@ func TestPriorityOrderAndManagerPauseSurviveARestart(t *testing.T) {
 		t.Fatalf("runtime priority after restart %v, want %v", got, want)
 	}
 	if got := r.pauses(); !reflect.DeepEqual(got, paused) {
-		t.Fatalf("chief pause after restart: %+v", got)
+		t.Fatalf("manager pause after restart: %+v", got)
 	}
 	r.requireRecordedFor(sent, want)
 	st, _ := r.s.store.Effective()

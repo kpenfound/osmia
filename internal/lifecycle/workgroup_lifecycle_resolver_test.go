@@ -81,7 +81,7 @@ func TestDesignProductionLifecycleResolverAcrossArchiveCleanup(t *testing.T) {
 	f.Engine.Mu.Lock()
 	f.Engine.Turns["resolver-survivor-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "survivor-after-resolver-cleanup"})
-		return intakefixture.QuestionResult(req, "session-worker", "Asked the original chief."), err
+		return intakefixture.QuestionResult(req, "session-worker", "Asked the original manager."), err
 	}
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		names, err := intakefixture.ToolNames(ctx, tools)
@@ -105,7 +105,7 @@ func TestDesignProductionLifecycleResolverAcrossArchiveCleanup(t *testing.T) {
 			}
 		}
 		_, err = fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Keep the contract.", "note": "Shared authority remains available.", "agents": []string{}})
-		return intakefixture.QuestionResult(req, "session-chief", "Read original authority."), err
+		return intakefixture.QuestionResult(req, "session-manager", "Read original authority."), err
 	}
 	f.Engine.Mu.Unlock()
 	_, err = f.C.Abandon(ctx, f.Stream1, "The owner cancelled the source member.")

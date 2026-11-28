@@ -188,7 +188,7 @@ func TestDeliveryBriefOfASharedManagerNamesTheMember(t *testing.T) {
 	controls.service.Store(s)
 	tool := controls.deliveryBrief(manager, scope)
 	if result := briefCall(t, tool, map[string]any{"review": 1, "review_revision": 1, "text": "t"}); result.Recorded || !strings.Contains(result.Reason, "must name") {
-		t.Fatalf("shared chief without a member: %+v", result)
+		t.Fatalf("shared manager without a member: %+v", result)
 	}
 	if result := briefCall(t, tool, map[string]any{"review": 1, "review_revision": 1, "text": "t", "workstream": "w_" + strings.Repeat("9", 32)}); result.Recorded || !strings.Contains(result.Reason, "does not share") {
 		t.Fatalf("a workstream outside the workgroup: %+v", result)

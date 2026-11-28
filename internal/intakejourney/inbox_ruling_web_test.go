@@ -42,7 +42,7 @@ func TestProjectPaneWebRulingResumesBothOriginsOnce(t *testing.T) {
 			f.Engine.Mu.Lock()
 			f.Engine.Turns["web-ruling-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "May the acknowledged offset contract change?"})
-				return intakefixture.QuestionResult(req, "web-worker", "Asked the chief."), err
+				return intakefixture.QuestionResult(req, "web-worker", "Asked the manager."), err
 			}
 			f.Engine.Turns[questions.TurnID("1")] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 				return intakefixture.QuestionResult(req, "web-worker", "Continued the original asking turn."), nil
@@ -54,13 +54,13 @@ func TestProjectPaneWebRulingResumesBothOriginsOnce(t *testing.T) {
 						"rephrasing": "May the acknowledged offset contract change?", "blocked": "Both asking origins.",
 						"options": []string{"Keep", "Change"}, "recommendation": "Keep the contract stable.",
 					})
-					return intakefixture.QuestionResult(req, "web-chief", "Asked the owner."), err
+					return intakefixture.QuestionResult(req, "web-manager", "Asked the owner."), err
 				}
 				if strings.Contains(req.Prompt, "Relay the recorded decision") && relay.Load() {
 					_, err := fixturekit.CallTool(ctx, tools, questions.RelayRulingTool, map[string]any{"question": string(f.Stream2) + ":1", "text": answer, "scope": "local"})
-					return intakefixture.QuestionResult(req, "web-chief", "Relayed to both origins."), err
+					return intakefixture.QuestionResult(req, "web-manager", "Relayed to both origins."), err
 				}
-				return intakefixture.QuestionResult(req, "web-chief", "Following the agreed contract."), nil
+				return intakefixture.QuestionResult(req, "web-manager", "Following the agreed contract."), nil
 			}
 			f.Engine.Mu.Unlock()
 			f.SharedDesign().LifecycleWorker(t, f.Project, f.Stream1, "worker_first", "web-ruling-ask", "Check the contract.")

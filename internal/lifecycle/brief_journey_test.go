@@ -107,7 +107,7 @@ func TestDeliveryEntryFallsBackWhenTheManagerRecordsNoBrief(t *testing.T) {
 	j.run(t)
 	j.awaitStarts(t, 1)
 	if entries := j.entries(t, stream); len(entries) != 0 {
-		t.Fatalf("the delivery entry is listed while the chief's turn runs: %+v", entries)
+		t.Fatalf("the delivery entry is listed while the manager's turn runs: %+v", entries)
 	}
 
 	j.manager.release()
@@ -285,7 +285,7 @@ func TestSharedManagerBriefsEachMemberWithItsOwnItems(t *testing.T) {
 		recordBrief(read[second], second, "The second member's brief.", itemSecond),
 		recordBrief(read[second], "", "No member named.", "Nobody's item"))
 	if len(results) != 3 || !strings.Contains(results[0], `"recorded":true`) || !strings.Contains(results[1], `"recorded":true`) || !strings.Contains(results[2], `"recorded":false`) || !strings.Contains(results[2], "must name") {
-		t.Fatalf("the shared chief's calls: %q", results)
+		t.Fatalf("the shared manager's calls: %q", results)
 	}
 	want := map[config.WorkstreamID][2]string{first: {itemFirst, itemSecond}, second: {itemSecond, itemFirst}}
 	bodies := map[config.WorkstreamID]string{}

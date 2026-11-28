@@ -120,7 +120,7 @@ func questionJourneyTurn(t *testing.T, f *journey.ShedFixture, stream config.Wor
 
 func awaitQuestionJourneyQuiet(t *testing.T, f *journey.ShedFixture, stream config.WorkstreamID) {
 	t.Helper()
-	awaitQuestionJourney(t, f, "chief notices and turn completion", func() bool {
+	awaitQuestionJourney(t, f, "manager notices and turn completion", func() bool {
 		outbox, err := f.Repository().Outbox(stream)
 		fixturekit.Must(t, err)
 		for _, entry := range outbox {

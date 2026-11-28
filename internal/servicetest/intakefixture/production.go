@@ -228,7 +228,7 @@ func (f *ProductionDesign) Timeout(t *testing.T, phase string) {
 				f.LogTurns(t, manager, host)
 				close()
 			} else {
-				t.Logf("shared chief error=%v", err)
+				t.Logf("shared manager error=%v", err)
 			}
 		}
 	}
@@ -330,7 +330,7 @@ func (f *ProductionDesign) OwnerSummary(t *testing.T) {
 		}
 		t.Logf("OWNER turn=%s request=%s revision=%d project=%s workstream=%s actor=%+v text-matches=%v status=%s claim=%+v response=%s completed=%v failure=%s", turn.Request.TurnID, turn.Request.ID, turn.Request.Revision, turn.Request.Project, turn.Request.Workstream, turn.Request.Actor, turn.Request.Prompt == sent.Text, turn.Status(), turn.Claim, response, turn.CompletedAt, failure)
 	}
-	op, err := thread.TurnOperation(manager.Project(), "workgroup-chief-"+sent.Turn, thread.TurnInput{Workstream: host, Agent: trace.Manager, Turn: sent.Turn})
+	op, err := thread.TurnOperation(manager.Project(), "workgroup-manager-"+sent.Turn, thread.TurnInput{Workstream: host, Agent: trace.Manager, Turn: sent.Turn})
 	if err != nil {
 		t.Logf("OWNER operation error=%v", err)
 		return
@@ -490,7 +490,7 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 			}
 		}
 		if _, err := repo.Thread(m, trace.Manager); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("member retains an independent chief: %v", err)
+			t.Fatalf("member retains an independent manager: %v", err)
 		}
 		groups, _, err := trace.Workgroups(repo)
 		fixturekit.Must(t, err)
@@ -503,11 +503,11 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 		close()
 		fixturekit.Must(t, err)
 		if manager.Identity.Role != trace.Manager {
-			t.Fatalf("the workgroup's chief thread has role %q", manager.Identity.Role)
+			t.Fatalf("the workgroup's manager thread has role %q", manager.Identity.Role)
 		}
 		for _, design := range f.Design.Turns {
 			if slices.ContainsFunc(manager.Turns, func(q trace.QueuedTurn) bool { return q.Request.ID == design.Request.ID }) {
-				t.Fatalf("design turn %s is on the chief's thread", design.Request.ID)
+				t.Fatalf("design turn %s is on the manager's thread", design.Request.ID)
 			}
 		}
 	}
@@ -860,7 +860,7 @@ func (f *ProductionDesign) Setup(t *testing.T, handIn bool) {
 			_, err = fixturekit.CallTool(ctx, tools, intake.DraftBriefToolName, map[string]any{"content": ProductionBrief, "projects": []config.ProjectID{*f.Project, *f.Project2}})
 			return QuestionResult(req, "session-design", ProductionBrief), err
 		}
-		return QuestionResult(req, "session-chief", "The service is following the agreed design."), nil
+		return QuestionResult(req, "session-manager", "The service is following the agreed design."), nil
 	}
 	f.Engine.Mu.Unlock()
 	if handIn {

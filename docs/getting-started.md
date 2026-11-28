@@ -190,8 +190,8 @@ Save and quit. The command records your edit as the next charter revision and
 prints its number; there is nothing further to ratify, and `osmia status` then
 shows `Charter: 2 rules, revision 2`. To write the charter from a file
 instead, use `osmia edit charter p_… --from charter.md`; **Project management** on a project card or in the Settings view
-opens the same revision-pinned charter editor and shows its rule count. Rules later proposed by the manager of
-staff are decided with `osmia charter`. See [charter](charter.md) for the
+opens the same revision-pinned charter editor and shows its rule count. Rules later proposed by the manager
+are decided with `osmia charter`. See [charter](charter.md) for the
 format.
 
 Register another repo as its own project:

@@ -73,7 +73,7 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 	f.Engine.Mu.Lock()
 	f.Engine.Turns["lifecycle-project-journal"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "May the cross-repo acknowledgment contract change?"})
-		return intakefixture.QuestionResult(req, "session-journal-worker", "Asked the original shared chief."), err
+		return intakefixture.QuestionResult(req, "session-journal-worker", "Asked the original shared manager."), err
 	}
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		names, err := intakefixture.ToolNames(ctx, tools)
@@ -100,7 +100,7 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 			}
 		}
 		_, err = fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Preserve the pending project decision.", "note": "The contract request remains pending.", "agents": []string{}})
-		return intakefixture.QuestionResult(req, "session-journal-chief", "The pending request remains in the original authority."), err
+		return intakefixture.QuestionResult(req, "session-journal-manager", "The pending request remains in the original authority."), err
 	}
 	f.Engine.Mu.Unlock()
 	journey.LifecycleAwait(t, f, "production member admission", func() bool {

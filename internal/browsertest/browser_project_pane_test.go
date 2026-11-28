@@ -99,7 +99,7 @@ func TestBrowserProjectPaneKeepsProjectInboxDecisionsSeparate(t *testing.T) {
 		must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: demoRole, ThreadID: "pane_worker_thread"}))
 		q, err := repo.Ask(ctx, "pane_worker", claim("pane_worker", "pane_worker_thread", "pane_worker_turn"), "May this project's contract change?", demoStart)
 		must(t, err)
-		managerScope := claim(trace.Manager, manager.Identity.ThreadID, "pane_chief_turn")
+		managerScope := claim(trace.Manager, manager.Identity.ThreadID, "pane_manager_turn")
 		managerScope.Role = trace.Manager
 		_, err = repo.EscalateQuestions(ctx, trace.Manager, managerScope, trace.EscalationRequest{Questions: []string{q.ID}, Rephrasing: "May this project's contract change?", Blocked: "The asking worker.", Recommendation: "Keep the contract."}, demoStart)
 		must(t, err)

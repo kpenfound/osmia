@@ -36,9 +36,6 @@ func TestCapacityToolAndStatusSerializeUnboundedPools(t *testing.T) {
 			t.Fatalf("capacity tool description lacks %q: %s", want, tool.Description)
 		}
 	}
-	if strings.Contains(strings.ToLower(tool.Description), "chief") {
-		t.Fatalf("capacity tool description names the role chief: %s", tool.Description)
-	}
 	out, err := tool.Handle(ctx, json.RawMessage(`{}`))
 	fixturekit.Must(t, err)
 	fromTool := fixturekit.CapacityWire(t, out)

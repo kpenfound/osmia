@@ -125,7 +125,7 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 		t.Fatalf("transfer has no unique shared route: pointer=%s groups=%+v", pointer, groups)
 	}
 	if _, err := repo.ManagerThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("local chief remains: %v", err)
+		t.Fatalf("local manager remains: %v", err)
 	}
 	_, err = repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "join-notice", Revision: 1, Project: f.Project, Workstream: f.Stream1, At: fixturekit.DemoStart.Add(-time.Hour), Actor: intake.OwnerActor, Cause: "owner"}, Subject: "join-notice", To: "recorded", Reason: "Observe member transfer"}, Events: []trace.Event{{ID: "join-notice", Kind: "notice", Body: "Member transfer remains pending."}}})
 	fixturekit.Must(t, err)
@@ -186,7 +186,7 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 		close()
 		fixturekit.Must(t, err)
 		if manager.Identity != shared.Identity {
-			t.Fatal("shared chief identity changed")
+			t.Fatal("shared manager identity changed")
 		}
 	}
 	entries, err := os.ReadDir(filepath.Join(f.S.Current().Root.String(), "workgroups"))
@@ -267,7 +267,7 @@ func TestDraftWorkgroupResumesAuthenticatedRetractedMemberAcrossRestart(t *testi
 	close()
 	fixturekit.Must(t, err)
 	if manager.Identity != original.Identity {
-		t.Fatal("retry replaced original shared chief")
+		t.Fatal("retry replaced original shared manager")
 	}
 	awaitProjectSpec(f, t)
 	bare := config.WorkstreamID("w_00000000000000000000000000000129")

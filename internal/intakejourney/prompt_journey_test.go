@@ -75,7 +75,7 @@ func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheMa
 	engine.Mu.Lock()
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.Contains(req.Prompt, intake.HandoffTitleOpening) {
-			return intakefixture.QuestionResult(req, "chief-session", "Titled."), nil
+			return intakefixture.QuestionResult(req, "manager-session", "Titled."), nil
 		}
 		if req.SystemPrompt != intake.DesignRolePrompt {
 			return intakefixture.QuestionResult(req, "other-session", "Nothing to do."), nil
@@ -185,7 +185,7 @@ func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheMa
 			t.Errorf("design turn %d did not keep the system prompt its session began with", i+1)
 		}
 		if strings.Contains(turn.SystemPrompt, "Current kind of the brief") || strings.Contains(turn.SystemPrompt, "## Workstream kinds") || strings.Contains(turn.Prompt, "## Operating policy") {
-			t.Errorf("design turn %d holds changing context in its system prompt or the chief's policy in its prompt", i+1)
+			t.Errorf("design turn %d holds changing context in its system prompt or the manager's policy in its prompt", i+1)
 		}
 	}
 
@@ -214,17 +214,17 @@ func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheMa
 	manager, err := repo.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	if manager.Identity.Role != trace.Manager || manager.Identity.ThreadID != trace.Manager || manager.Identity.ID == designThread.Identity.ID {
-		t.Fatalf("the chief's thread %+v is not its own, apart from the design thread %+v", manager.Identity, designThread.Identity)
+		t.Fatalf("the manager's thread %+v is not its own, apart from the design thread %+v", manager.Identity, designThread.Identity)
 	}
 	opening := manager.Turns[0].Request
 	seeds := append(strings.Split(content, "\n"), intake.HandoffTitleOpening, "## Transcript", "Owner: message 1", "Agent: Reply to message 1", "Owner: message 5", "Agent: Reply to message 5")
 	for _, want := range seeds {
 		if !strings.Contains(opening.Prompt, want) {
-			t.Fatalf("the chief's first turn is not seeded from the brief and the transcript, it lacks %q:\n%s", want, opening.Prompt)
+			t.Fatalf("the manager's first turn is not seeded from the brief and the transcript, it lacks %q:\n%s", want, opening.Prompt)
 		}
 	}
 	if opening.AgentID != trace.Manager || opening.SystemPrompt == intake.DesignRolePrompt {
-		t.Fatalf("the chief's first turn: agent %q, designer prompt %v", opening.AgentID, opening.SystemPrompt == intake.DesignRolePrompt)
+		t.Fatalf("the manager's first turn: agent %q, designer prompt %v", opening.AgentID, opening.SystemPrompt == intake.DesignRolePrompt)
 	}
 	for _, q := range manager.Turns {
 		turn, ok := log.Turn(q.Request.TurnID)
@@ -232,16 +232,16 @@ func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheMa
 			continue
 		}
 		if turn.ResumeID == "design-session" || turn.SystemPrompt == intake.DesignRolePrompt || turn.Model == "design-model" || slices.Contains(turn.Skills, designerSkillRef) || slices.Contains(turn.Skills, kindSkillRef) {
-			t.Errorf("chief turn %s took up the design session: resume %q model %q skills %v", turn.Name, turn.ResumeID, turn.Model, turn.Skills)
+			t.Errorf("manager turn %s took up the design session: resume %q model %q skills %v", turn.Name, turn.ResumeID, turn.Model, turn.Skills)
 		}
-		if turn.ResumeID != "" && turn.ResumeID != "chief-session" {
-			t.Errorf("chief turn %s resumed %q", turn.Name, turn.ResumeID)
+		if turn.ResumeID != "" && turn.ResumeID != "manager-session" {
+			t.Errorf("manager turn %s resumed %q", turn.Name, turn.ResumeID)
 		}
 		if slices.Contains(turn.Tools, intake.DraftBriefToolName) || !slices.Contains(turn.Tools, "decide") && !slices.Contains(turn.Tools, "set_status") {
-			t.Errorf("chief turn %s was offered %v, not the chief's tools", turn.Name, turn.Tools)
+			t.Errorf("manager turn %s was offered %v, not the manager's tools", turn.Name, turn.Tools)
 		}
 		if !strings.Contains(turn.Prompt, "## Operating policy") || strings.Contains(turn.SystemPrompt, "## Operating policy") {
-			t.Errorf("chief turn %s does not carry the current policy in its newest turn only", turn.Name)
+			t.Errorf("manager turn %s does not carry the current policy in its newest turn only", turn.Name)
 		}
 	}
 	if after, err := repo.DesignerThread(stream); err != nil || len(after.Turns) != len(designThread.Turns) {

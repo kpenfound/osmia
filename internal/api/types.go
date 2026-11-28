@@ -1229,8 +1229,8 @@ const (
 // manager sent the owner as one ask, and Asked holds its questions as
 // their askers put them. Unit names a contested unit, or the unit an
 // amendment was filed from; Amendment names an amendment. Revision is the
-// revision of the record the decision is taken on. Question is the manager of
-// staff's rephrasing of an escalation, and the service's statement of the
+// revision of the record the decision is taken on. Question is the manager's
+// rephrasing of an escalation, and the service's statement of the
 // decision for the other kinds. A publication entry reports a publication
 // whose last attempts failed: it takes no decision, its Revision is the owner
 // approval being published and its Options are empty. A checks entry reports
@@ -1351,16 +1351,16 @@ const (
 	TurnStopped TurnState = "stopped"
 )
 
-// ConversationResponse lists a workstream's conversation with its manager of
-// staff, oldest first.
+// ConversationResponse lists a workstream's conversation with its manager,
+// oldest first.
 type ConversationResponse struct {
 	Workstream config.WorkstreamID `json:"workstream"`
 	Entries    []ConversationEntry `json:"entries"`
 }
 
-// ConversationEntry is an owner message (kind "message"), the manager of
-// staff's final response to it (kind "response"), or something the manager of
-// staff did on the owner's behalf (kind "action"), such as resolving a
+// ConversationEntry is an owner message (kind "message"), the manager's
+// final response to it (kind "response"), or something the manager
+// did on the owner's behalf (kind "action"), such as resolving a
 // contested unit. A message and its response carry the state of the turn that
 // answers the message, and At is when the message was accepted, the response
 // captured or the action recorded.

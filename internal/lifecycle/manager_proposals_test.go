@@ -39,14 +39,14 @@ func TestAManagerMoveReturnsAReopenedWorkstreamToDelivered(t *testing.T) {
 
 	out := intakefixture.Handle(t, tool, `{"to":"delivered","note":"Nothing needed repair; the pull request is as published."}`)
 	if !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"state":"delivered"`) {
-		t.Fatalf("the chief's move: %s", out)
+		t.Fatalf("the manager's move: %s", out)
 	}
 	moved := lastOn(t, p.Repository, p.Stream, trace.FeatureSubject)
 	if moved.To != intake.DeliveredState || moved.DecidedBy != trace.DecidedByManager || moved.Judgment != "" || moved.Departed() {
 		t.Fatalf("the transition %+v", moved)
 	}
 	if n := len(jev.TransitionRequests()); n != 0 {
-		t.Fatalf("Jev was asked %d times about a chief move", n)
+		t.Fatalf("Jev was asked %d times about a manager move", n)
 	}
 	records := routeFor(t, p.Repository, p.Stream, "ws.move_proposal")
 	if len(records) != 1 || records[0].Outcome != router.OutcomeFollowed || records[0].Authority != router.AuthorityManager {

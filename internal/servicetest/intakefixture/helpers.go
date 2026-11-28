@@ -672,7 +672,7 @@ func (d *ExitDemo) Manager(ctx context.Context, req agent.Request, _ *agent.Turn
 			d.Problem("%s of %q: %s %v", status.ToolName, title, out, err)
 		}
 	}
-	return &agent.Result{ClaudeID: "session-chief", ResultText: "Noted", SessionDir: req.SessionDir, NumTurns: 1}, nil
+	return &agent.Result{ClaudeID: "session-manager", ResultText: "Noted", SessionDir: req.SessionDir, NumTurns: 1}, nil
 }
 
 const DoneTool = "done"
@@ -783,7 +783,7 @@ func (c *Manager) Turn(ctx context.Context, req agent.Request, _ *agent.Turn, to
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return QuestionResult(req, "session-chief", "Chosen"), nil
+	return QuestionResult(req, "session-manager", "Chosen"), nil
 }
 
 // Choose calls one question tool and reports a refusal, except one saying the
@@ -1312,8 +1312,8 @@ func TransitionByID(t *testing.T, repository *trace.Repository, stream config.Wo
 func Turn(id config.ProjectID, name string) string { return string(id[len(id)-4:]) + "-" + name }
 
 const (
-	ManagerAgent  = "agent_chief"
-	ManagerThread = "thread_chief"
+	ManagerAgent  = "agent_manager"
+	ManagerThread = "thread_manager"
 	Quiet         = config.WorkstreamID("w_fedcba9876543210fedcba9876543210")
 )
 

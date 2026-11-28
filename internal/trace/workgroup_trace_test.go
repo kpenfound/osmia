@@ -159,7 +159,7 @@ func TestCrossRepoWorkgroupSharesOneManagerThreadAcrossMembersAndARestart(t *tes
 		t.Fatal(err)
 	}
 
-	managerScope := claimCrossRepoTurn(t, wg, wg.Project(), host, Manager, Manager, "", "chief1")
+	managerScope := claimCrossRepoTurn(t, wg, wg.Project(), host, Manager, Manager, "", "manager1")
 	if _, err := wg.AnswerQuestion(ctx, Manager, managerScope, string(crossMember1)+":"+q1.ID, "member1's answer", []string{"spec#1"}, at); err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestCrossRepoRouteAmendmentLandsOnAskingMemberAndResumes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	managerScope := claimCrossRepoTurn(t, wg, wg.Project(), host, Manager, Manager, "", "chief1")
+	managerScope := claimCrossRepoTurn(t, wg, wg.Project(), host, Manager, Manager, "", "manager1")
 	outcome, err := wg.FileAmendment(ctx, Manager, managerScope, AmendmentRequest{
 		QuestionID: string(crossMember2) + ":" + q.ID, Citations: []string{"plan#resume"}, Change: "Widen the retry window", Reason: "The reviewer found a gap",
 		Seal: 1, SealRevision: 1, SpecHash: "sha256:test",
@@ -281,7 +281,7 @@ func TestCrossRepoContractChangeBecomesProjectLevelAmendment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	managerScope := claimCrossRepoTurn(t, wg, wg.Project(), host, Manager, Manager, "", "chief1")
+	managerScope := claimCrossRepoTurn(t, wg, wg.Project(), host, Manager, Manager, "", "manager1")
 	outcome, err := wg.FileAmendment(ctx, Manager, managerScope, AmendmentRequest{
 		QuestionID: string(crossMember1) + ":" + q.ID, Citations: []string{"spec#5"}, Change: "Change the retry contract", Reason: "The contract no longer fits",
 		Seal: 1, SealRevision: 1, SpecHash: "sha256:test",
@@ -333,7 +333,7 @@ func TestCrossRepoContractCitingRouteAmendmentReturnsWithinBoundedTime(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	managerScope := claimCrossRepoTurn(t, wg, wg.Project(), host, Manager, Manager, "", "chief1")
+	managerScope := claimCrossRepoTurn(t, wg, wg.Project(), host, Manager, Manager, "", "manager1")
 
 	type result struct {
 		outcome AmendmentOutcome
@@ -386,7 +386,7 @@ func TestCrossRepoConsolidatedEscalationSurvivesRestartAndRelayResumesBothOrigin
 		t.Fatal(err)
 	}
 
-	managerScope := claimCrossRepoTurn(t, wg, wg.Project(), host, Manager, Manager, "", "chief1")
+	managerScope := claimCrossRepoTurn(t, wg, wg.Project(), host, Manager, Manager, "", "manager1")
 	batch, err := wg.EscalateQuestions(ctx, Manager, managerScope, EscalationRequest{
 		Questions:  []string{string(crossMember1) + ":" + affected1.ID, string(crossMember2) + ":" + affected2.ID},
 		Rephrasing: "Does the shared retry budget apply to both repos?", Blocked: "both units", Recommendation: "Apply it to both",
@@ -424,10 +424,10 @@ func TestCrossRepoConsolidatedEscalationSurvivesRestartAndRelayResumesBothOrigin
 		t.Fatal(err)
 	}
 
-	if err := wg.AbandonTurn(ctx, host, Manager, "chief1", at); err != nil {
+	if err := wg.AbandonTurn(ctx, host, Manager, "manager1", at); err != nil {
 		t.Fatal(err)
 	}
-	managerScope2 := claimCrossRepoTurn(t, wg, wg.Project(), host, Manager, Manager, "", "chief2")
+	managerScope2 := claimCrossRepoTurn(t, wg, wg.Project(), host, Manager, Manager, "", "manager2")
 	relayed, err := wg.RelayRuling(ctx, Manager, managerScope2, string(crossMember1)+":"+affected1.ID, "Apply the shared retry budget", ScopeLocal, at)
 	if err != nil {
 		t.Fatal(err)

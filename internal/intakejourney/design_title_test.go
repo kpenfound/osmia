@@ -51,7 +51,7 @@ func TestDesignTitleToolRecordsReplacesAndSurvivesRestart(t *testing.T) {
 				postStart = names
 				mu.Unlock()
 			}
-			return intakefixture.QuestionResult(req, "session-chief", "ok"), nil
+			return intakefixture.QuestionResult(req, "session-manager", "ok"), nil
 		}
 		if want := []string{"draft_brief", "file_read", "read_repo", "set_title"}; !slices.Equal(names, want) {
 			fail("design tools %v, want %v", names, want)

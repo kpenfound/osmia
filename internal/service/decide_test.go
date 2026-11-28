@@ -43,12 +43,12 @@ func newDecideKit(t *testing.T, p *gateJev, role string) *decideKit {
 	t.Helper()
 	f := newGateFixture(t, p)
 	fixturekit.RecordCharter(t, f.repo, "1. Every change has a test.\n")
-	manager := claimThread(t, f.repo, f.now(), "chief", trace.Manager, "chief1", "")
+	manager := claimThread(t, f.repo, f.now(), "manager", trace.Manager, "manager1", "")
 	asker := claimThread(t, f.repo, f.now(), "asker", role, "build_asker", "unit1")
 	_, err := f.repo.Ask(context.Background(), "asker", asker, "Should uploads resume after a restart?", f.now())
 	fixturekit.Must(t, err)
 	k := &decideKit{f: f, p: p, manager: manager}
-	k.turn(t, "chief", manager)
+	k.turn(t, "manager", manager)
 	return k
 }
 
@@ -101,8 +101,8 @@ func TestAConfidentRoutingPickBindsTheManagersOutcomeToolsInLaterTurns(t *testin
 	if got := k.call(t, k.tools["escalate"], escalateUpload); got["recorded"] != false || !strings.Contains(got["reason"].(string), "Jev decided answer") {
 		t.Fatalf("escalate against the pick: %v", got)
 	}
-	later := claimThread(t, k.f.repo, k.f.now(), "chief2", trace.Manager, "chief2", "")
-	k.turn(t, "chief2", later)
+	later := claimThread(t, k.f.repo, k.f.now(), "manager2", trace.Manager, "manager2", "")
+	k.turn(t, "manager2", later)
 	if again := k.call(t, k.decide, decideQuestion); again["decision"] != "binding" || again["pick"] != "answer" {
 		t.Fatalf("decide again: %v", again)
 	}

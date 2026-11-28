@@ -180,7 +180,7 @@ func TestIncompleteCloudAttemptKeepsTheRetryAndContest(t *testing.T) {
 		return e.TransitionID == CheckDocumentID("resume", 1)+"-incomplete" && e.Event.Kind == trace.NoticeKind
 	})
 	if i < 0 || !strings.Contains(outbox[i].Event.Body, "held in checking") || !strings.Contains(outbox[i].Event.Body, cloudPrompt+" every check") {
-		t.Fatalf("chief notices %+v", outbox)
+		t.Fatalf("manager notices %+v", outbox)
 	}
 	runChecks(t, f.s, repository, stream)
 	if len(local.Runs()) != 1 || len(cloud.Runs()) != 1 {

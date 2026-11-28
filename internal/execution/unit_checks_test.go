@@ -482,7 +482,7 @@ func TestIncompleteChecksHoldTheUnitAndRunAgain(t *testing.T) {
 		return e.TransitionID == CheckDocumentID("resume", 1)+"-incomplete" && e.Event.Kind == trace.NoticeKind
 	})
 	if i < 0 || !strings.Contains(outbox[i].Event.Body, "held in checking") || !strings.Contains(outbox[i].Event.Body, "engine unreachable") {
-		t.Fatalf("chief notices %+v", outbox)
+		t.Fatalf("manager notices %+v", outbox)
 	}
 
 	runChecks(t, f.s, repository, stream)

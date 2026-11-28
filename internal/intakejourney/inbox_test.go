@@ -117,7 +117,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 			case <-relayed:
 
 				f.Mu.Unlock()
-				return intakefixture.QuestionResult(req, "session-chief", "Already relayed"), nil
+				return intakefixture.QuestionResult(req, "session-manager", "Already relayed"), nil
 			default:
 			}
 			if strings.Contains(req.Prompt, "<<< osmia:owner_response") {
@@ -144,19 +144,19 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 			if !strings.Contains(req.Prompt, "## Notices\n"+notice) {
 				f.Problem("event turn context lacks the notice:\n%s", req.Prompt)
 			}
-			return intakefixture.QuestionResult(req, "session-chief", "Relayed"), f.Use(ctx, tools, "relay-local", "relay_ruling", map[string]any{"question": "1", "text": "Add no dependency.", "scope": "local"})
+			return intakefixture.QuestionResult(req, "session-manager", "Relayed"), f.Use(ctx, tools, "relay-local", "relay_ruling", map[string]any{"question": "1", "text": "Add no dependency.", "scope": "local"})
 		case strings.Contains(req.Prompt, "Where does state live?") && strings.Contains(req.Prompt, "Is the log format fixed?") && strings.Contains(req.Prompt, "is open"):
 			defer f.Mu.Unlock()
-			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), f.Use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1", "2"},
+			return intakefixture.QuestionResult(req, "session-manager", "Escalated"), f.Use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1", "2"},
 				"rephrasing": "Are state files and the log format part of the contract?", "blocked": "The upload unit and its review.", "options": []string{"Both fixed", "Both free"}, "recommendation": "Both fixed."})
 		case strings.Contains(req.Prompt, "is open, asked by the mason: May I add a dependency?"):
 			defer f.Mu.Unlock()
-			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), f.Use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1"},
+			return intakefixture.QuestionResult(req, "session-manager", "Escalated"), f.Use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1"},
 				"rephrasing": "May the index unit add a dependency?", "blocked": "The index unit.", "options": []string{}, "recommendation": "No."})
 		}
 		f.Problem("unexpected manager turn:\n%s", req.Prompt)
 		f.Mu.Unlock()
-		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Nothing to do"), nil
 	}
 
 	states := func(r *trace.Repository, ws config.WorkstreamID) map[string]string {

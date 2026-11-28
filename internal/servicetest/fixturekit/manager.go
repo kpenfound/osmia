@@ -12,8 +12,8 @@ import (
 )
 
 // AnswerManager captures final as the response of the workstream's claimed
-// manager turn and completes it, as a finished turn of the manager of
-// staff would.
+// manager turn and completes it, as a finished turn of the manager
+// would.
 func AnswerManager(t *testing.T, repo *trace.Repository, ws config.WorkstreamID, turn, final string) {
 	t.Helper()
 	ctx := context.Background()

@@ -373,7 +373,7 @@ func TestFactoryContextReadsCompleteCheckOutput(t *testing.T) {
 
 func TestManagerInspectsMasonCandidateAndCommissionsWork(t *testing.T) {
 	t.Parallel()
-	c := newContestFixture(t, "chief-engineering-tools")
+	c := newContestFixture(t, "manager-engineering-tools")
 	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.Manager, Thread: trace.Manager, Turn: "events_1"}
 	raw, err := inspectCode(c.f.s.about(c.repo), c.repo, scope, c.f.clock.Now).Handle(context.Background(), json.RawMessage(`{"unit":"resume","path":"`+fixturekit.MasonWrote+`"}`))
 	fixturekit.Must(t, err)
@@ -418,11 +418,11 @@ func TestManagerInspectsMasonCandidateAndCommissionsWork(t *testing.T) {
 		state, err := c.repo.Workflow(c.stream, trace.UnitSubject("resume"))
 		fixturekit.Must(t, err)
 		if state.Value != UnitReviewing {
-			t.Fatalf("chief's own request parked unrelated unit: %s", state.Value)
+			t.Fatalf("manager's own request parked unrelated unit: %s", state.Value)
 		}
 		return
 	}
-	t.Fatal("chief lacks replanning tool")
+	t.Fatal("manager lacks replanning tool")
 }
 
 func TestManagerRecoveryCannotApproveItsOwnCandidate(t *testing.T) {
@@ -433,7 +433,7 @@ func TestManagerRecoveryCannotApproveItsOwnCandidate(t *testing.T) {
 		t.Fatal(out)
 	}
 	if intakefixture.UnitWorkflow(t, m.repo, m.stream, "resume").Value != UnitReviewing {
-		t.Fatal("chief bypassed independent review")
+		t.Fatal("manager bypassed independent review")
 	}
 }
 
@@ -508,7 +508,7 @@ func TestReplanningWaitsForWritersWithoutHoldingReadOnlyReview(t *testing.T) {
 	var evidence trace.CodeInspection
 	fixturekit.Must(t, json.Unmarshal(raw, &evidence))
 	if evidence.Commit == "" || evidence.Content != "work captured before done\n" {
-		t.Fatalf("chief cannot inspect unfinished captured work: %s", raw)
+		t.Fatalf("manager cannot inspect unfinished captured work: %s", raw)
 	}
 }
 

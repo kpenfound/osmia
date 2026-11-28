@@ -95,8 +95,8 @@ func TestRoutedAmendmentParksAndSurvivesRestart(t *testing.T) {
 	if got := call(t, tools(t, f, "mason1", scope, start)[questions.AskTool], `{"question":"Restart behavior is not in the spec. Should it be?"}`); !strings.Contains(got, `"question":"1"`) {
 		t.Fatal(got)
 	}
-	manager := f.turn(t, "chief", trace.Manager, "chief1")
-	tool := tools(t, f, "chief", manager, start)[questions.RouteAmendmentTool]
+	manager := f.turn(t, "manager", trace.Manager, "manager1")
+	tool := tools(t, f, "manager", manager, start)[questions.RouteAmendmentTool]
 	input := `{"question":"1","citations":["spec#1","plan#resume"],"change":"Clarify restart behavior","reason":"The task needs another state"}`
 	if got := call(t, tool, input); !strings.Contains(got, `"amendment":"1"`) {
 		t.Fatal(got)
@@ -166,8 +166,8 @@ func TestRoutedAmendmentsCheckLifecycleAndCitations(t *testing.T) {
 	if got := call(t, reviewerTools[questions.AskTool], `{"question":"The plan names no check for resume. Should it?"}`); !strings.Contains(got, `"question":"1"`) {
 		t.Fatal(got)
 	}
-	manager := f.turn(t, "chief", trace.Manager, "chief1")
-	route := tools(t, f, "chief", manager, start)[questions.RouteAmendmentTool]
+	manager := f.turn(t, "manager", trace.Manager, "manager1")
+	route := tools(t, f, "manager", manager, start)[questions.RouteAmendmentTool]
 	valid := `{"question":"1","citations":["plan#resume"],"change":"Add a check","reason":"Review found a gap"}`
 	before := f.head(t)
 	if got := call(t, route, valid); !strings.Contains(got, "building or assembled") {
@@ -204,7 +204,7 @@ func TestRoutedAmendmentsCheckLifecycleAndCitations(t *testing.T) {
 	if err != nil || len(requests) != 1 {
 		t.Fatalf("requests %+v: %v", requests, err)
 	}
-	if requests[0].Requester.ID != "reviewer1" || requests[0].Actor.ID != "chief" || requests[0].QuestionID != "1" || requests[0].Unit != "resume" {
+	if requests[0].Requester.ID != "reviewer1" || requests[0].Actor.ID != "manager" || requests[0].QuestionID != "1" || requests[0].Unit != "resume" {
 		t.Fatalf("routed %+v", requests[0])
 	}
 	if states(t, f)["1"].State != trace.QuestionRouted {
@@ -305,12 +305,12 @@ func states(t *testing.T, f fixture) map[string]trace.QuestionState {
 func TestResolveCitations(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	manager := f.turn(t, "chief", trace.Manager, "chief1")
+	manager := f.turn(t, "manager", trace.Manager, "manager1")
 	mason := f.turn(t, "mason1", "mason", "build1")
 	if _, err := f.repo.Ask(ctx, "mason1", mason, "Where does state live?", start); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.repo.AnswerQuestion(ctx, "chief", manager, "1", "In files.", []string{"charter#2"}, start); err != nil {
+	if _, err := f.repo.AnswerQuestion(ctx, "manager", manager, "1", "In files.", []string{"charter#2"}, start); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []string{"charter#1", "charter#2", "ruling#1", "spec#1", "spec#2", "plan#resume"} {
@@ -347,7 +347,7 @@ func TestResolveCitations(t *testing.T) {
 	}
 }
 
-func TestToolDescriptionsAndGuidanceSayManagerNotChief(t *testing.T) {
+func TestToolDescriptionsAndGuidanceNameTheManager(t *testing.T) {
 	f := setup(t)
 	var texts []string
 	for _, role := range []string{trace.Manager, "mason", "reviewer", "architect", "committee"} {
@@ -362,9 +362,6 @@ func TestToolDescriptionsAndGuidanceSayManagerNotChief(t *testing.T) {
 	texts = append(texts, questions.Guidance)
 	var asked bool
 	for _, text := range texts {
-		if strings.Contains(strings.ToLower(text), "chief") {
-			t.Errorf("tool text names the role chief: %.300s", text)
-		}
 		asked = asked || strings.HasPrefix(text, "ask: Ask the manager a question")
 	}
 	if !asked {
@@ -385,7 +382,7 @@ func TestToolsFollowTheRole(t *testing.T) {
 		}
 		return out
 	}
-	if got := names(f.turn(t, "chief", trace.Manager, "chief1"), "chief"); !reflect.DeepEqual(got, questions.ManagerTools) || strings.Contains(strings.Join(got, " "), "ask") {
+	if got := names(f.turn(t, "manager", trace.Manager, "manager1"), "manager"); !reflect.DeepEqual(got, questions.ManagerTools) || strings.Contains(strings.Join(got, " "), "ask") {
 		t.Fatalf("manager tools: %v", got)
 	}
 	for _, role := range []string{"mason", "reviewer", "architect", "committee", "foreman"} {
@@ -394,7 +391,7 @@ func TestToolsFollowTheRole(t *testing.T) {
 			t.Fatalf("%s tools: %v", role, got)
 		}
 	}
-	if _, err := questions.Tools(nil, "chief", coreadapter.Scope{}, time.Now); err == nil {
+	if _, err := questions.Tools(nil, "manager", coreadapter.Scope{}, time.Now); err == nil {
 		t.Fatal("tools without a trace")
 	}
 }
@@ -410,13 +407,13 @@ func askedQuestions(t *testing.T) askedFixture {
 	f := setup(t)
 	a := askedFixture{
 		fixture:      f,
-		managerScope: f.turn(t, "chief", trace.Manager, "chief1"),
+		managerScope: f.turn(t, "manager", trace.Manager, "manager1"),
 		mason:        f.turn(t, "mason1", "mason", "build1"),
 		reviewer:     f.turn(t, "reviewer1", "reviewer", "review1"),
 	}
 	call(t, tools(t, f, "mason1", a.mason, start.Add(time.Minute))["ask"], `{"question":"Where does state live?"}`)
 	call(t, tools(t, f, "reviewer1", a.reviewer, start.Add(2*time.Minute))["ask"], `{"question":"Is the log format fixed?"}`)
-	a.manager = tools(t, f, "chief", a.managerScope, start.Add(time.Hour))
+	a.manager = tools(t, f, "manager", a.managerScope, start.Add(time.Hour))
 	return a
 }
 
@@ -599,11 +596,11 @@ func TestDeliverQueuesNothingForAnUndeliverableQuestion(t *testing.T) {
 func TestDelivererFailsWithoutAProfileAndQueuesNothing(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	manager := f.turn(t, "chief", trace.Manager, "chief1")
+	manager := f.turn(t, "manager", trace.Manager, "manager1")
 	if _, err := f.repo.Ask(ctx, "mason1", f.turn(t, "mason1", "mason", "build1"), "Where?", start); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.repo.AnswerQuestion(ctx, "chief", manager, "1", "In files.", []string{"charter#2"}, start); err != nil {
+	if _, err := f.repo.AnswerQuestion(ctx, "manager", manager, "1", "In files.", []string{"charter#2"}, start); err != nil {
 		t.Fatal(err)
 	}
 	broken := &questions.Deliverer{Repository: f.repo, Now: time.Now, Profile: func(string, string) (coreadapter.Profile, error) {
@@ -694,7 +691,7 @@ func TestTurnThatAskedEndsWaiting(t *testing.T) {
 func TestRelayRulingDeliversToEachAsker(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	manager := tools(t, f, "chief", f.turn(t, "chief", trace.Manager, "chief1"), start.Add(time.Hour))
+	manager := tools(t, f, "manager", f.turn(t, "manager", trace.Manager, "manager1"), start.Add(time.Hour))
 	for agent, question := range map[string]string{"mason1": "Where does state live?", "reviewer1": "Is the log format fixed?"} {
 		role := strings.TrimSuffix(agent, "1")
 		if _, err := f.repo.Ask(ctx, agent, f.turn(t, agent, role, "turn_"+agent), question, start); err != nil {
@@ -782,7 +779,7 @@ func TestProposeCharterFromAnOwnerRuling(t *testing.T) {
 	if _, err := f.repo.Ask(ctx, "reviewer1", reviewer, "Is every change tested?", start); err != nil {
 		t.Fatal(err)
 	}
-	manager := tools(t, f, "chief", f.turn(t, "chief", trace.Manager, "chief1"), start)
+	manager := tools(t, f, "manager", f.turn(t, "manager", trace.Manager, "manager1"), start)
 	if got := call(t, manager["answer"], `{"question":"2","text":"Yes.","citations":["charter#1"]}`); !strings.Contains(got, `"recorded":true`) {
 		t.Fatal(got)
 	}
@@ -845,7 +842,7 @@ func TestProposeCharterFromAnOwnerRuling(t *testing.T) {
 	}
 	p := proposals[0]
 	want := trace.CharterProposal{Question: "1", Ruling: "workstreams/" + string(stream) + "/questions/1/rulings.jsonl", RulingRevision: 1, OwnerResponse: "Uploads must always resume.", Rule: "Uploads resume.", Number: 4}
-	if p.Workstream != stream || p.Proposal != want || p.State.Value != trace.CharterProposed || p.Proposed.Path != "questions/1/charter.json" || p.Proposed.Actor != (trace.Actor{Kind: "agent", ID: "chief"}) || p.Latest.Revision != 1 {
+	if p.Workstream != stream || p.Proposal != want || p.State.Value != trace.CharterProposed || p.Proposed.Path != "questions/1/charter.json" || p.Proposed.Actor != (trace.Actor{Kind: "agent", ID: "manager"}) || p.Latest.Revision != 1 {
 		t.Fatalf("proposal %+v", p)
 	}
 }
@@ -1024,7 +1021,7 @@ func TestOnlyADriftMasonGetsDriftTools(t *testing.T) {
 	}{
 		"a unit reviewer":    {"reviewer1", f.turn(t, "reviewer1", "reviewer", "review1")},
 		"a unit mason":       {"mason1", f.turn(t, "mason1", "mason", "build1")},
-		"the manager": {"chief", f.turn(t, "chief", trace.Manager, "chief1")},
+		"the manager": {"manager", f.turn(t, "manager", trace.Manager, "manager1")},
 	} {
 		if _, err := questions.DriftTools(f.repo, scope.agent, scope.scope, time.Now, driftMove); err == nil {
 			t.Fatalf("%s got drift tools", name)

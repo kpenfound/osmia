@@ -72,7 +72,7 @@ func (f *publisherFixture) decideWork(stream config.WorkstreamID) {
 	f.ask(stream, "1", "Is the upload cap 10 MiB or unbounded?", hr(3))
 	f.escalate(stream, "1", "Is the upload cap 10 MiB or unbounded?", hr(4))
 	f.ruling(stream, "1", 1, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Cap uploads at 10 MiB."}, hr(5), trace.Actor{Kind: "owner", ID: "local"})
-	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":"Treat the 10 MiB cap as inclusive.","actor":{"kind":"agent","id":"chief_of_staff"},"thread":"chief","turn":"t1","at":%q}]}`, string(stream), hr(6).Format(time.RFC3339))
+	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":"Treat the 10 MiB cap as inclusive.","actor":{"kind":"agent","id":"chief_of_staff"},"thread":"manager","turn":"t1","at":%q}]}`, string(stream), hr(6).Format(time.RFC3339))
 	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(6), managerActor)
 }
 
@@ -142,7 +142,7 @@ func TestCleanupKeepsPendingPublicationThroughAnOutageAndARestart(t *testing.T) 
 			assumptions = append(assumptions, d)
 		}
 	}
-	if len(assumptions) != 1 || assumptions[0].Source != "osmia-work" || assumptions[0].Str("author") != "" || assumptions[0].Str("decider") != "chief_of_staff" || assumptions[0].Str("workstream") != string(stream) {
+	if len(assumptions) != 1 || assumptions[0].Source != "osmia-work" || assumptions[0].Str("author") != "" || assumptions[0].Str("decider") != trace.Manager || assumptions[0].Str("workstream") != string(stream) {
 		t.Fatalf("assumption: %v", assumptions)
 	}
 	for _, p := range posts {
@@ -451,8 +451,8 @@ id = "osmia-worker"
 token_env = "PUBLISH_TEST_WORKER"
 
 [hearsay.agents.orchestrator]
-id = "osmia-chief"
-token_env = "PUBLISH_TEST_CHIEF"
+id = "osmia-manager"
+token_env = "PUBLISH_TEST_MANAGER"
 
 [hearsay.agents.observer]
 id = "osmia-observer"

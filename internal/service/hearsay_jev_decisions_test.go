@@ -18,7 +18,7 @@ import (
 
 const jevJudgment = "judgment_0123456789abcdef"
 
-var contractDeciders = []string{"owner", "chief_of_staff", "committee"}
+var contractDeciders = []string{"owner", trace.Manager, "committee"}
 
 func requireWorkDecision(t *testing.T, p fixturekit.HooksPost, judgment string) {
 	t.Helper()
@@ -110,7 +110,7 @@ func TestPublishJevRulingIsAWorkDecisionAndTheOwnersStaysTheOwners(t *testing.T)
 	}
 	for _, p := range posts {
 		if strings.Contains(p.Raw, "RELAYED-TO-THE-ASKERS") {
-			t.Fatalf("a post carries the chief's relay: %s", p.Raw)
+			t.Fatalf("a post carries the manager's relay: %s", p.Raw)
 		}
 		if p.Source == "osmia-owner" && strings.Contains(p.Raw, "Jev") {
 			t.Fatalf("Jev's decision reached the owner source: %s", p.Raw)

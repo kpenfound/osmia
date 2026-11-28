@@ -44,8 +44,8 @@ type Dependencies struct {
 	// role's own, never the manager's.
 	DesignerOverride  func(cfg *config.Config) (string, coreadapter.Profile, error)
 	ManagerRepository func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host config.WorkstreamID, bundleStream config.WorkstreamID, close func(), err error)
-	// ManagerRepositoryForRead is ManagerRepository for reading the manager of
-	// staff's thread; it needs no live member to supply context.
+	// ManagerRepositoryForRead is ManagerRepository for reading the manager's
+	// thread; it needs no live member to supply context.
 	ManagerRepositoryForRead func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host config.WorkstreamID, bundleStream config.WorkstreamID, close func(), err error)
 	ContestedEntry           func(repository *trace.Repository, stream config.WorkstreamID, unit string) (InboxEntry, bool, error)
 	// ContestedGate returns the gate of the contested unit's open card when Jev

@@ -350,8 +350,8 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   once the workstream is building, and for a landed unit its commit on the
   feature branch, the reviewed candidate and base with the approval that
   landed it, and the criteria it meets, then the full status (goal, attention, note, one line per active
-  agent, and when it was written), or `Status: none yet` before the manager of
-  staff writes one. `Live agents:` below the narrative lines shows each active
+  agent, and when it was written), or `Status: none yet` before the manager
+  writes one. `Live agents:` below the narrative lines shows each active
   or parked turn's role, optional unit, state, RFC 3339 start time, elapsed
   seconds, effective profile, optional attempt number and `resume` or `replay`
   path, and a parked question's trace number. A workstream the project does not hold fails with
@@ -371,8 +371,8 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   transition on which Jev departed from the default state, and after no other:
   a followed default, a fallback, a move an owner or one of Jev's gate decisions
   authorised and a reviewer's verdict print nothing extra.
-- `send <workstream-id> <message>` sends a message to the workstream's shared workgroup manager
-  of staff. The message is one argument; quote it. The service records it
+- `send <workstream-id> <message>` sends a message to the workstream's shared workgroup manager.
+  The message is one argument; quote it. The service records it
   before answering, and the output names the message's turn ID and its state
   (`queued`). The manager answers it as its next turn, after any turn
   already running. A message to an abandoned workstream is recorded but never
@@ -448,8 +448,8 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   records a decision; they leave out a gate while its judgment is pending. When
   Jev answers below the threshold, defers or falls back, the entry reaches you
   as usual and is not judged again; its recommendation is Jev's pick with its
-  confidence (the entry's `jev` field) when Jev gave one, and the manager of
-  staff's when it did not. A confident pick the service cannot carry out, such
+  confidence (the entry's `jev` field) when Jev gave one, and the manager's
+  when it did not. A confident pick the service cannot carry out, such
   as a ratification of a plan that stopped validating, also leaves the entry
   with you, showing Jev's judgment. Your own decisions (the delivery card,
   charter proposals and conflicts between charters, a project that needs no
@@ -600,8 +600,8 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   Only you can give the answer; the manager cannot.
 - `recover <workstream-id> [unit-id] [--json]` approves the move of the
   `Approve this recovery move` inbox entry of that workstream (of that unit,
-  when the workstream has several): a stall that neither Jev nor the manager of
-  staff cleared, or a move that belongs to you. The entry shows the exact
+  when the workstream has several): a stall that neither Jev nor the manager
+  cleared, or a move that belongs to you. The entry shows the exact
   move (the subject, the state and version it was read at, the target and
   why), and the command submits that move and nothing else. The router
   applies it as a pinned owner decision with its usual effects, records you
@@ -633,7 +633,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   workstream by itself when its own pull request merges, so you rarely need
   to; the owner's archive stays available for every terminal workstream, and an
   archive that exists is never replaced, so `archive` on a workstream the manager
-  of staff archived changes nothing and reports the manager. The service
+  archived changes nothing and reports the manager. The service
   then deletes the workstream's own independent
   storage, its dedicated trace repository and its temporary workspaces,
   including handed inputs, decisions, turns and complete check output, from

@@ -70,11 +70,6 @@ func TestManagerRolePromptStatesItsRoleSettingToolsStateMachineOutputAndDone(t *
 
 func TestManagerRolePromptDescribesOneWorkgroupWithADefinedJob(t *testing.T) {
 	requireAll(t, "the manager role prompt", ManagerRolePrompt, "You are the manager of one workgroup", "a defined job", "not an open-ended assistant")
-	for _, banned := range []string{"chief", "Chief"} {
-		if strings.Contains(ManagerRolePrompt, banned) {
-			t.Fatalf("the manager role prompt names the role %q", banned)
-		}
-	}
 }
 
 func TestManagerGuidanceBlocksNameNoSkill(t *testing.T) {

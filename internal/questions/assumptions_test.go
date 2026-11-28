@@ -60,5 +60,5 @@ func TestSharedManagerAssumptionToolValidatesAffectedWorkstreams(t *testing.T) {
 		}
 		return
 	}
-	t.Fatal("shared chief has no log_assumption tool")
+	t.Fatal("shared manager has no log_assumption tool")
 }

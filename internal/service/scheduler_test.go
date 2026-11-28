@@ -249,13 +249,13 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 	target := runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: fixturekit.Stream}
 	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "owner"})
 	queueTurn(t, repo, "held", clock.Now())
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_chief", Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "message_chief", Depth: 1},
-		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "chief", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message: chief"}
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_manager", Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "message_manager", Depth: 1},
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "manager", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message: manager"}
 	_, err = repo.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
-	await("paused", []string{"chief"})
+	await("paused", []string{"manager"})
 	awaitPasses(2)
-	if got := ran(); !slices.Equal(got, []string{"chief"}) {
+	if got := ran(); !slices.Equal(got, []string{"manager"}) {
 		t.Fatalf("paused runs %v", got)
 	}
 	if _, ok := turnOperations(t, repo)["held"]; ok {
@@ -263,7 +263,7 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 	}
 
 	intakefixture.Mutation(t, c, "DELETE", "pause", ClearPauseRequest(target))
-	await("resumed", []string{"chief", "held"})
+	await("resumed", []string{"manager", "held"})
 	fixturekit.Must(t, s.Close())
 }
 

@@ -21,7 +21,7 @@ func TestTheObjectionsJevDecidesAtTheRatificationGate(t *testing.T) {
 	}{
 		"the owner's own objection":   {func(e *shed.Entry) { e.Member, e.Kind, e.Escalated = shed.OwnerMember, shed.Owner, false }, jev.KindOwnerObjection},
 		"a charter conflict":          {func(e *shed.Entry) { e.Kind = shed.CharterConflict }, jev.KindCharterConflict},
-		"one the chief did not raise": {func(e *shed.Entry) { e.Escalated = false }, ""},
+		"one the manager did not raise": {func(e *shed.Entry) { e.Escalated = false }, ""},
 		"advice that blocks nothing":  {func(e *shed.Entry) { e.Blocking = false }, ""},
 		"one already dismissed":       {func(e *shed.Entry) { e.Disposition, e.Blocking = shed.Dismissed, false }, ""},
 		"one the owner sustained":     {func(e *shed.Entry) { e.Disposition = shed.Sustained }, ""},
@@ -52,7 +52,7 @@ func TestAnEscalationOfACharterConflictIsAnOwnerGate(t *testing.T) {
 	}
 	entry.Options = nil
 	if gate, _, err := c.escalationGate(repo, entry, InboxView(entry)); err != nil || gate != nil {
-		t.Fatalf("an escalation without the chief's options is a gate: %+v %v", gate, err)
+		t.Fatalf("an escalation without the manager's options is a gate: %+v %v", gate, err)
 	}
 }
 

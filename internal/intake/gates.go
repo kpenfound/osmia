@@ -747,8 +747,8 @@ func (s *Controller) RuleInboxBy(ctx context.Context, repository *trace.Reposito
 
 // WorkstreamGates returns the gates the workstream has reached whose decision
 // Jev may make: its ratification and the objections that block it, its
-// presented amendments that change intent, its contested units the manager of
-// staff escalated, its delivery card, its charter proposals and the
+// presented amendments that change intent, its contested units the manager
+// escalated, its delivery card, its charter proposals and the
 // cancellations presented in its conversation. Whatever the owner already
 // decided is included, for the gate's own decision to say so.
 func (s *Controller) WorkstreamGates(ctx context.Context, repository *trace.Repository, w trace.WorkstreamStatus) ([]Gate, error) {

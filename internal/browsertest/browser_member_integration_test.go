@@ -47,7 +47,7 @@ func (f *workgroupPageFixture) awaitOwnerTurn(t *testing.T, text string, member 
 
 func (f *workgroupPageFixture) runManager(t *testing.T) {
 	t.Helper()
-	mutation(t, f.c, "PUT", "pause", service.PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Keep worker activity stable during chief conversation", Source: runtime.PauseOwner})
+	mutation(t, f.c, "PUT", "pause", service.PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Keep worker activity stable during manager conversation", Source: runtime.PauseOwner})
 	f.c.Close()
 	must(t, f.s.Close())
 	path := filepath.Join(f.opts.Config.Root, "config.toml")
@@ -65,7 +65,7 @@ func (f *workgroupPageFixture) runManager(t *testing.T) {
 		"A new shared update":          "A shared answer while the owner is away.",
 	}
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		reply := "Chief activity recorded."
+		reply := "Manager activity recorded."
 		for text, answer := range replies {
 			if strings.HasSuffix(strings.TrimSpace(req.Prompt), text) {
 				got, err := fixturekit.CallTool(ctx, tools, "set_status", map[string]any{"goal": "Ship shared uploads", "note": "Manager status after " + text, "attention": "Choose the shared interface and upload approach.", "agents": []string{}})
@@ -75,7 +75,7 @@ func (f *workgroupPageFixture) runManager(t *testing.T) {
 				reply = answer
 			}
 		}
-		return &agent.Result{ClaudeID: "chief-" + req.Name, ResultText: reply}, nil
+		return &agent.Result{ClaudeID: "manager-" + req.Name, ResultText: reply}, nil
 	}
 	f.opts.Reconciliation.Now = time.Now
 	f.opts = service.EnforceThreadsForTest(f.opts, service.Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}}})

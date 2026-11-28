@@ -35,21 +35,21 @@ func TestSetPriorityRecordsTheOwnersRequest(t *testing.T) {
 	ctx := context.Background()
 	r, root, p := create(t)
 	owner := Actor{Kind: "owner", ID: "local"}
-	scope := managerTurnFrom(t, r, "chief", "message1", owner)
+	scope := managerTurnFrom(t, r, "manager", "message1", owner)
 	order := func(ids ...config.WorkstreamID) func() ([]config.WorkstreamID, error) {
 		return func() ([]config.WorkstreamID, error) { return ids, nil }
 	}
 
-	first, err := r.SetPriority(ctx, "chief", scope, at.Add(time.Minute), order(streamID))
+	first, err := r.SetPriority(ctx, "manager", scope, at.Add(time.Minute), order(streamID))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := PriorityChange{Header: Header{Schema: "osmia.trace.priority", Version: Version, ID: PriorityID, Revision: 1, Project: projectID, Workstream: streamID, At: at.Add(time.Minute), Actor: owner, Cause: "request_message1", Depth: 3},
-		Agent: "chief", Turn: "message1", Order: []config.WorkstreamID{streamID}}
+		Agent: "manager", Turn: "message1", Order: []config.WorkstreamID{streamID}}
 	if !reflect.DeepEqual(first, want) {
 		t.Fatalf("first change %+v, want %+v", first, want)
 	}
-	second, err := r.SetPriority(ctx, "chief", scope, at.Add(2*time.Minute), order())
+	second, err := r.SetPriority(ctx, "manager", scope, at.Add(2*time.Minute), order())
 	if err != nil || second.Revision != 2 || second.Order == nil || len(second.Order) != 0 {
 		t.Fatalf("second change %+v %v", second, err)
 	}
@@ -59,26 +59,26 @@ func TestSetPriorityRecordsTheOwnersRequest(t *testing.T) {
 	}
 
 	failed := errors.New("runtime unavailable")
-	if _, err := r.SetPriority(ctx, "chief", scope, at, func() ([]config.WorkstreamID, error) { return nil, failed }); !errors.Is(err, failed) {
+	if _, err := r.SetPriority(ctx, "manager", scope, at, func() ([]config.WorkstreamID, error) { return nil, failed }); !errors.Is(err, failed) {
 		t.Fatalf("apply error: %v", err)
 	}
 
 	called := false
 	apply := func() ([]config.WorkstreamID, error) { called = true; return nil, nil }
-	events := managerTurnFrom(t, r, "chief_events", "events1", Actor{Kind: "service", ID: "events"})
+	events := managerTurnFrom(t, r, "manager_events", "events1", Actor{Kind: "service", ID: "events"})
 	var refused *PriorityRefused
-	if _, err := r.SetPriority(ctx, "chief_events", events, at, apply); !errors.As(err, &refused) || !strings.Contains(refused.Reason, "only the owner") {
+	if _, err := r.SetPriority(ctx, "manager_events", events, at, apply); !errors.As(err, &refused) || !strings.Contains(refused.Reason, "only the owner") {
 		t.Fatalf("service turn: %v", err)
 	}
 	mason := scope
 	mason.Role = "mason"
-	if _, err := r.SetPriority(ctx, "chief", mason, at, apply); err == nil || errors.As(err, &refused) {
+	if _, err := r.SetPriority(ctx, "manager", mason, at, apply); err == nil || errors.As(err, &refused) {
 		t.Fatalf("mason scope: %v", err)
 	}
 	if called {
 		t.Fatal("apply ran for a refused change")
 	}
-	if err := r.Append(ctx, PriorityChange{Header: first.Header, Agent: "chief", Turn: "message1", Order: []config.WorkstreamID{}}); !errors.Is(err, ErrConflict) {
+	if err := r.Append(ctx, PriorityChange{Header: first.Header, Agent: "manager", Turn: "message1", Order: []config.WorkstreamID{}}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("direct append: %v", err)
 	}
 	if err := r.Close(); err != nil {

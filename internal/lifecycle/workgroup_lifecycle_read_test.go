@@ -41,11 +41,11 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 			f.Engine.Mu.Lock()
 			f.Engine.Turns["lifecycle-read-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": req.Prompt})
-				return intakefixture.QuestionResult(req, "session-worker", "Asked the shared chief."), err
+				return intakefixture.QuestionResult(req, "session-worker", "Asked the shared manager."), err
 			}
 			f.Engine.Turns["lifecycle-read-next"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "survivor-after-read-cleanup"})
-				return intakefixture.QuestionResult(req, "session-worker", "Asked the shared chief."), err
+				return intakefixture.QuestionResult(req, "session-worker", "Asked the shared manager."), err
 			}
 			f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				names, err := intakefixture.ToolNames(ctx, tools)
@@ -85,7 +85,7 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 					}
 				}
 				_, err = fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Keep the contract.", "note": "Original authority remains available.", "agents": []string{}})
-				return intakefixture.QuestionResult(req, "session-chief", "Read original authority."), err
+				return intakefixture.QuestionResult(req, "session-manager", "Read original authority."), err
 			}
 			f.Engine.Mu.Unlock()
 			lifecycleWorker(t, f, f.Project, f.Stream1, "worker_first", "lifecycle-read-ask", "first-read-origin")
@@ -205,7 +205,7 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 				source, err := f.S.Repository(f.Project)
 				fixturekit.Must(t, err)
 				busy, manager, err := (&journey.WorkspaceCleanup{Repository: source}).Busy(f.Stream1)
-				t.Logf("source cleanup busy=%v chief=%v error=%v", busy, manager, err)
+				t.Logf("source cleanup busy=%v manager=%v error=%v", busy, manager, err)
 				for _, scope := range []struct {
 					repo   *trace.Repository
 					stream config.WorkstreamID

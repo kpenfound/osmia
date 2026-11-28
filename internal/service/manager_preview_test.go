@@ -537,7 +537,7 @@ func TestManagerPreviewRestartsCaptureWithoutReceipt(t *testing.T) {
 	receipt, err := view.Read("previews/results.json")
 	fixturekit.Must(t, err)
 	if !strings.Contains(string(receipt), result.ImageID) {
-		t.Fatal("recovered receipt missing from chief view")
+		t.Fatal("recovered receipt missing from manager view")
 	}
 	if result.Commit != commit || result.ImageID == "" {
 		t.Fatalf("%+v", result)
@@ -981,6 +981,6 @@ func TestTheServiceSeedsAManagersViewWithItsEarlierPreviews(t *testing.T) {
 	other2.Role = "mason"
 	fixturekit.Must(t, turns.Seed(context.Background(), other2, other))
 	if _, err := other.Read("previews/results.json"); err == nil {
-		t.Fatal("a turn that is not the chief's was seeded with previews")
+		t.Fatal("a turn that is not the manager's was seeded with previews")
 	}
 }

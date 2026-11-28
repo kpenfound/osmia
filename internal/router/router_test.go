@@ -390,7 +390,7 @@ func TestOwnerGatesOpenOnlyOnAnOwnerOrGateDecision(t *testing.T) {
 	f.track("implementing", "abandoned", "approved")
 	proposal := f.exit()
 	proposal.Trigger = "unit.move_proposal"
-	proposal.Actor = trace.Actor{Kind: "agent", ID: "chief-of-staff"}
+	proposal.Actor = trace.Actor{Kind: "agent", ID: "manager-of-staff"}
 	route(t, f, proposal)
 	_, options := request(t, f.provider, 0)
 	if slices.Contains(options, "abandoned") || slices.Contains(options, "approved") {
@@ -1089,7 +1089,7 @@ func TestAManagerMoveIsPinnedButOpensNoOwnerGate(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 	if n := len(f.provider.Requests()); n != 0 {
-		t.Fatalf("a chief move made %d requests", n)
+		t.Fatalf("a manager move made %d requests", n)
 	}
 	if m := f.moves()[0]; m.DecidedBy != trace.DecidedByManager || m.Judgment != "" || !trace.ValidRouting(m.To, m.Routing()) {
 		t.Fatalf("transition = %+v", m)

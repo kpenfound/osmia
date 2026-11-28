@@ -311,7 +311,7 @@ func TestHandInRecordedSingleSelectionKeepsOrdinaryPacket(t *testing.T) {
 				closeManager()
 				fixturekit.Must(t, err)
 				if !intakefixture.EqualJSONTest(thread.Identity, f.Before.Identity) {
-					t.Fatal("single selection replaced the hand-in chief")
+					t.Fatal("single selection replaced the hand-in manager")
 				}
 				status, err := f.C.Status(context.Background(), f.Stream1)
 				fixturekit.Must(t, err)
@@ -378,7 +378,7 @@ func TestHandInProductionSharedManagerResumesBothQuestionsAfterRestart(t *testin
 	f.Engine.Mu.Lock()
 	f.Engine.Turns["handin-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "Should acknowledgments retain their offsets?"})
-		return intakefixture.QuestionResult(req, "session-ask", "Asked the shared chief."), err
+		return intakefixture.QuestionResult(req, "session-ask", "Asked the shared manager."), err
 	}
 	f.Engine.Turns["answer_1"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.Contains(req.Prompt, "Keep the acknowledged offset.") {
@@ -426,7 +426,7 @@ func TestHandInProductionSharedManagerResumesBothQuestionsAfterRestart(t *testin
 				}
 			}
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Both member questions were answered."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Both member questions were answered."), nil
 	}
 	f.Engine.Mu.Unlock()
 	f.Start(t)
@@ -780,7 +780,7 @@ func TestArchitectNoChangeEscalatesWithSelectedMemberPresent(t *testing.T) {
 			return draft(ctx, req, verified, tools)
 		}
 		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
-		return intakefixture.QuestionResult(req, "session-no-change", "Asked the chief to escalate."), err
+		return intakefixture.QuestionResult(req, "session-no-change", "Asked the manager to escalate."), err
 	}
 	original := f.Engine.Turns["*"]
 	var escalated atomic.Bool
@@ -800,7 +800,7 @@ func TestArchitectNoChangeEscalatesWithSelectedMemberPresent(t *testing.T) {
 				if err == nil {
 					escalated.Store(true)
 				}
-				return intakefixture.QuestionResult(req, "session-chief-no-change", "Escalated the no-change judgment."), err
+				return intakefixture.QuestionResult(req, "session-manager-no-change", "Escalated the no-change judgment."), err
 			}
 		}
 		return original(ctx, req, verified, tools)

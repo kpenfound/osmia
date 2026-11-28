@@ -181,6 +181,7 @@ func (s *Controller) moveUnit(ctx context.Context, repo *trace.Repository, strea
 		if res.Target != req.To {
 			move = UnitMove{From: state.Value, To: res.Target, Note: note, By: trace.DecidedByJev, Turn: turn}
 		}
+		move.By = trace.DisplayRuler(move.By)
 		return UnitMoveResponse{Workstream: stream, Unit: unit, Move: move}, nil
 	case res.Outcome == router.OutcomeHeld && res.Hold == router.HoldStale:
 		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s moved since it was read; read it again", unit)}

@@ -541,7 +541,7 @@ func TestProjectSpecContractGuardRedraftStopsRetryingAndTheManagerAsksAgain(t *t
 	}
 	notices := leaderNotices(t, f, "contracts could not be redrafted")
 	if len(notices) != 1 || !strings.Contains(notices[0], "last 3 redrafts were refused") || !strings.Contains(notices[0], "move_workstream to sketched") {
-		t.Fatalf("chief notice of the stopped redraft: %v", notices)
+		t.Fatalf("manager notice of the stopped redraft: %v", notices)
 	}
 	assertGuardRefusal(t, f, id, 2, "ended without delivering")
 
@@ -562,12 +562,12 @@ func TestProjectSpecContractGuardRedraftStopsRetryingAndTheManagerAsksAgain(t *t
 		return err
 	})
 	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
-	out, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, mustRepo(t, f.S, f.Project2), f.Stream2, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "chief-turn-1")
+	out, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, mustRepo(t, f.S, f.Project2), f.Stream2, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "manager-turn-1")
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	if !strings.Contains(out.Detail, "redrafts the workgroup spec's contracts again") {
-		t.Fatalf("chief's request not taken: %+v", out)
+		t.Fatalf("manager's request not taken: %+v", out)
 	}
 	for range 2 {
 		fixturekit.Must(t, f.S.Lifecycle().DraftProjectSpecIfReady(ctx, repo, id))

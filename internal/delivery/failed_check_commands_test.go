@@ -78,7 +78,7 @@ func TestFailedCloudRunGivesEverySurfaceEachFailedCheckWithItsTraceCommand(t *te
 	lint := "- lint: Dagger Cloud posted no trace id for this check; status: https://dagger.cloud/acme/checks/github.com/acme/widgets@" + pushedCommit + "?check=lint"
 	surfaces := map[string]string{
 		"reader evidence": FinalCheckEvidence(last),
-		"chief notice":    f.noticeOf(),
+		"manager notice":    f.noticeOf(),
 	}
 	for name, text := range surfaces {
 		for _, want := range []string{"- test:a: `dagger trace " + traceA + "`", "- build: `dagger trace " + traceB + "`", lint} {
@@ -156,7 +156,7 @@ func TestFailedRunWithoutAFailingCheckStatusSaysSoWithTheCountsAndTheRunURL(t *t
 	if _, listed := got["failed_checks"]; listed || got["outcome"] != "failed" || !strings.Contains(detail, want) {
 		t.Fatalf("poll %v", got)
 	}
-	for name, text := range map[string]string{"reader evidence": FinalCheckEvidence(run), "chief notice": f.noticeOf()} {
+	for name, text := range map[string]string{"reader evidence": FinalCheckEvidence(run), "manager notice": f.noticeOf()} {
 		if !strings.Contains(text, want) || strings.Contains(text, "Failed checks (") {
 			t.Errorf("%s:\n%s", name, text)
 		}
@@ -220,7 +220,7 @@ func TestFailedRunLinksCarryNoCredentialOnAnySurface(t *testing.T) {
 	}
 	surfaces := map[string]string{
 		"reader evidence": FinalCheckEvidence(run),
-		"chief notice":    f.noticeOf(),
+		"manager notice":    f.noticeOf(),
 		"poll result":     string(pollText),
 	}
 	for name, text := range surfaces {
@@ -236,8 +236,8 @@ func TestFailedRunLinksCarryNoCredentialOnAnySurface(t *testing.T) {
 	if evidence := surfaces["reader evidence"]; !strings.Contains(evidence, "\nStatus: https://dagger.cloud/run.json\n") {
 		t.Errorf("reader evidence lacks the run's status link without its credential:\n%s", evidence)
 	}
-	if strings.Contains(surfaces["chief notice"], "run status:") || !strings.Contains(surfaces["chief notice"], "lint: Dagger Cloud posted no trace id for this check; status: https://dagger.cloud/acme/checks/github.com/acme/widgets@"+pushedCommit+"?check=lint") {
-		t.Errorf("chief notice:\n%s", surfaces["chief notice"])
+	if strings.Contains(surfaces["manager notice"], "run status:") || !strings.Contains(surfaces["manager notice"], "lint: Dagger Cloud posted no trace id for this check; status: https://dagger.cloud/acme/checks/github.com/acme/widgets@"+pushedCommit+"?check=lint") {
+		t.Errorf("manager notice:\n%s", surfaces["manager notice"])
 	}
 
 	recorded := f.runs()

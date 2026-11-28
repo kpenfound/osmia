@@ -116,7 +116,7 @@ func TestBrowserAgentMarkdownAcrossConversations(t *testing.T) {
 	awaitFeedEvent(ps, opened.Session.Workstream)
 	session := `#session-feed [data-kind=response] [data-field=text] > .markdown`
 	if got := assertMarkdown(ps, session); got != expected {
-		t.Fatalf("session structure differs from chief: %s", got)
+		t.Fatalf("session structure differs from manager: %s", got)
 	}
 	assertMarkdownPhone(ps, session)
 	ps.Await("session owner text as typed", `document.querySelector('#session-feed [data-kind=message] [data-field=text]').textContent === `+strconv.Quote(owner))
@@ -145,7 +145,7 @@ func TestBrowserAgentMarkdownAcrossConversations(t *testing.T) {
 	design := `#design-feed [data-kind=response] [data-field=text] > .markdown`
 	got := assertMarkdown(pd, design)
 	if strings.TrimSpace(got) != strings.TrimSpace(expected) {
-		t.Fatalf("design structure differs from chief: %s", got)
+		t.Fatalf("design structure differs from manager: %s", got)
 	}
 	assertMarkdownPhone(pd, design)
 	pd.AwaitText("#design-feed details summary", "Assumptions (reply to override)")

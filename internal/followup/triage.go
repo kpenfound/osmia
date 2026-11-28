@@ -12,8 +12,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// TriageDocumentID and TriagePath name the document that records the manager of
-// staff's triage of a final review's blocking findings. Each revision holds
+// TriageDocumentID and TriagePath name the document that records the manager's
+// triage of a final review's blocking findings. Each revision holds
 // every decision recorded so far.
 const (
 	TriageDocumentID = "final-triage"

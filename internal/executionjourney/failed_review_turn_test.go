@@ -63,7 +63,7 @@ func TestFailedReviewTurnContestsTheUnit(t *testing.T) {
 	}
 
 	if _, apiErr := recordContestedRuling(f.S, ctx, repository, stream, "resume", api.ContestedRulingRequest{Decision: "review", Note: "Review it again."}, intake.ManagerActor); apiErr != nil {
-		t.Fatalf("the chief's ruling: %+v", apiErr)
+		t.Fatalf("the manager's ruling: %+v", apiErr)
 	}
 	state, err = repository.Workflow(stream, subject)
 	fixturekit.Must(t, err)

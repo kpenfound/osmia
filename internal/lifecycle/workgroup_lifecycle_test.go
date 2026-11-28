@@ -94,7 +94,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				}
 				if strings.Contains(req.SessionDir, string(unrelated)) && slices.Contains(names, status.ToolName) {
 					_, err := fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "An independent request.", "note": "Waiting on its own ratification.", "agents": []string{}})
-					return intakefixture.QuestionResult(req, "session-unrelated-chief", "Independent work remains available."), err
+					return intakefixture.QuestionResult(req, "session-unrelated-manager", "Independent work remains available."), err
 				}
 				if !slices.Contains(names, status.ToolName) {
 					return intakefixture.QuestionResult(req, "session-idle", "Working within the slice."), nil
@@ -167,7 +167,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 					}
 				}
 				_, err = fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Continue the surviving slice.", "note": "The project contract is active.", "agents": []string{}})
-				return intakefixture.QuestionResult(req, "session-chief", "The survivor keeps its original conversation."), err
+				return intakefixture.QuestionResult(req, "session-manager", "The survivor keeps its original conversation."), err
 			}
 			f.Engine.Turns["lifecycle-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				question := "consolidated-survivor"
@@ -175,7 +175,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 					question = "consolidated-origin"
 				}
 				_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
-				return intakefixture.QuestionResult(req, "session-worker", "Asked the shared chief."), err
+				return intakefixture.QuestionResult(req, "session-worker", "Asked the shared manager."), err
 			}
 			for _, boundary := range []string{"retained", "deleted", "restarted"} {
 				for _, kind := range []string{"ask", "escalate"} {
@@ -185,7 +185,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 					}
 					f.Engine.Turns[kind+"-"+boundary] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 						_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
-						return intakefixture.QuestionResult(req, "session-worker", "Asked the shared chief."), err
+						return intakefixture.QuestionResult(req, "session-worker", "Asked the shared manager."), err
 					}
 				}
 			}
@@ -335,7 +335,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 					reads <- f.C.Do(readCtx, "GET", api.Prefix+"/feed/"+string(survivor), nil, &feed)
 				}()
 				go func() { _, _, _, err := repo.CrossRepoProjectSpec(group.ID); reads <- err }()
-				go func() { _, err := f.C.Send(readCtx, survivor, "Queued while the chief is working."); reads <- err }()
+				go func() { _, err := f.C.Send(readCtx, survivor, "Queued while the manager is working."); reads <- err }()
 				for range 4 {
 					select {
 					case err := <-reads:
@@ -345,7 +345,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 						}
 					case <-readCtx.Done():
 						close(gate)
-						t.Fatal("owner access blocked behind chief turn")
+						t.Fatal("owner access blocked behind manager turn")
 					}
 				}
 				close(gate)
@@ -452,7 +452,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				continuedOther, err := otherRepo.ManagerThread(unrelated)
 				fixturekit.Must(t, err)
 				if !intakefixture.EqualJSONTest(otherManager.Identity, continuedOther.Identity) {
-					t.Fatal("retirement replaced an unrelated chief")
+					t.Fatal("retirement replaced an unrelated manager")
 				}
 				archived, err := f.C.Status(ctx, retired)
 				fixturekit.Must(t, err)
@@ -706,7 +706,7 @@ func TestDesignProductionLifecycleArchiveRecoveryAtBoundaries(t *testing.T) {
 			}
 			sent, err := f.C.Send(ctx, f.Stream2, "Continue after interrupted retirement.")
 			fixturekit.Must(t, err)
-			journey.LifecycleAwait(t, f, "recovered shared chief owner turn", func() bool {
+			journey.LifecycleAwait(t, f, "recovered shared manager owner turn", func() bool {
 				conversation, err := f.C.Conversation(ctx, f.Stream2)
 				fixturekit.Must(t, err)
 				return slices.ContainsFunc(conversation.Entries, func(e api.ConversationEntry) bool {

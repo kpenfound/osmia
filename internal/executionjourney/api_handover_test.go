@@ -62,7 +62,7 @@ func (h *handoverManager) turn(ctx context.Context, req agent.Request, _ *agent.
 		h.written[stream] = out
 		h.mu.Unlock()
 	}
-	return &agent.Result{ClaudeID: "session-chief", ResultText: "Noted", SessionDir: req.SessionDir, NumTurns: 1}, nil
+	return &agent.Result{ClaudeID: "session-manager", ResultText: "Noted", SessionDir: req.SessionDir, NumTurns: 1}, nil
 }
 
 func TestHandInToSketchedPlan(t *testing.T) {
@@ -81,7 +81,7 @@ func TestHandInToSketchedPlan(t *testing.T) {
 		turns := &isolation.Turns{Workspaces: intake.StagedWorkspaces{}, Views: isolation.Views{Directory: filepath.Join(root, "views")}, Engine: engine,
 			Grants: map[string]coreadapter.Capabilities{trace.Manager: {Tools: []string{status.ToolName}}},
 			Select: func(_ context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
-				workspace := filepath.Join(root, "chief", scope.Workstream, scope.Turn)
+				workspace := filepath.Join(root, "manager", scope.Workstream, scope.Turn)
 				if err := os.MkdirAll(workspace, 0700); err != nil {
 					return isolation.Selection{}, err
 				}

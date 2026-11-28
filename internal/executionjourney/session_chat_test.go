@@ -668,19 +668,19 @@ func confinementManagerTurn(t *testing.T, s *journey.Service, c *journey.Client,
 		if req.ResumeID != "" {
 			t.Errorf("manager first turn asked to resume %q", req.ResumeID)
 		}
-		return &agent.Result{ClaudeID: "chief-session-1", ResultText: "First chief reply"}, nil
+		return &agent.Result{ClaudeID: "manager-session-1", ResultText: "First manager reply"}, nil
 	}
 	engine.mu.Unlock()
-	_, err = c.Send(context.Background(), other, "first chief message")
+	_, err = c.Send(context.Background(), other, "first manager message")
 	fixturekit.Must(t, err)
 	awaitConversationOn(t, c, other, func(l api.ConversationResponse) bool { return len(l.Entries) == 2 })
 	engine.mu.Lock()
 	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		resume, prompt = req.ResumeID, req.Prompt
-		return &agent.Result{ClaudeID: "chief-session-1", ResultText: "Second chief reply"}, nil
+		return &agent.Result{ClaudeID: "manager-session-1", ResultText: "Second manager reply"}, nil
 	}
 	engine.mu.Unlock()
-	_, err = c.Send(context.Background(), other, "second chief message")
+	_, err = c.Send(context.Background(), other, "second manager message")
 	fixturekit.Must(t, err)
 	awaitConversationOn(t, c, other, func(l api.ConversationResponse) bool { return len(l.Entries) == 4 })
 	return resume, prompt
@@ -718,7 +718,7 @@ func TestResumeConfinedToSessionTurns(t *testing.T) {
 	if managerResume != "" {
 		t.Fatalf("a manager turn resumed although only the session role may: %q", managerResume)
 	}
-	if !strings.Contains(managerPrompt, "second chief message") {
+	if !strings.Contains(managerPrompt, "second manager message") {
 		t.Fatalf("manager turn input: %q", managerPrompt)
 	}
 

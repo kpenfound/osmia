@@ -99,12 +99,12 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 				{"answer", map[string]any{"question": "2", "text": "Fixed.", "citations": []string{"charter#1"}}},
 				{"escalate", map[string]any{"questions": []string{"3"}, "rephrasing": "Again?", "blocked": "The same.", "options": []string{}, "recommendation": "No."}},
 			} {
-				if err := use(ctx, tools, "chief-escalates", call.tool, call.args); err != nil {
+				if err := use(ctx, tools, "manager-escalates", call.tool, call.args); err != nil {
 					return nil, err
 				}
 			}
 			close(escalated)
-			return result(req, "session-chief", "Escalated"), nil
+			return result(req, "session-manager", "Escalated"), nil
 		case strings.Contains(req.Prompt, "Question 1 is open, asked by the mason: Where does state live?"):
 			if !strings.Contains(req.Prompt, "Question 2 is open, asked by the reviewer: Is the log format fixed?") {
 				problem("questions were not delivered together:\n%s", req.Prompt)
@@ -113,10 +113,10 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 			if firstDeliveries > 1 {
 
 				defer mu.Unlock()
-				if err := use(ctx, tools, "chief-redelivered", "answer", map[string]any{"question": "1", "text": "In files under the root.", "citations": []string{"charter#1"}}); err != nil {
+				if err := use(ctx, tools, "manager-redelivered", "answer", map[string]any{"question": "1", "text": "In files under the root.", "citations": []string{"charter#1"}}); err != nil {
 					return nil, err
 				}
-				return result(req, "session-chief", "Already answered"), nil
+				return result(req, "session-manager", "Already answered"), nil
 			}
 			for _, call := range []struct {
 				tool string
@@ -129,7 +129,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 				{"answer", map[string]any{"question": "1", "text": "In files under the root.", "citations": []string{"charter#1"}}},
 				{"answer", map[string]any{"question": "1", "text": "In a database.", "citations": []string{"charter#1"}}},
 			} {
-				if err := use(ctx, tools, "chief-answers", call.tool, call.args); err != nil {
+				if err := use(ctx, tools, "manager-answers", call.tool, call.args); err != nil {
 					mu.Unlock()
 					return nil, err
 				}
@@ -142,7 +142,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 		}
 		mu.Unlock()
 		problem("unexpected manager turn:\n%s", req.Prompt)
-		return result(req, "session-chief", "Nothing to do"), nil
+		return result(req, "session-manager", "Nothing to do"), nil
 	}
 
 	states := func(r *trace.Repository) map[string]string {
@@ -323,7 +323,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 		"build":    {`{"recorded":true,"question":"1","next":"End your turn now. The answer arrives as your next turn on this thread."}`},
 		"review":   {`{"recorded":true,"question":"2","next":"End your turn now. The answer arrives as your next turn on this thread."}`},
 		"answer_1": {`{"recorded":true,"question":"3","next":"End your turn now. The answer arrives as your next turn on this thread."}`},
-		"chief-answers": {
+		"manager-answers": {
 			`{"recorded":false,"reason":"an answer needs at least one citation; escalate a question the record does not settle"}`,
 			`{"recorded":false,"reason":"citation \"charter#7\" does not resolve: the charter has no rule numbered 7 exactly once"}`,
 			`{"recorded":false,"reason":"at least one spec#<n> or plan#<unit> citation is required"}`,
@@ -331,8 +331,8 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 			`{"recorded":true,"question":"1","next":"The answer is delivered to the asker as its next turn."}`,
 			`{"recorded":false,"reason":"question 1 is already answered"}`,
 		},
-		"chief-redelivered": {`{"recorded":false,"reason":"question 1 is already answered"}`},
-		"chief-escalates": {
+		"manager-redelivered": {`{"recorded":false,"reason":"question 1 is already answered"}`},
+		"manager-escalates": {
 			`{"recorded":true,"batch":"escalation_2","questions":["2","3"]}`,
 			`{"recorded":false,"reason":"question 2 is escalated to the owner; only the owner's ruling answers it"}`,
 			`{"recorded":false,"reason":"question 3 is escalated to the owner; only the owner's ruling answers it"}`,

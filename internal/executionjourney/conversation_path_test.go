@@ -79,7 +79,7 @@ func TestConversationPathBypassesSchedulingAndOwnWorkflow(t *testing.T) {
 	}
 	t.Cleanup(func() { attempt.Close() })
 
-	manager, err := client.Send(ctx, fixturekit.Stream, "Chief message")
+	manager, err := client.Send(ctx, fixturekit.Stream, "Manager message")
 	fixturekit.Must(t, err)
 	designed, err := client.DesignMessage(ctx, design.Design.Workstream, "Design message")
 	fixturekit.Must(t, err)
@@ -341,7 +341,7 @@ func TestConversationPathManagerPauseAndProviderHolds(t *testing.T) {
 	fixturekit.Must(t, err)
 	intakefixture.AwaitConversation(t, client, func(r api.ConversationResponse) bool { return len(r.Entries) == 2 })
 	if len(turns.Calls()) != 1 {
-		t.Fatal("chief did not run while paused")
+		t.Fatal("manager did not run while paused")
 	}
 	repo := s.Sole().Repository
 	records, err := repo.Operations(fixturekit.Stream)
@@ -369,7 +369,7 @@ func TestConversationPathManagerPauseAndProviderHolds(t *testing.T) {
 	op, err := thread.TurnOperation(cfg.Project.ID, "provider-test", thread.TurnInput{Workstream: fixturekit.Stream, Agent: trace.Manager, Turn: next.Turn})
 	fixturekit.Must(t, err)
 	if !holds(repo, fixturekit.Stream, op) || turn.Claim != nil || len(turns.Calls()) != 1 {
-		t.Fatal("provider hold did not keep chief queued")
+		t.Fatal("provider hold did not keep manager queued")
 	}
 	fixturekit.Must(t, s.Store.ClearProviderLimit("claude"))
 	fixturekit.Must(t, s.Store.ClearProviderLimit("codex"))

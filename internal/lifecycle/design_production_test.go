@@ -62,7 +62,7 @@ func awaitOwnerTurnRunning(f *journey.ProductionDesignFixture, t *testing.T, sen
 		t.Logf("owner address=%s project=%s authoritative-project=%s host=%s shared-handle=%v", address, project, target.Project(), routedHost, same)
 		release()
 		if !same {
-			t.Fatal("continued owner address and members do not share the authoritative chief")
+			t.Fatal("continued owner address and members do not share the authoritative manager")
 		}
 	}
 	diagnose := func() {
@@ -82,10 +82,10 @@ func awaitOwnerTurnRunning(f *journey.ProductionDesignFixture, t *testing.T, sen
 				}
 			}
 		}
-		op, err := thread.TurnOperation(manager.Project(), "workgroup-chief-"+sent.Turn, thread.TurnInput{Workstream: host, Agent: trace.Manager, Turn: sent.Turn})
+		op, err := thread.TurnOperation(manager.Project(), "workgroup-manager-"+sent.Turn, thread.TurnInput{Workstream: host, Agent: trace.Manager, Turn: sent.Turn})
 		fixturekit.Must(t, err)
 		observed, err := (thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: manager}}).Inspect(context.Background(), op)
-		t.Logf("owner dispatch operation=%s observation=%+v error=%v; shared chief dispatch applies directly without an operation retry timer", op.ID, observed, err)
+		t.Logf("owner dispatch operation=%s observation=%+v error=%v; shared manager dispatch applies directly without an operation retry timer", op.ID, observed, err)
 		f.SharedDesign().LogTurns(t, manager, host)
 	}
 	diagnose()
@@ -398,7 +398,7 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 		}
 		if strings.Contains(req.Prompt, ruling) && relayed.CompareAndSwap(false, true) {
 			_, err := fixturekit.CallTool(ctx, tools, questions.RelayRulingTool, map[string]any{"question": string(f.Stream1) + ":1", "text": ruling, "scope": "local"})
-			return intakefixture.QuestionResult(req, "session-chief", "Ruling relayed."), err
+			return intakefixture.QuestionResult(req, "session-manager", "Ruling relayed."), err
 		}
 		_, err = fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Implement resumable uploads.", "note": "The offset contract remains agreed.", "agents": []string{}})
 		if err != nil {
@@ -407,7 +407,7 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 		if strings.Contains(req.Prompt, "affected-one") && strings.Contains(req.Prompt, "affected-two") && escalated.CompareAndSwap(false, true) {
 			_, err = fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{string(f.Stream1) + ":1", string(f.Stream2) + ":1"}, "rephrasing": escalation, "blocked": "Both asking origins.", "options": []string{"Keep", "Change"}, "recommendation": "Keep."})
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "The service is following the agreed design."), err
+		return intakefixture.QuestionResult(req, "session-manager", "The service is following the agreed design."), err
 	}
 	f.Engine.Turns["affected-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		question := "affected-one: may the offset contract change?"
@@ -415,7 +415,7 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 			question = "affected-two: may the offset contract change?"
 		}
 		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
-		return intakefixture.QuestionResult(req, "session-worker", "Asked the chief."), err
+		return intakefixture.QuestionResult(req, "session-worker", "Asked the manager."), err
 	}
 	f.Engine.Turns["unaffected-work"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		unaffectedRuns.Add(1)
@@ -674,7 +674,7 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 			<-ctx.Done()
 			return nil, ctx.Err()
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Following the approved contract."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Following the approved contract."), nil
 	}
 	f.Engine.Mu.Unlock()
 	sent, err := f.C.Send(ctx, f.Origin, message)
@@ -690,7 +690,7 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 	fixturekit.Must(t, err)
 	index := slices.IndexFunc(before.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == sent.Turn })
 	if index < 0 || before.Active != sent.Turn || before.Turns[index].Claim == nil || before.Turns[index].Response != nil || !before.Turns[index].CompletedAt.IsZero() {
-		t.Logf("continued chief status=%s active=%s sent=%s queue-index=%d", before.Status, before.Active, sent.Turn, index)
+		t.Logf("continued manager status=%s active=%s sent=%s queue-index=%d", before.Status, before.Active, sent.Turn, index)
 		t.Fatal("continued pending owner turn was not the durably claimed active request")
 	}
 	request := before.Turns[index].Request
@@ -706,7 +706,7 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 			_, err := fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Continue resumable uploads.", "note": "Restart retained the owner status request.", "agents": []string{}})
 			return intakefixture.QuestionResult(req, "session-recovered", "Status continued after restart."), err
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Following the approved contract."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Following the approved contract."), nil
 	}
 	f.Engine.Mu.Unlock()
 	f.Start(t)

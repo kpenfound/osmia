@@ -296,8 +296,8 @@ func TestAConfidentDiscoveryPickBindsTheDisposition(t *testing.T) {
 	}
 }
 
-// A caller cannot name the decider of a discovery: a disposition the manager of
-// staff records on its own is never Jev's.
+// A caller cannot name the decider of a discovery: a disposition the manager
+// records on its own is never Jev's.
 func TestADiscoveryCannotNameItsDecider(t *testing.T) {
 	t.Parallel()
 	k := newDiscoveryKit(t, "decide-discovery-decider", nil)

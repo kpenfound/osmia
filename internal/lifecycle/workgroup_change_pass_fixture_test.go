@@ -227,7 +227,7 @@ func (c *changePass) scriptChangeTurns() {
 			_, err = fixturekit.CallTool(ctx, tools, lifecycle.RequestChangeTool, toolMap(lifecycle.ChangeRequest{Key: changeKey, Kind: c.kind, Scope: scope, Workstream: c.survivor, Change: "Cancel the selected work or add diagnostic refusal checks to its selected slices."}))
 			return intakefixture.QuestionResult(req, "session-request", "The impact will be presented here."), err
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Following the original shared conversation."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Following the original shared conversation."), nil
 	}
 }
 
@@ -513,7 +513,7 @@ func (c *changePass) requireDesignConversationUnchanged(t *testing.T) {
 	}
 	before := c.f.Before
 	if !intakefixture.EqualJSONTest(before.Identity, manager.Identity) || len(manager.Turns) < len(before.Turns) || !intakefixture.EqualJSONTest(before.Turns, manager.Turns[:len(before.Turns)]) {
-		t.Fatalf("retirement changed original conversation or design turns: before=%+v turns=%d chief=%+v turns=%d", before.Identity, len(before.Turns), manager.Identity, len(manager.Turns))
+		t.Fatalf("retirement changed original conversation or design turns: before=%+v turns=%d manager=%+v turns=%d", before.Identity, len(before.Turns), manager.Identity, len(manager.Turns))
 	}
 	origin, err := c.f.S.Repository(c.f.Project)
 	fixturekit.Must(t, err)

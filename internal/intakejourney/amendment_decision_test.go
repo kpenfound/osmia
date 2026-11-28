@@ -446,7 +446,7 @@ func TestManagerRecordsTheOwnersAmendmentDecision(t *testing.T) {
 		actor trace.Actor
 	}{{"events_1", intake.ServiceActor}, {"message_1", intake.OwnerActor}} {
 		_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn.id, Revision: 1, Project: f.Project, Workstream: stream, At: fixturekit.DemoStart, Actor: turn.actor, Cause: "fixture"},
-			AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: turn.id, Profile: profile, SystemPrompt: "chief", Prompt: "Reject amendment 1."})
+			AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: turn.id, Profile: profile, SystemPrompt: "manager", Prompt: "Reject amendment 1."})
 		fixturekit.Must(t, err)
 	}
 	controls := &journey.RuntimeControls{}

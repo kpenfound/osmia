@@ -32,12 +32,12 @@ type EdgeWaiver struct {
 	Upstream config.WorkstreamID `json:"upstream"`
 	Type     string              `json:"type"`
 	// Ended says why the dependency could not be met: abandoned, closed,
-	// owner when the owner dropped a dependency that had not ended, or
-	// chief_of_staff when the manager did.
+	// owner when the owner dropped a dependency that had not ended, or the
+	// manager's stored name (trace.Manager) when the manager did.
 	Ended string `json:"ended,omitempty"`
 	// Reason is the decision's reason.
 	Reason string `json:"reason"`
-	// DecidedBy is who decided the drop (jev, owner or chief_of_staff) and Judgment the
+	// DecidedBy is who decided the drop (jev, owner or the manager's stored name, trace.Manager) and Judgment the
 	// judgment record when Jev did.
 	DecidedBy string    `json:"decided_by"`
 	Judgment  string    `json:"judgment,omitempty"`

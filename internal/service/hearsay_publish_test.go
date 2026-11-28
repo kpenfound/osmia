@@ -29,8 +29,8 @@ token_env = "TEST_HEARSAY_OWNER_TOKEN"
 id = "osmia-worker"
 token_env = "TEST_HEARSAY_WORKER_TOKEN"
 [hearsay.agents.orchestrator]
-id = "osmia-chief"
-token_env = "TEST_HEARSAY_CHIEF_TOKEN"
+id = "osmia-manager"
+token_env = "TEST_HEARSAY_MANAGER_TOKEN"
 [hearsay.agents.observer]
 id = "osmia-observer"
 token_env = "TEST_HEARSAY_OBSERVER_TOKEN"

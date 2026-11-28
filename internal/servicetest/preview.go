@@ -63,13 +63,13 @@ func NewPreviewJourney(t *testing.T) *PreviewJourney {
 	engine := &fixturekit.SessionEngine{Sessions: &fixturekit.DemoSessions{ByKey: map[string]*mcp.ClientSession{}}}
 	engine.Turn = func(ctx context.Context, req agent.Request) (*agent.Result, error) {
 		if !strings.HasSuffix(req.Prompt, previewPrompt) {
-			return &agent.Result{ClaudeID: "preview-chief", ResultText: "Ready."}, nil
+			return &agent.Result{ClaudeID: "preview-manager", ResultText: "Ready."}, nil
 		}
 		engine.Sessions.Mu.Lock()
 		tools := engine.Sessions.ByKey[req.Env[coreadapter.TokenEnvironment]]
 		engine.Sessions.Mu.Unlock()
 		if tools == nil {
-			return nil, fmt.Errorf("chief has no scoped tool host")
+			return nil, fmt.Errorf("manager has no scoped tool host")
 		}
 		inspected, err := fixturekit.CallTool(ctx, tools, "inspect_code", map[string]any{"workstream": f.Member, "path": ".dagger/main.go"})
 		if err != nil {
@@ -80,7 +80,7 @@ func NewPreviewJourney(t *testing.T) *PreviewJourney {
 			return nil, err
 		}
 		if code.Commit != f.Commit || !strings.Contains(code.Content, "Web()") || !strings.Contains(code.Content, "WithExposedPort(8080)") {
-			return nil, fmt.Errorf("chief could not inspect committed Service: %s", inspected)
+			return nil, fmt.Errorf("manager could not inspect committed Service: %s", inspected)
 		}
 		raw, err := fixturekit.CallTool(ctx, tools, "preview", map[string]any{"workstream": f.Member, "call": []string{"web"}, "port": 8080})
 		if err != nil {
@@ -97,11 +97,11 @@ func NewPreviewJourney(t *testing.T) *PreviewJourney {
 			return nil, fmt.Errorf("preview result: %s", raw)
 		}
 		if req.Grants == nil || req.Grants.VCS || req.Grants.DaggerEngine != "" {
-			return nil, fmt.Errorf("chief has no confined read-only grants")
+			return nil, fmt.Errorf("manager has no confined read-only grants")
 		}
 		for _, tool := range []string{"*", "Bash", "Write", "Edit", "shell", "apply_patch", "bash", "edit", "write"} {
 			if slices.Contains(req.Grants.Tools, tool) {
-				return nil, fmt.Errorf("chief received execution or write tool %s", tool)
+				return nil, fmt.Errorf("manager received execution or write tool %s", tool)
 			}
 		}
 		copies := 0
@@ -115,9 +115,9 @@ func NewPreviewJourney(t *testing.T) *PreviewJourney {
 			}
 		}
 		if copies != 1 {
-			return nil, fmt.Errorf("chief read-only image copies: %d", copies)
+			return nil, fmt.Errorf("manager read-only image copies: %d", copies)
 		}
-		return &agent.Result{ClaudeID: "preview-chief", ResultText: "Settings preview: " + result.ImageID}, nil
+		return &agent.Result{ClaudeID: "preview-manager", ResultText: "Settings preview: " + result.ImageID}, nil
 	}
 	f.Project = NewProject(t, func(opts *service.Options, _ *service.TestHooks) {
 		intakefixture.WithWeb(t, opts.Config.Root, "127.0.0.1:0")
@@ -170,14 +170,14 @@ func (f *PreviewJourney) Capture(t *testing.T) api.FeedImage {
 				fixturekit.Must(t, err)
 				for _, turn := range thread.Turns {
 					if turn.Request.TurnID == message.Turn && turn.Response != nil {
-						t.Fatalf("chief preview failed: %s", turn.Response.Failure)
+						t.Fatalf("manager preview failed: %s", turn.Response.Failure)
 					}
 				}
-				t.Fatalf("chief preview failed: %+v", conversation)
+				t.Fatalf("manager preview failed: %+v", conversation)
 			}
 			if entry.Kind == "response" && entry.State == api.TurnDone {
 				if !strings.HasPrefix(entry.Text, "Settings preview: ") {
-					t.Fatalf("chief did not preview the page: %+v", entry)
+					t.Fatalf("manager did not preview the page: %+v", entry)
 				}
 				completed = true
 			}
@@ -186,7 +186,7 @@ func (f *PreviewJourney) Capture(t *testing.T) api.FeedImage {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("chief preview did not complete: %+v", conversation)
+			t.Fatalf("manager preview did not complete: %+v", conversation)
 		}
 		wait()
 	}

@@ -303,8 +303,8 @@ func routeWord(res router.Result) string {
 // manager turn. The manager dismisses a committee objection at
 // the ratification gate on the owner's behalf, or escalates it to the owner.
 // A decision the service refuses is an ordinary result,
-// {"recorded":false,"reason":...}, and records nothing. A shared manager of
-// staff names the member whose debate the objection belongs to.
+// {"recorded":false,"reason":...}, and records nothing. A shared manager
+// names the member whose debate the objection belongs to.
 func (c *Controls) ResolveObjection(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: ResolveObjectionTool, Effect: coreadapter.ToolMemory,
 		Description: "Decide a committee objection that stands once this workstream's debate concluded, before the owner sees the ratification packet. objection: its ID; decision: dismiss (the record answers it: it no longer blocks and is not put to the owner) or escalate (the owner rules on it); " +

@@ -187,7 +187,7 @@ func TestConcludingRebasesOnceOntoThePinnedTargetAndMeasuresTheRebasedCommit(t *
 	}
 	for _, id := range []string{"climb-conclusion-pinned", "climb-conclusion-prepared", "climb-conclusion-moved", "climb-conclusion-measured"} {
 		if got := noticeCount(t, r, id); got != 1 {
-			t.Fatalf("the chief heard %d events of %s", got, id)
+			t.Fatalf("the manager heard %d events of %s", got, id)
 		}
 	}
 	if r.published != 4 {

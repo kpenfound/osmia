@@ -56,8 +56,8 @@ func (s *Controller) ManagerEventsSkip(repository *trace.Repository) func(config
 // and the context they are delivered with: the project context and the note
 // about a member workstream, which change between turns.
 // The bundle is assembled from the project's files and the given trace only.
-// stream is the member whose events this delivery carries; the manager of
-// staff is identified by its workgroup's host, which may be a different
+// stream is the member whose events this delivery carries; the manager
+// is identified by its workgroup's host, which may be a different
 // workstream when stream shares a manager with others.
 func (s *Controller) ManagerEventsPrompt(project config.ProjectID, repository *trace.Repository) func(context.Context, config.WorkstreamID) (string, string, error) {
 	return func(ctx context.Context, stream config.WorkstreamID) (string, string, error) {

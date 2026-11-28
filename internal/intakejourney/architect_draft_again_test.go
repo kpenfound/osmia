@@ -38,12 +38,12 @@ func TestAMoveToSketchedDraftsAStoppedWorkstreamAgain(t *testing.T) {
 	moves := service.InspectForTest(f.S.Core()).LifecycleController()
 	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
 	note := "Drop the dependency between the units; they share no state."
-	out, apiErr := moves.MoveWorkstream(ctx, f.Repository(), stream, lifecycle.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "chief-turn-1")
+	out, apiErr := moves.MoveWorkstream(ctx, f.Repository(), stream, lifecycle.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "manager-turn-1")
 	if apiErr != nil {
 		t.Fatal(apiErr)
 	}
 	if out.State != intake.HandedState || !strings.Contains(out.Detail, "new run of up to 3 drafts") {
-		t.Fatalf("chief's move: %+v", out)
+		t.Fatalf("manager's move: %+v", out)
 	}
 	last := fmt.Sprintf("draft-%d-exhausted", 2*intake.MaxDrafts)
 	f.Await(t, stream, f.TransitionRecorded(t, stream, last))

@@ -23,7 +23,7 @@ import (
 
 func TestManagerResolvesAContestOnTheOwnersBehalf(t *testing.T) {
 	t.Parallel()
-	c := journey.NewContestFixture(t, "chief-resolves")
+	c := journey.NewContestFixture(t, "manager-resolves")
 	contest := c.Contest(t)
 	if raised, _ := c.Raised(t, contest); raised {
 		t.Fatal("a contest the manager has not seen was raised to the owner")
@@ -63,7 +63,7 @@ func TestManagerResolvesAContestOnTheOwnersBehalf(t *testing.T) {
 
 func TestManagerRaisesWhatItCannotResolve(t *testing.T) {
 	t.Parallel()
-	c := journey.NewContestFixture(t, "chief-raises")
+	c := journey.NewContestFixture(t, "manager-raises")
 	for i := range 3 {
 		c.Contest(t)
 		if out := c.Resolve(t, `{"unit":"resume","decision":"review","note":"Record a verdict."}`); !strings.Contains(out, `"recorded":true`) {
@@ -100,7 +100,7 @@ func TestManagerRaisesWhatItCannotResolve(t *testing.T) {
 
 func TestManagerViewShowsWhyAUnitIsStuck(t *testing.T) {
 	t.Parallel()
-	c := journey.NewContestFixture(t, "chief-view")
+	c := journey.NewContestFixture(t, "manager-view")
 	contest := c.Contest(t)
 	th, err := c.Repo.Thread(c.Stream, intake.ReviewerAgent("resume"))
 	fixturekit.Must(t, err)

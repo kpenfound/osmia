@@ -18,8 +18,8 @@ const ProjectSpecDraftInputDocument = "project-spec-draft-input"
 
 // ProjectSpecDraftInput pins the documents shown to one architect turn. It is
 // recorded atomically with the drafting transition and reused after a restart.
-// Problems is why the previous draft was refused, and Note what the manager of
-// staff or the owner asked the architect to change; the turn's prompt carries
+// Problems is why the previous draft was refused, and Note what the manager
+// or the owner asked the architect to change; the turn's prompt carries
 // both.
 type ProjectSpecDraftInput struct {
 	Turn     string                           `json:"turn"`
@@ -36,7 +36,7 @@ type ProjectSpecDraftInput struct {
 const ProjectSpecDraftAttempts = 3
 
 // ProjectSpecDraftRequestCause is the cause of a drafting transition the manager
-// of staff or the owner asked for. It starts a new run of attempts.
+// or the owner asked for. It starts a new run of attempts.
 const ProjectSpecDraftRequestCause = "project-spec-draft-request"
 
 // ProjectSpecDraftFailures returns how many drafts have been refused since the

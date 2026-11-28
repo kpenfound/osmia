@@ -102,8 +102,8 @@ type Quiet struct {
 	Card bool
 	// Paused says a pause covers the subject.
 	Paused bool
-	// Turn is the latest time a turn of the subject, other than the manager of
-	// staff's, that is running or queued was queued, claimed or attempted; zero
+	// Turn is the latest time a turn of the subject, other than the manager's,
+	// that is running or queued was queued, claimed or attempted; zero
 	// when none is. A turn explains the quiet only while that time is younger
 	// than the window, so a turn stuck in its queue is a stall.
 	Turn time.Time

@@ -725,14 +725,14 @@ func TestTheManagerDropsADependency(t *testing.T) {
 	tool := controls.Lifecycle().DropDependency(f.repository, scope)
 	out := intakefixture.Handle(t, tool, fmt.Sprintf(`{"upstream":%q,"reason":"The dependent works without it.","workstream":%q}`, f.upstream, f.downstream))
 	if !strings.Contains(out, `"recorded":true`) {
-		t.Fatalf("the chief's drop: %s", out)
+		t.Fatalf("the manager's drop: %s", out)
 	}
 	dropped := lastOn(t, f.repository, f.downstream, lifecycle.DependencySubject(f.upstream, trace.EdgeHardBlock))
 	if dropped.To != lifecycle.DependencyWaived || dropped.DecidedBy != trace.DecidedByManager || dropped.Judgment != "" {
-		t.Fatalf("the chief's drop %+v", dropped)
+		t.Fatalf("the manager's drop %+v", dropped)
 	}
 	if n := len(p.TransitionRequests()); n != 0 {
-		t.Fatalf("Jev was asked %d times about the chief's decision", n)
+		t.Fatalf("Jev was asked %d times about the manager's decision", n)
 	}
 	waivers, _, err := lifecycle.EdgeWaiversAt(f.repository, f.downstream)
 	fixturekit.Must(t, err)
@@ -740,6 +740,6 @@ func TestTheManagerDropsADependency(t *testing.T) {
 		t.Fatalf("waivers %+v", waivers)
 	}
 	if f.holdsMason(t, f.downstream) {
-		t.Fatal("the dependent is still held after the chief's drop")
+		t.Fatal("the dependent is still held after the manager's drop")
 	}
 }

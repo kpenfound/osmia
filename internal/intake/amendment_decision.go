@@ -808,8 +808,8 @@ func (a AmendmentDebate) Rule(ctx context.Context, stream config.WorkstreamID, r
 
 // DeliverRuling queues the ruling as the next turn of the requester's thread
 // unless the thread holds it already. The turn carries the system prompt of
-// the turn that asked for the amendment, or asked the question the manager of
-// staff routed as one, and the profile the requester's role is bound to now.
+// the turn that asked for the amendment, or asked the question the manager
+// routed as one, and the profile the requester's role is bound to now.
 // A requester the trace holds no thread for is sent nothing, and neither is
 // a drift mason: its thread takes turns for a drift rebase's conflicts
 // alone.

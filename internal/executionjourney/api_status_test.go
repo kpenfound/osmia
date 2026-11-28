@@ -48,7 +48,7 @@ func queueManagerTurn(t *testing.T, repo *trace.Repository, turn string, at time
 	fixturekit.Must(t, err)
 	tx := trace.Transaction{Transition: trace.Transition{
 		Header:  trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "deliver_" + turn, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at, Actor: trace.Actor{Kind: "service", ID: "inbox"}, Cause: req.ID, Depth: 1},
-		Subject: "chief_inbox", To: "delivering", Reason: "Owner message accepted for the manager"},
+		Subject: "manager_inbox", To: "delivering", Reason: "Owner message accepted for the manager"},
 		Events: []trace.Event{{ID: event, Kind: "turn", Body: "Deliver " + turn, Operation: &op}}}
 	_, err = repo.Transact(ctx, tx)
 	fixturekit.Must(t, err)
@@ -72,7 +72,7 @@ func TestManagerStatusAcrossRestart(t *testing.T) {
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, clock.Now(), owner))
 	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Quiet, clock.Now(), owner))
-	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: intakefixture.ManagerAgent, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "chief_of_staff", ThreadID: intakefixture.ManagerThread}
+	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: intakefixture.ManagerAgent, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: trace.Manager, ThreadID: intakefixture.ManagerThread}
 	fixturekit.Must(t, repo.CreateThread(ctx, identity))
 	queueManagerTurn(t, repo, "status", clock.Now())
 	fixturekit.Must(t, repo.Close())
@@ -87,7 +87,7 @@ func TestManagerStatusAcrossRestart(t *testing.T) {
 	fixturekit.Must(t, os.Mkdir(views, 0700))
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		turns := &isolation.Turns{Workspaces: &fixturekit.DemoWorkspaces{Directory: cfg.Project.Clone}, Views: isolation.Views{Directory: views}, Engine: engine,
-			Grants: map[string]coreadapter.Capabilities{"chief_of_staff": {Tools: []string{status.ToolName}}},
+			Grants: map[string]coreadapter.Capabilities{trace.Manager: {Tools: []string{status.ToolName}}},
 			Select: func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			},
@@ -140,7 +140,7 @@ func TestManagerStatusAcrossRestart(t *testing.T) {
 			}
 			results = append(results, out)
 		}
-		return &agent.Result{ClaudeID: "session-chief", ResultText: "Status written", SessionDir: req.SessionDir, NumTurns: 1}, nil
+		return &agent.Result{ClaudeID: "session-manager", ResultText: "Status written", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
 
 	s, c := journey.StartT(t, opts)
@@ -168,7 +168,7 @@ func TestManagerStatusAcrossRestart(t *testing.T) {
 	}
 	mu.Lock()
 	want := []string{
-		`{"stored":false,"reason":"goal contains an Osmia or backend identifier (\"thread_chief\"); refer to the work or the agent in words"}`,
+		`{"stored":false,"reason":"goal contains an Osmia or backend identifier (\"thread_manager\"); refer to the work or the agent in words"}`,
 		`{"stored":true,"revision":1}`,
 		`{"stored":true,"revision":2}`,
 	}

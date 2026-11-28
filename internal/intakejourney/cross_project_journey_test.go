@@ -193,7 +193,7 @@ func TestCrossProjectDesignJourney(t *testing.T) {
 			return nil, err
 		}
 		if !slices.Contains(names, intake.DraftBriefToolName) {
-			return &agent.Result{ClaudeID: "session-chief-journey", ResultText: "The workgroup follows the agreed brief."}, nil
+			return &agent.Result{ClaudeID: "session-manager-journey", ResultText: "The workgroup follows the agreed brief."}, nil
 		}
 		projects := []config.ProjectID{j.Project}
 		if strings.Contains(req.Prompt, "Add Client") {

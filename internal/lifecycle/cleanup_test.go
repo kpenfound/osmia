@@ -211,7 +211,7 @@ func TestCleanupRemovesTheTurnDirectoriesOfAFinishedWorkstream(t *testing.T) {
 		filepath.Join("architect", project, string(stream), "draft-1", "session", "transcript.jsonl"),
 		filepath.Join("shed", project, string(stream), "round-1-member-1", "session", "prompt.md"),
 		filepath.Join("final", project, string(stream), "final-1", "session", "report.json"),
-		filepath.Join("chief_of_staff", project, string(stream), "status.json"),
+		filepath.Join(trace.Manager, project, string(stream), "status.json"),
 		filepath.Join("workspaces", project, string(stream), "notes.md"),
 		filepath.Join("views", project, string(stream), "mason", "turn-1", "output.txt"),
 		filepath.Join("checks", project, string(stream), "final-123", "output.txt"),

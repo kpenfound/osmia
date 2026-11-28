@@ -109,16 +109,16 @@ func TestWorkgroupSharesOneManagerAcrossMembersAndARestart(t *testing.T) {
 			acted = true
 		}
 		if acted {
-			return intakefixture.QuestionResult(req, "session-chief", "Handled"), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Handled"), nil
 		}
 
 		if strings.Contains(req.Prompt, "asked by the mason: "+question1) ||
 			strings.Contains(req.Prompt, "asked by the mason: "+question2) ||
 			strings.Contains(req.Prompt, ownersRuling) {
-			return intakefixture.QuestionResult(req, "session-chief", "Nothing further"), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Nothing further"), nil
 		}
 		problem("unexpected manager turn:\n%s", req.Prompt)
-		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Nothing to do"), nil
 	}
 	engine.Turns[questions.TurnID("1")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		return intakefixture.QuestionResult(req, "session-"+req.Name, "Continued"), nil

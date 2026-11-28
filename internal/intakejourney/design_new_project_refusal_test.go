@@ -62,7 +62,7 @@ func TestNewProjectStartRefusedAfterStartReachesTheInboxAndTheManager(t *testing
 		return len(turns) == 1 && turns[0].Response != nil
 	})
 	if turn := refusalTurns()[0]; !strings.Contains(turn.Request.Prompt, "already exists on GitHub") || !strings.Contains(turn.Request.Prompt, "tries the creation again on every pass") {
-		t.Fatalf("the chief's turn: %s", turn.Request.Prompt)
+		t.Fatalf("the manager's turn: %s", turn.Request.Prompt)
 	}
 	seen := repos.reads.Load()
 	f.await(t, "more passes over the refused creation", func() bool { return repos.reads.Load() >= seen+3 })

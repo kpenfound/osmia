@@ -210,7 +210,7 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 		}
 		defer release()
 	}
-	attrs := []any{"project", string(a.repository.Project()), "workstream", string(in.Workstream), "role", role, "profile", profile}
+	attrs := []any{"project", string(a.repository.Project()), "workstream", string(in.Workstream), "role", trace.DisplayRole(role), "profile", profile}
 	if unit != "" {
 		attrs = append(attrs, "unit", unit)
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 const project config.ProjectID = "p_0123456789abcdef0123456789abcdef"
@@ -27,7 +28,7 @@ func (local) Assemble(_ context.Context, id config.ProjectID, scope bundle.Scope
 	return bundle.Bundle{Project: id, Mode: bundle.ModeFile, Scope: scope, Charter: bundle.Charter{Revision: 7}}, nil
 }
 func settings(endpoint string) config.Hearsay {
-	return config.Hearsay{URL: endpoint, Principal: "human", TokenEnv: "OWNER_TOKEN", Agents: map[string]config.HearsayAgent{"worker": {ID: "worker", TokenEnv: "WORKER_TOKEN"}, "observer": {ID: "observer", TokenEnv: "OBSERVER_TOKEN"}, "orchestrator": {ID: "orchestrator", TokenEnv: "CHIEF_TOKEN"}}}
+	return config.Hearsay{URL: endpoint, Principal: "human", TokenEnv: "OWNER_TOKEN", Agents: map[string]config.HearsayAgent{"worker": {ID: "worker", TokenEnv: "WORKER_TOKEN"}, "observer": {ID: "observer", TokenEnv: "OBSERVER_TOKEN"}, "orchestrator": {ID: "orchestrator", TokenEnv: "MANAGER_TOKEN"}}}
 }
 func secret(name string) string { return "private-" + name }
 
@@ -83,7 +84,7 @@ func TestClientRejectsRedirectsMissingCredentialsAndUngrantableCalls(t *testing.
 	}))
 	defer source.Close()
 	c := Client{Config: settings(source.URL), LookupEnv: secret}
-	for _, test := range []struct{ role, name string }{{"mason", "get_bundle"}, {"session", "assert"}, {"mason", "watch"}, {"chief_of_staff", "delete"}} {
+	for _, test := range []struct{ role, name string }{{"mason", "get_bundle"}, {"session", "assert"}, {"mason", "watch"}, {trace.Manager, "delete"}} {
 		if _, err := c.Call(context.Background(), test.role, test.name, map[string]string{}); err == nil || strings.Contains(err.Error(), "private") {
 			t.Fatalf("%+v: %v", test, err)
 		}
@@ -102,7 +103,7 @@ func TestProviderRejectsWrongScopeAndOversizedBundles(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, response) }))
 		cfg := &config.Config{Hearsay: settings(server.URL), Projects: []config.Project{{ID: project, HearsayScope: "root"}}}
 		p := Provider{Local: local{}, Config: func() *config.Config { return cfg }, Client: func(h config.Hearsay) Client { return Client{Config: h, LookupEnv: secret} }}
-		got, err := p.Assemble(context.Background(), project, bundle.Scope{Role: "chief_of_staff"})
+		got, err := p.Assemble(context.Background(), project, bundle.Scope{Role: trace.Manager})
 		server.Close()
 		if err != nil || got.Mode != Degraded || len(got.Memory) != 0 || got.Charter.Revision != 7 {
 			t.Fatalf("invalid bundle: %+v %v", got, err)
@@ -127,7 +128,7 @@ func TestToolsBindRoleAndValidateActiveTurnBeforeCalling(t *testing.T) {
 	defer server.Close()
 	c := Client{Config: settings(server.URL), LookupEnv: secret}
 	active := false
-	tools := c.Tools("chief_of_staff", "project-scope", func() error {
+	tools := c.Tools(trace.Manager, "project-scope", func() error {
 		if !active {
 			return fmt.Errorf("turn scope denied")
 		}
@@ -214,7 +215,7 @@ func TestTraverseUsesTheRolesClassCredentialsNotThePublishers(t *testing.T) {
 	defer server.Close()
 	c := Client{Config: publishing(settings(server.URL)), LookupEnv: secret}
 	input := json.RawMessage(`{"start":[{"type":"entity","id":"work:osmia-work:p"}],"steps":[{"edge":"documents"}]}`)
-	for role, agent := range map[string]string{"mason": "worker", "chief_of_staff": "orchestrator", "session": "observer"} {
+	for role, agent := range map[string]string{"mason": "worker", trace.Manager: "orchestrator", "session": "observer"} {
 		var tool *coreadapter.Tool
 		for _, candidate := range c.Tools(role, "work:osmia-work:p", func() error { return nil }) {
 			if candidate.Name == "traverse" {
@@ -228,7 +229,7 @@ func TestTraverseUsesTheRolesClassCredentialsNotThePublishers(t *testing.T) {
 			t.Fatalf("%s: %v", role, err)
 		}
 		h := seen[len(seen)-1]
-		if h.Get("Hearsay-Agent") != agent || h.Get("Hearsay-Agent-Token") != secret(map[string]string{"worker": "WORKER_TOKEN", "orchestrator": "CHIEF_TOKEN", "observer": "OBSERVER_TOKEN"}[agent]) || h.Get("Authorization") != "Bearer private-OWNER_TOKEN" || h.Get("Hearsay-Principal") != "human" {
+		if h.Get("Hearsay-Agent") != agent || h.Get("Hearsay-Agent-Token") != secret(map[string]string{"worker": "WORKER_TOKEN", "orchestrator": "MANAGER_TOKEN", "observer": "OBSERVER_TOKEN"}[agent]) || h.Get("Authorization") != "Bearer private-OWNER_TOKEN" || h.Get("Hearsay-Principal") != "human" {
 			t.Errorf("%s: credentials %v", role, h)
 		}
 		for name, values := range h {
@@ -247,7 +248,7 @@ func TestTraverseUsesTheRolesClassCredentialsNotThePublishers(t *testing.T) {
 
 func TestEveryRoleWithReadToolsGetsTraverseAndOnlyWorkersAndTheManagerAssert(t *testing.T) {
 	c := Client{Config: settings("https://memory.example")}
-	for _, role := range []string{"chief_of_staff", "architect", "committee", "mason", "reviewer", "session"} {
+	for _, role := range []string{trace.Manager, "architect", "committee", "mason", "reviewer", "session"} {
 		names := map[string]bool{}
 		for _, tool := range c.Tools(role, "work:s:p", nil) {
 			names[tool.Name] = true

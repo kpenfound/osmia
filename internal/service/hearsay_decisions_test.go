@@ -124,7 +124,7 @@ func TestPublishOwnerRulingIsAnOwnerDecisionAndTheManagersRelayIsNot(t *testing.
 	}
 	for _, p := range posts {
 		if strings.Contains(p.Raw, relayed) {
-			t.Fatalf("a post carries the chief's relay: %s", p.Raw)
+			t.Fatalf("a post carries the manager's relay: %s", p.Raw)
 		}
 	}
 }
@@ -146,7 +146,7 @@ func TestPublishManagerAnswersAreDecisionsUnlessTheyCiteCode(t *testing.T) {
 		t.Fatalf("%d decisions: %v", len(got), kinds(posts))
 	}
 	d := got[0]
-	if d.Source != "osmia-work" || d.Str("author") != "" || d.Str("decider") != "chief_of_staff" || d.Str("outcome") != "Resume is in scope." || d.Str("decision") != string(stream)+"-answer-1" {
+	if d.Source != "osmia-work" || d.Str("author") != "" || d.Str("decider") != trace.Manager || d.Str("outcome") != "Resume is in scope." || d.Str("decision") != string(stream)+"-answer-1" {
 		t.Fatalf("answer: %s on %s", d.Raw, d.Source)
 	}
 	if !strings.Contains(d.Str("rationale"), "charter#1") || !strings.Contains(d.Str("context"), "Is resume in scope?") || d.Str("question") != string(stream)+":1" {
@@ -163,7 +163,7 @@ func TestPublishLoggedAssumptionIsAnInferredManagerDecision(t *testing.T) {
 	f := newPublisherFixture(t)
 	stream := fixturekit.Stream
 	f.recordSeal(stream, 1, "# Upload limits\n\nCap uploads.\n")
-	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":"Treat the 10 MiB cap as inclusive.","actor":{"kind":"agent","id":"chief_of_staff"},"thread":"chief","turn":"t1","at":%q}]}`, string(stream), hr(2).Format(time.RFC3339))
+	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":"Treat the 10 MiB cap as inclusive.","actor":{"kind":"agent","id":"chief_of_staff"},"thread":"manager","turn":"t1","at":%q}]}`, string(stream), hr(2).Format(time.RFC3339))
 	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(2), managerActor)
 
 	posts, _ := f.pass()
@@ -172,7 +172,7 @@ func TestPublishLoggedAssumptionIsAnInferredManagerDecision(t *testing.T) {
 		t.Fatalf("%d decisions: %v", len(got), kinds(posts))
 	}
 	d := got[0]
-	if d.Source != "osmia-work" || d.Str("author") != "" || d.Str("decider") != "chief_of_staff" || d.Str("outcome") != "Treat the 10 MiB cap as inclusive." || d.Str("workstream") != string(stream) {
+	if d.Source != "osmia-work" || d.Str("author") != "" || d.Str("decider") != trace.Manager || d.Str("outcome") != "Treat the 10 MiB cap as inclusive." || d.Str("workstream") != string(stream) {
 		t.Fatalf("assumption: %s on %s", d.Raw, d.Source)
 	}
 	if d.Str("spec_document") != string(stream)+"-spec" || d.Str("context") == "" || d.Str("rationale") == "" {
@@ -272,7 +272,7 @@ func TestPublishAmendmentDecisionsRouteByWhoDecided(t *testing.T) {
 	if !strings.HasPrefix(ownerDecided.Str("outcome"), "Approved amendment 1") || ownerDecided.Str("rationale") != "Go ahead." || len(rejectedOf(ownerDecided)) == 0 || ownerDecided.Str("spec_document") != string(stream)+"-spec" {
 		t.Fatalf("owner-decided amendment: %s", ownerDecided.Raw)
 	}
-	if planOnly.Source != "osmia-work" || planOnly.Str("author") != "" || planOnly.Str("decider") != "chief_of_staff" || planOnly.Str("supersedes") != "" {
+	if planOnly.Source != "osmia-work" || planOnly.Str("author") != "" || planOnly.Str("decider") != trace.Manager || planOnly.Str("supersedes") != "" {
 		t.Fatalf("plan-only amendment: %s on %s", planOnly.Raw, planOnly.Source)
 	}
 	if revisited.Str("supersedes") != ownerDecided.Str("decision") || ownerDecided.Str("supersedes") != "" {
@@ -333,7 +333,7 @@ func TestPublishPostsADeclinedAndADeferredDiscoveryAsManagerScopeCalls(t *testin
 	declined := decisionOf(t, p.posts, string(p.stream)+"-discovery-"+shortHash(scopeDiscovery(1))+"-2")
 	deferred := decisionOf(t, p.posts, string(p.stream)+"-discovery-"+shortHash(scopeDiscovery(1))+"-3")
 	for _, d := range []fixturekit.HooksPost{declined, deferred} {
-		if d.Source != "osmia-work" || d.Str("author") != "" || d.Str("decider") != "chief_of_staff" || d.Str("workstream") != string(p.stream) {
+		if d.Source != "osmia-work" || d.Str("author") != "" || d.Str("decider") != trace.Manager || d.Str("workstream") != string(p.stream) {
 			t.Fatalf("scope call: %s on %s", d.Raw, d.Source)
 		}
 	}
@@ -361,7 +361,7 @@ func TestPublishPostsAnAcceptedBlockingFindingAsTheOwnersDecision(t *testing.T) 
 func TestPublishPostsAFinalReviewFollowUpAsAManagerDecision(t *testing.T) {
 	p := publishScopeCalls(t)
 	later := decisionOf(t, p.posts, string(p.stream)+"-followup-final-1")
-	if later.Source != "osmia-work" || later.Str("author") != "" || later.Str("decider") != "chief_of_staff" || !strings.Contains(later.Str("context"), "Resume is not tested after a restart") || later.Str("rationale") == "" {
+	if later.Source != "osmia-work" || later.Str("author") != "" || later.Str("decider") != trace.Manager || !strings.Contains(later.Str("context"), "Resume is not tested after a restart") || later.Str("rationale") == "" {
 		t.Fatalf("follow-up: %s on %s", later.Raw, later.Source)
 	}
 }
@@ -390,7 +390,7 @@ func TestPublishDecisionsWaitForAnOutageAndAreNotRepeated(t *testing.T) {
 	stream := fixturekit.Stream
 	f.ask(stream, "1", "Is the cap per file?", hr(1))
 	f.ruling(stream, "1", 1, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "Per file.", Citations: []string{"spec#1"}}, hr(2), managerActor)
-	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":"Count bytes, not characters.","actor":{"kind":"agent","id":"chief_of_staff"},"thread":"chief","turn":"t1","at":%q}]}`, string(stream), hr(3).Format(time.RFC3339))
+	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":"Count bytes, not characters.","actor":{"kind":"agent","id":"chief_of_staff"},"thread":"manager","turn":"t1","at":%q}]}`, string(stream), hr(3).Format(time.RFC3339))
 	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(3), managerActor)
 
 	f.hooks.SetStatus(http.StatusServiceUnavailable)

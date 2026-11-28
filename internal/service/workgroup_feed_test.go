@@ -91,11 +91,11 @@ func workgroupFeedFixture(t *testing.T, cross bool, count int, pending ...bool) 
 func finishFeedManager(t *testing.T, manager *trace.Repository, host config.WorkstreamID) trace.QueuedTurn {
 	t.Helper()
 	ctx := context.Background()
-	q, err := manager.ClaimTurn(ctx, host, trace.Manager, "chief-token", filepath.Join(t.TempDir(), "chief"), fixturekit.DemoStart.Add(time.Minute))
+	q, err := manager.ClaimTurn(ctx, host, trace.Manager, "manager-token", filepath.Join(t.TempDir(), "manager"), fixturekit.DemoStart.Add(time.Minute))
 	fixturekit.Must(t, err)
 	h := q.Request.Header
 	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), fixturekit.DemoStart.Add(2*time.Minute)
-	fixturekit.Must(t, manager.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: "chief-session"}, StartedAt: q.Claim.At, SessionDirectory: q.Claim.SessionDirectory, FinalResponse: "Shared reply"}}))
+	fixturekit.Must(t, manager.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: "manager-session"}, StartedAt: q.Claim.At, SessionDirectory: q.Claim.SessionDirectory, FinalResponse: "Shared reply"}}))
 	fixturekit.Must(t, manager.CompleteTurn(ctx, host, trace.Manager, q.Request.TurnID, q.Claim.Token, h.At))
 	return q
 }
@@ -191,7 +191,7 @@ func newWorkgroupFeedScenario(t *testing.T, cross bool) *workgroupFeedScenario {
 	fixturekit.FeedDocument(t, repo, member, "final-checks-1", "final/checks-1.json", 1, fixturekit.DemoStart, FinalCheckRun{Review: 1, Status: ChecksPassed, StartedAt: fixturekit.DemoStart, FinishedAt: fixturekit.DemoStart})
 	fixturekit.FeedDocument(t, repo, member, finalReportDocument, finalReportPath, 1, fixturekit.DemoStart, FinalReport{Review: 1, Outcome: finalReviewed, Reader: "reader", Turn: "review"})
 	data, _ := json.Marshal(ManagerContestDecision{Decision: "revise", Note: "Retry the check", Turn: "contest-turn"})
-	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: 1, Revision: 1, ID: "contest", Project: repo.Project(), Workstream: member, Unit: "upload", At: fixturekit.DemoStart, Actor: managerActor, Cause: "test"}, Path: "units/unit-upload/chief-decision.json", Content: string(data)}}))
+	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: 1, Revision: 1, ID: "contest", Project: repo.Project(), Workstream: member, Unit: "upload", At: fixturekit.DemoStart, Actor: managerActor, Cause: "test"}, Path: trace.ContestDecisionPrefix("unit-upload")+"decision.json", Content: string(data)}}))
 	var feed WorkgroupFeedResponse
 	if code := feedHTTP(t, s, http.MethodGet, Prefix+"/workgroups/"+string(g.ID)+"/feed", "", &feed); code != 200 {
 		t.Fatalf("feed status %d: %+v", code, feed)
@@ -313,7 +313,7 @@ func TestMemberFeedManagerSessionsFollowMembership(t *testing.T) {
 			if completed {
 				finishFeedManager(t, manager, fixturekit.Stream)
 			} else {
-				_, err := manager.ClaimTurn(context.Background(), fixturekit.Stream, trace.Manager, "chief-token", filepath.Join(t.TempDir(), "chief"), fixturekit.DemoStart.Add(time.Minute))
+				_, err := manager.ClaimTurn(context.Background(), fixturekit.Stream, trace.Manager, "manager-token", filepath.Join(t.TempDir(), "manager"), fixturekit.DemoStart.Add(time.Minute))
 				fixturekit.Must(t, err)
 			}
 			fixturekit.QueueRoleTurn(t, manager, fixturekit.Stream, "worker", masonRole, "upload", fixturekit.DemoStart)
@@ -340,7 +340,7 @@ func TestMemberFeedManagerSessionsFollowMembership(t *testing.T) {
 			sessions := 0
 			for _, e := range multi.Entries {
 				if e.Kind == "message" || e.Session != nil && e.Session.Role == trace.Manager {
-					t.Fatalf("chief leak: %+v", e)
+					t.Fatalf("manager leak: %+v", e)
 				}
 				if e.Session != nil {
 					sessions++

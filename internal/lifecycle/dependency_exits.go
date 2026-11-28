@@ -275,6 +275,12 @@ const ownerEnded = "owner"
 
 const managerEnded = trace.Manager
 
+// storedManagerDropCause is a stored name of the manager role: the cause of
+// the transition that records the manager dropping a dependency. Saved traces
+// hold it and the reader that finds a decided dependency exit compares
+// against it, so the value must not change.
+const storedManagerDropCause = "chief-drop"
+
 func (c dependencyCase) base() bool { return c.Type == BaseEdgeType }
 
 func (s *Controller) dependencyExit(repo *trace.Repository, stream config.WorkstreamID, state trace.WorkflowState, c dependencyCase) router.Exit {
@@ -587,7 +593,7 @@ func (s *Controller) dropDependency(ctx context.Context, project config.ProjectI
 	}
 	cause, ended := "owner-drop", ownerEnded
 	if authority.Kind == router.AuthorityManager {
-		cause, ended = "chief-drop", managerEnded
+		cause, ended = storedManagerDropCause, managerEnded
 	}
 	c := dependencyCase{Upstream: req.Upstream, Type: req.Type, Trigger: TriggerUpstreamTerminal, Cause: cause, Ended: ended, Actor: actor, Authority: authority}
 	if dependency, err := repo.WorkstreamBase(stream); err != nil {

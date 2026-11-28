@@ -24,8 +24,8 @@ const (
 
 // RoutingRoles are the roles whose questions Jev takes part in routing: the
 // workers that build a feature. A question of any other role, such as the
-// architect's judgment that a project needs no change, is the manager of
-// staff's to route without Jev; once escalated, Jev decides it at the owner's
+// architect's judgment that a project needs no change, is the manager's
+// to route without Jev; once escalated, Jev decides it at the owner's
 // gate at the owner threshold.
 var RoutingRoles = []string{"mason", "reviewer"}
 

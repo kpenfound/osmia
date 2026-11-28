@@ -261,12 +261,12 @@ func TestStallWatchdogCountsNoProgressOfTheManager(t *testing.T) {
 	t.Parallel()
 	f := newStallFixture(t, "", nil)
 	f.clock.QuietFor(40 * time.Minute)
-	f.transition(t, "stall-chief-move", trace.UnitSubject(stallUnit), UnitImplementing, UnitChecking, stallUnit, managerActor, f.clock.Now())
+	f.transition(t, "stall-manager-move", trace.UnitSubject(stallUnit), UnitImplementing, UnitChecking, stallUnit, managerActor, f.clock.Now())
 	f.clock.QuietFor(46 * time.Minute)
 	got := f.pass(t, f.watch("45m"))
 	unit := got[execution.TriggerStalled]
 	if len(got) != 2 || unit.From != UnitChecking || unit.Evidence.Facts["last_progress"] != fixturekit.DemoStart.UTC().Format(time.RFC3339) {
-		t.Fatalf("the chief's move reset the clock: %+v", got)
+		t.Fatalf("the manager's move reset the clock: %+v", got)
 	}
 
 	f.transition(t, "stall-owner-move", trace.UnitSubject(stallUnit), UnitChecking, UnitReviewing, stallUnit, ownerActor, f.clock.Now())

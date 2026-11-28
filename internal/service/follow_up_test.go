@@ -140,7 +140,7 @@ func TestAFollowUpSurvivesARestartAndFiresOnce(t *testing.T) {
 	k.repo = reopened
 	t.Cleanup(func() { _ = reopened.Close() })
 	pending := k.pending(t)
-	if len(pending) != 1 || pending[0].Reason != "Check that the upload unit landed." || pending[0].By != "chief" || pending[0].Turn != "message_1" {
+	if len(pending) != 1 || pending[0].Reason != "Check that the upload unit landed." || pending[0].By != trace.ManagerKey || pending[0].Turn != "message_1" {
 		t.Fatalf("pending follow-ups after reopening: %+v", pending)
 	}
 	context, err := renderFollowUps(k.repo, k.stream)
@@ -249,8 +249,8 @@ func TestAnActionResultReportsQueuedWorkAndAnInertOneSchedulesACheckBack(t *test
 	intakefixture.Handle(t, action, `{"unit":"upload","to":"ready"}`)
 	intakefixture.Handle(t, schedule, `{"after":"2h","reason":"Check the final review started.","workstream":"`+string(other.stream)+`"}`)
 	pending = other.pending(t)
-	if len(pending) != 1 || pending[0].By != "chief" {
-		t.Fatalf("pending after the chief's own follow_up: %+v", pending)
+	if len(pending) != 1 || pending[0].By != trace.ManagerKey {
+		t.Fatalf("pending after the manager's own follow_up: %+v", pending)
 	}
 }
 
@@ -323,7 +323,7 @@ func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
 	ctx := context.Background()
 	host, gone := g.Members[0], fixturekit.Quiet
 	if host == gone {
-		t.Fatalf("the archived member %s hosts the chief", gone)
+		t.Fatalf("the archived member %s hosts the manager", gone)
 	}
 	member := s.projects[len(s.projects)-1].repository
 	f := followUp{ID: followUpID(trace.Manager, ""), Reason: stallFollowUpReason, ScheduledAt: fixturekit.DemoStart, Due: fixturekit.DemoStart.Add(time.Minute), By: "service", Turn: "events_1", State: followUpPending}
@@ -365,7 +365,7 @@ func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
 		return
 	}
 
-	named := followUp{ID: followUpID(trace.Manager, gone), Workstream: gone, Reason: "Check the archived member.", ScheduledAt: now, Due: now.Add(time.Minute), By: "chief", Turn: "message_1", State: followUpPending}
+	named := followUp{ID: followUpID(trace.Manager, gone), Workstream: gone, Reason: "Check the archived member.", ScheduledAt: now, Due: now.Add(time.Minute), By: trace.ManagerKey, Turn: "message_1", State: followUpPending}
 	fixturekit.Must(t, recordFollowUp(ctx, manager, host, 1, named, followUpActor, "test", now))
 	now = now.Add(time.Hour)
 	pass(nil)

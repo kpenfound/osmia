@@ -76,7 +76,7 @@ func browserDesignTitles(t *testing.T, workgroup bool) {
 		}
 		if !slices.Contains(names, "set_title") {
 			if !strings.Contains(req.Prompt, "Title the started work") {
-				return &agent.Result{ClaudeID: "chief", ResultText: "Nothing to do."}, nil
+				return &agent.Result{ClaudeID: "manager", ResultText: "Nothing to do."}, nil
 			}
 			handoffTurns.Add(1)
 			input := map[string]any{"goal": designTitleHandoff, "note": "The work is titled from the handed brief.", "agents": []string{}}
@@ -88,7 +88,7 @@ func browserDesignTitles(t *testing.T, workgroup bool) {
 			if err != nil || !strings.Contains(out, `"stored":true`) {
 				problem("set_status: %s %v", out, err)
 			}
-			return &agent.Result{ClaudeID: "chief", ResultText: "Titled."}, nil
+			return &agent.Result{ClaudeID: "manager", ResultText: "Titled."}, nil
 		}
 		title := designTitleFirst
 		if designTurns.Add(1) > 1 {

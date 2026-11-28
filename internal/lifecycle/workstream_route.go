@@ -227,8 +227,8 @@ func (s *Controller) workstreamMoveExit(repo *trace.Repository, stream config.Wo
 	return x, nil
 }
 
-// RebuildWorkstreamExit returns how the router rebuilds the exit of a manager of
-// staff's proposal to move a workstream from its route record, to finish a pick
+// RebuildWorkstreamExit returns how the router rebuilds the exit of a manager's
+// proposal to move a workstream from its route record, to finish a pick
 // that was recorded but not applied when the service stopped. An exit raised by
 // a pass, or that carried an authority, is raised again by its own pass. load
 // returns the lifecycle controller.

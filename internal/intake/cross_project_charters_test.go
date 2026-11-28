@@ -160,7 +160,7 @@ func TestCrossProjectCharterConflictAndAmendment(t *testing.T) {
 	fixturekit.Must(t, err)
 	manager := claimCharterManager(t, f.group, host)
 	if _, err := f.group.AnswerQuestion(ctx, trace.Manager, manager, string(fixturekit.Stream)+":"+q, "Dismiss it.", []string{"charter#1"}, fixturekit.DemoStart); err == nil || !strings.Contains(err.Error(), "only the owner's ruling") {
-		t.Fatalf("chief answered conflict: %v", err)
+		t.Fatalf("manager answered conflict: %v", err)
 	}
 	_, err = f.group.Rule(ctx, inbox[0].Number, "B may persist the coordination journal.", OwnerActor, fixturekit.DemoStart)
 	fixturekit.Must(t, err)
@@ -172,7 +172,7 @@ func TestCrossProjectCharterConflictAndAmendment(t *testing.T) {
 			out, err := tool.Handle(ctx, raw)
 			fixturekit.Must(t, err)
 			if !strings.Contains(string(out), `"recorded":false`) {
-				t.Fatalf("chief answered charter conflict: %s", out)
+				t.Fatalf("manager answered charter conflict: %s", out)
 			}
 		}
 		if tool.Name != questions.ProposeCharterTool {
@@ -270,7 +270,7 @@ func TestCrossProjectCharterConflictCannotBeDismissed(t *testing.T) {
 	decisions := []shed.ManagerDecisions{{Decisions: []shed.ManagerDecision{{Objection: "conflict", Decision: shed.Dismiss, Note: "Ignore it."}}}}
 	entries := shed.DissentRecord(records, nil, decisions)
 	if len(entries) != 1 || !entries[0].Blocking || !entries[0].Escalated || entries[0].Disposition != "" || len(shed.ForOwner(entries)) != 1 || len(shed.Undecided(entries)) != 0 {
-		t.Fatalf("chief dismissed conflict: %+v", entries)
+		t.Fatalf("manager dismissed conflict: %+v", entries)
 	}
 }
 

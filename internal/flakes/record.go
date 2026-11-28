@@ -93,7 +93,7 @@ type Announcement struct {
 type Moot struct {
 	Destination string              `json:"destination"`
 	Workstream  config.WorkstreamID `json:"workstream"`
-	// ArchivedBy is who archived the workstream: "owner" or "chief_of_staff".
+	// ArchivedBy is who archived the workstream: "owner" or the manager's stored name, trace.Manager.
 	ArchivedBy string    `json:"archived_by"`
 	Note       string    `json:"note"`
 	At         time.Time `json:"at"`

@@ -56,7 +56,7 @@ func TestGateRecordsDecidedByJevRoundTripWithTheirJudgment(t *testing.T) {
 		t.Fatal(err)
 	}
 	if back, err := shed.ParseManagerDecisions(data); err != nil || !reflect.DeepEqual(back, decisions) {
-		t.Fatalf("chief decisions round trip %+v %v", back, err)
+		t.Fatalf("manager decisions round trip %+v %v", back, err)
 	}
 	decisions.Decisions[0].Judgment = ""
 	if _, err := shed.EncodeManagerDecisions(decisions); err == nil {

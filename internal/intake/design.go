@@ -945,8 +945,8 @@ func threadTranscript(th trace.Thread) string {
 
 // designHistoryContext carries a design session's earlier conversation into
 // the turns of its design thread until one of them has answered. A session
-// opened before the design thread existed holds its conversation on the manager
-// of staff's thread, where this thread's backend session never saw it, so the
+// opened before the design thread existed holds its conversation on the manager's
+// thread, where this thread's backend session never saw it, so the
 // agent reads the conversation and its latest brief here.
 func designHistoryContext(repository *trace.Repository, stream config.WorkstreamID, designer, earlier trace.Thread) (string, error) {
 	if slices.ContainsFunc(designer.Turns, func(q trace.QueuedTurn) bool { return q.Status() == "idle" }) {

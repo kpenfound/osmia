@@ -13,15 +13,15 @@ import (
 func reclaimManagerTurn(t *testing.T, r *Repository, stream config.WorkstreamID, thread, turn, next string, at time.Time) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
-	if err := r.AbandonTurn(ctx, stream, "chief", turn, at); err != nil {
+	if err := r.AbandonTurn(ctx, stream, "manager", turn, at); err != nil {
 		t.Fatal(err)
 	}
-	req := TurnRequest{Header: header("turn-request", "request_"+next), AgentID: "chief", ThreadID: thread, TurnID: next,
+	req := TurnRequest{Header: header("turn-request", "request_"+next), AgentID: "manager", ThreadID: thread, TurnID: next,
 		Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake-model-7"}, Prompt: "Owner message"}
 	if _, err := r.EnqueueTurn(ctx, req); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.ClaimTurn(ctx, stream, "chief", "token_"+next, "/owned/"+next, at); err != nil {
+	if _, err := r.ClaimTurn(ctx, stream, "manager", "token_"+next, "/owned/"+next, at); err != nil {
 		t.Fatal(err)
 	}
 	return coreadapter.Scope{Project: string(projectID), Workstream: string(stream), Thread: thread, Turn: next, Role: StatusRole}
@@ -81,9 +81,9 @@ func newCrashedRuling(t *testing.T) crashedRuling {
 	if _, err := r.Ask(ctx, "agent_b", askerB, "Does the index rebuild on start?", at.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	manager := managerThread(t, r, "chief1")
+	manager := managerThread(t, r, "manager1")
 	managerAt := at.Add(time.Minute)
-	if _, err := r.EscalateQuestions(ctx, "chief", manager, EscalationRequest{
+	if _, err := r.EscalateQuestions(ctx, "manager", manager, EscalationRequest{
 		Questions: []string{"1", string(secondStream) + ":1"}, Rephrasing: "Where does the upload index live, and does it rebuild on start?",
 		Blocked: "Both workstreams' upload units.", Options: []string{"Keep it fixed", "Rebuild it"}, Recommendation: "Keep it fixed.",
 	}, managerAt); err != nil {
@@ -189,9 +189,9 @@ func TestRelayAfterARetriedRuleAnswersBothMembersOnce(t *testing.T) {
 	if _, err := reopened.Rule(ctx, 1, partialRuleText, owner, c.rulingAt); err != nil {
 		t.Fatal(err)
 	}
-	managerScope2 := reclaimManagerTurn(t, reopened, streamID, "chief_thread", "chief1", "chief2", c.rulingAt)
+	managerScope2 := reclaimManagerTurn(t, reopened, streamID, "manager_thread", "manager1", "manager2", c.rulingAt)
 	relayAt := c.rulingAt.Add(time.Minute)
-	relayed, err := reopened.RelayRuling(ctx, "chief", managerScope2, "1", "The index stays fixed at start.", ScopeLocal, relayAt)
+	relayed, err := reopened.RelayRuling(ctx, "manager", managerScope2, "1", "The index stays fixed at start.", ScopeLocal, relayAt)
 	if err != nil || len(relayed) != 2 {
 		t.Fatalf("relay of the completed batch: %+v %v", relayed, err)
 	}
@@ -214,7 +214,7 @@ func TestRelayAfterARetriedRuleAnswersBothMembersOnce(t *testing.T) {
 	if open := escalatedOnly(inbox); len(open) != 0 {
 		t.Fatalf("the owner's open-inbox view after the relay, want no escalated entries: %+v", open)
 	}
-	if _, err := reopened.RelayRuling(ctx, "chief", managerScope2, "1", "Again.", ScopeLocal, relayAt); err == nil {
+	if _, err := reopened.RelayRuling(ctx, "manager", managerScope2, "1", "Again.", ScopeLocal, relayAt); err == nil {
 		t.Fatal("a second relay of an already-answered question reported success")
 	}
 }
@@ -236,9 +236,9 @@ func TestRetriedRelayRulingCompletesRemainingMembersAfterACrashBetweenCommits(t 
 	if _, err := r.Ask(ctx, "agent_b", askerB, "Does the index rebuild on start?", at.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	manager := managerThread(t, r, "chief1")
+	manager := managerThread(t, r, "manager1")
 	managerAt := at.Add(time.Minute)
-	if _, err := r.EscalateQuestions(ctx, "chief", manager, EscalationRequest{
+	if _, err := r.EscalateQuestions(ctx, "manager", manager, EscalationRequest{
 		Questions: []string{"1", string(secondStream) + ":1"}, Rephrasing: "Where does the upload index live, and does it rebuild on start?",
 		Blocked: "Both workstreams' upload units.", Options: []string{"Keep it fixed", "Rebuild it"}, Recommendation: "Keep it fixed.",
 	}, managerAt); err != nil {
@@ -260,7 +260,7 @@ func TestRetriedRelayRulingCompletesRemainingMembersAfterACrashBetweenCommits(t 
 
 	relayAt := rulingAt.Add(time.Minute)
 	relayText := "The index stays fixed at start."
-	if _, err := r.RelayRuling(ctx, "chief", manager, "1", relayText, ScopeLocal, relayAt); err == nil {
+	if _, err := r.RelayRuling(ctx, "manager", manager, "1", relayText, ScopeLocal, relayAt); err == nil {
 		t.Fatal("the injected crash reported success")
 	}
 
@@ -272,7 +272,7 @@ func TestRetriedRelayRulingCompletesRemainingMembersAfterACrashBetweenCommits(t 
 		t.Fatalf("B after the crash: %+v err=%v", qb, err)
 	}
 
-	if _, err := r.RelayRuling(ctx, "chief", manager, "1", "A different answer.", ScopeLocal, relayAt); err == nil {
+	if _, err := r.RelayRuling(ctx, "manager", manager, "1", "A different answer.", ScopeLocal, relayAt); err == nil {
 		t.Fatal("a relay with a different text on a half-relayed batch reported success")
 	}
 	if qa := questionStates(t, r)["1"]; qa.Ruling.ReturnedAnswer != relayText {
@@ -292,8 +292,8 @@ func TestRetriedRelayRulingCompletesRemainingMembersAfterACrashBetweenCommits(t 
 	}
 	defer reopened.Close()
 
-	managerScope2 := reclaimManagerTurn(t, reopened, streamID, "chief_thread", "chief1", "chief2", relayAt)
-	relayed, err := reopened.RelayRuling(ctx, "chief", managerScope2, "1", relayText, ScopeLocal, relayAt)
+	managerScope2 := reclaimManagerTurn(t, reopened, streamID, "manager_thread", "manager1", "manager2", relayAt)
+	relayed, err := reopened.RelayRuling(ctx, "manager", managerScope2, "1", relayText, ScopeLocal, relayAt)
 	if err != nil || len(relayed) != 2 {
 		t.Fatalf("retried relay: %+v %v", relayed, err)
 	}
@@ -317,7 +317,7 @@ func TestRetriedRelayRulingCompletesRemainingMembersAfterACrashBetweenCommits(t 
 		t.Fatalf("the owner's open-inbox view after the retried relay, want no escalated entries: %+v", open)
 	}
 
-	if _, err := reopened.RelayRuling(ctx, "chief", managerScope2, "1", "Different.", ScopeLocal, relayAt); err == nil {
+	if _, err := reopened.RelayRuling(ctx, "manager", managerScope2, "1", "Different.", ScopeLocal, relayAt); err == nil {
 		t.Fatal("a relay with a different text on an already-answered question reported success")
 	}
 }

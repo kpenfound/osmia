@@ -36,7 +36,7 @@ func TestCheckAcceptsPlainStatus(t *testing.T) {
 		"ordinary known word":     func(c *trace.StatusContent) { c.Note = "The first review passed." },
 		"version number":          func(c *trace.StatusContent) { c.Note = "Version 1.5 of the protocol is supported." },
 		"large number":            func(c *trace.StatusContent) { c.Note = "Uploads of 10485760 bytes resume." },
-		"words around a known ID": func(c *trace.StatusContent) { c.Note = "The xchief_threadx and chief_thread2 labels are prose here." },
+		"words around a known ID": func(c *trace.StatusContent) { c.Note = "The xmanager_threadx and manager_thread2 labels are prose here." },
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := valid()
@@ -45,7 +45,7 @@ func TestCheckAcceptsPlainStatus(t *testing.T) {
 			if name == "no attention" {
 				gates = nil
 			}
-			if err := Check(c, []string{"first", "", "test", "chief_thread"}, gates); err != nil {
+			if err := Check(c, []string{"first", "", "test", "manager_thread"}, gates); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -53,7 +53,7 @@ func TestCheckAcceptsPlainStatus(t *testing.T) {
 }
 
 func TestCheckRejects(t *testing.T) {
-	known := []string{"p_00000000000000000000000000000001", "chief_thread", "turn-9", "backend-session-identifier"}
+	known := []string{"p_00000000000000000000000000000001", "manager_thread", "turn-9", "backend-session-identifier"}
 	cases := []struct {
 		name   string
 		edit   func(*trace.StatusContent)
@@ -89,7 +89,7 @@ func TestCheckRejects(t *testing.T) {
 		{"service session token", func(c *trace.StatusContent) { c.Note = "Claim ABCDEFGHIJKLMNOPQRSTUVWXYZ expired." }, "note contains a session ID"},
 		{"prefixed session", func(c *trace.StatusContent) { c.Note = "Resumed ses_4f9aZ21 after restart." }, "note contains a session ID"},
 		{"known session", func(c *trace.StatusContent) { c.Note = "Resumed backend-session-identifier after restart." }, `note contains an Osmia or backend identifier ("backend-session-identifier")`},
-		{"known thread", func(c *trace.StatusContent) { c.Agents = []string{"chief_thread is idle."} }, "agents[0] contains an Osmia or backend identifier"},
+		{"known thread", func(c *trace.StatusContent) { c.Agents = []string{"manager_thread is idle."} }, "agents[0] contains an Osmia or backend identifier"},
 		{"known turn", func(c *trace.StatusContent) { c.Note = "It finished (turn-9)." }, `note contains an Osmia or backend identifier ("turn-9")`},
 		{"project ID", func(c *trace.StatusContent) { c.Note = "Project p_00000000000000000000000000000001 is active." }, "note contains an Osmia or backend identifier"},
 		{"workstream ID", func(c *trace.StatusContent) { c.Goal = "Finish w_0123456789abcdef0123456789abcdef." }, "goal contains an Osmia project, workstream or thread ID"},
@@ -170,15 +170,15 @@ func manager(t *testing.T) (*trace.Repository, coreadapter.Scope, config.Root, c
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { repo.Close() })
-	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, ID: "chief", Revision: 1, Project: p.ID, Workstream: stream, At: at, Actor: owner, Cause: "workstream-create"}
+	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, ID: "manager", Revision: 1, Project: p.ID, Workstream: stream, At: at, Actor: owner, Cause: "workstream-create"}
 	must(t, repo.CreateWorkstream(ctx, stream, at, owner))
-	must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: "chief_of_staff", ThreadID: "chief_thread"}))
+	must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: trace.Manager, ThreadID: "manager_thread"}))
 	h.Schema, h.ID, h.Cause, h.Depth = "osmia.trace.turn-request", "request_one", "message_one", 1
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: "chief", ThreadID: "chief_thread", TurnID: "one", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message"})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: "manager", ThreadID: "manager_thread", TurnID: "one", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message"})
 	must(t, err)
-	_, err = repo.ClaimTurn(ctx, stream, "chief", "token", "/owned", at)
+	_, err = repo.ClaimTurn(ctx, stream, "manager", "token", "/owned", at)
 	must(t, err)
-	return repo, coreadapter.Scope{Project: string(p.ID), Workstream: string(stream), Thread: "chief_thread", Turn: "one", Role: "chief_of_staff"}, root, p
+	return repo, coreadapter.Scope{Project: string(p.ID), Workstream: string(stream), Thread: "manager_thread", Turn: "one", Role: trace.Manager}, root, p
 }
 
 func must(t *testing.T, err error) {
@@ -196,14 +196,14 @@ func TestToolStoresReplacesAndRejects(t *testing.T) {
 	for _, role := range []string{"mason", "reviewer", "architect", ""} {
 		s := scope
 		s.Role = role
-		if _, err := Tool(repo, "chief", s, clock); err == nil {
+		if _, err := Tool(repo, "manager", s, clock); err == nil {
 			t.Errorf("%q received %s", role, ToolName)
 		}
 	}
-	if _, err := Tool(nil, "chief", scope, clock); err == nil {
+	if _, err := Tool(nil, "manager", scope, clock); err == nil {
 		t.Error("tool without a trace")
 	}
-	tool, err := Tool(repo, "chief", scope, clock)
+	tool, err := Tool(repo, "manager", scope, clock)
 	must(t, err)
 	if tool.Name != ToolName || tool.Effect != coreadapter.ToolMemory || !json.Valid(tool.InputSchema) {
 		t.Fatalf("tool: %+v", tool)
@@ -220,8 +220,8 @@ func TestToolStoresReplacesAndRejects(t *testing.T) {
 	if rejected != `{"stored":false,"reason":"goal must be one sentence, not 2"}` {
 		t.Fatalf("rejection: %s", rejected)
 	}
-	rejected = call(`{"goal":"Ship it.","note":"Waiting on chief_thread.","agents":[]}`)
-	if !strings.Contains(rejected, `"stored":false`) || !strings.Contains(rejected, "chief_thread") {
+	rejected = call(`{"goal":"Ship it.","note":"Waiting on manager_thread.","agents":[]}`)
+	if !strings.Contains(rejected, `"stored":false`) || !strings.Contains(rejected, "manager_thread") {
 		t.Fatalf("known identifier: %s", rejected)
 	}
 	for _, input := range []string{`{"goal":"g","note":"n","agents":[],"role":"mason"}`, `{"goal":"g"}{}`, `[]`} {
@@ -265,9 +265,9 @@ func TestToolAttentionFollowsEscalatedInboxEntry(t *testing.T) {
 	asker := coreadapter.Scope{Project: string(p.ID), Workstream: string(stream), Thread: "mason_thread", Turn: "ask", Role: "mason", Unit: "upload"}
 	_, err = repo.Ask(ctx, "mason", asker, "May uploads change?", at)
 	must(t, err)
-	_, err = repo.EscalateQuestions(ctx, "chief", managerScope, trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "May uploads change?", Blocked: "The upload unit.", Recommendation: "Keep it."}, at)
+	_, err = repo.EscalateQuestions(ctx, "manager", managerScope, trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "May uploads change?", Blocked: "The upload unit.", Recommendation: "Keep it."}, at)
 	must(t, err)
-	tool, err := Tool(repo, "chief", managerScope, func() time.Time { return at })
+	tool, err := Tool(repo, "manager", managerScope, func() time.Time { return at })
 	must(t, err)
 	call := func(attention string) string {
 		t.Helper()

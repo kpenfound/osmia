@@ -208,9 +208,9 @@ func feedWithEveryClaimedRoleAndTwoFinalReports(t *testing.T) claimedRolesFeed {
 	}
 	_, err = repo.EnsureManager(ctx, fixturekit.Stream, fixturekit.DemoStart, intake.ServiceActor)
 	fixturekit.Must(t, err)
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "owner_turn", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: "owner-message"}, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "message", Profile: coreadapter.Profile{Name: "chief", Backend: "fake", Model: "test"}, Prompt: "Review progress?"})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "owner_turn", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: "owner-message"}, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "message", Profile: coreadapter.Profile{Name: "manager", Backend: "fake", Model: "test"}, Prompt: "Review progress?"})
 	fixturekit.Must(t, err)
-	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.Manager, "token_chief", filepath.Join(t.TempDir(), "chief"), fixturekit.DemoStart)
+	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.Manager, "token_manager", filepath.Join(t.TempDir(), "manager"), fixturekit.DemoStart)
 	fixturekit.Must(t, err)
 	before, err := service.ConversationEntries(repo, fixturekit.Stream)
 	fixturekit.Must(t, err)

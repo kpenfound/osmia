@@ -294,8 +294,8 @@ func (f *ShedFixture) StillInShed(t *testing.T, stream config.WorkstreamID) {
 	}
 }
 
-// Concluded returns the notice the conclusion after round n told the manager of
-// staff with.
+// Concluded returns the notice the conclusion after round n told the manager
+// with.
 func (f *ShedFixture) Concluded(t *testing.T, stream config.WorkstreamID, n int) trace.OutboxEntry {
 	t.Helper()
 	id := fmt.Sprintf("shed-concluded-%d", n)
