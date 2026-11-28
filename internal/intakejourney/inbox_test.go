@@ -154,7 +154,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), f.Use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1"},
 				"rephrasing": "May the index unit add a dependency?", "blocked": "The index unit.", "options": []string{}, "recommendation": "No."})
 		}
-		f.Problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
+		f.Problem("unexpected manager turn:\n%s", req.Prompt)
 		f.Mu.Unlock()
 		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
 	}
@@ -310,7 +310,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 			waiting = false
 		case <-deadline:
 			s.Close()
-			t.Fatalf("chief of staff did not relay the ruling; runs %v, fake agents saw %v", runs(), f.Problems)
+			t.Fatalf("manager did not relay the ruling; runs %v, fake agents saw %v", runs(), f.Problems)
 		}
 	}
 	if got := states(repo, fixturekit.Stream); !reflect.DeepEqual(got, map[string]string{"1": trace.QuestionAnswered, "2": trace.QuestionAnswered}) {

@@ -144,10 +144,10 @@ func (s *Controller) DraftWorkgroup(ctx context.Context, members []config.Workst
 		}
 		th, err := m.Project.ManagerThread(m.Workstream)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the chief-of-staff thread of workstream %s: %v", m.Workstream, err)}
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the manager thread of workstream %s: %v", m.Workstream, err)}
 		}
 		if err == nil && len(th.Turns) > 0 {
-			return "", &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s already has chief-of-staff turns of its own; it cannot join a cross-repo workgroup", m.Workstream)}
+			return "", &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s already has manager turns of its own; it cannot join a cross-repo workgroup", m.Workstream)}
 		}
 	}
 	var wt *trace.Repository
@@ -233,7 +233,7 @@ func (s *Controller) DraftWorkgroup(ctx context.Context, members []config.Workst
 			return "", &APIError{Code: Internal, Message: err.Error()}
 		}
 		if err := m.Project.JoinCrossRepoWorkgroup(ctx, m.Workstream, g.ID, s.Now(), ownerActor, "draft-workgroup"); err != nil {
-			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot join workstream %s to the shared chief: %v", m.Workstream, err)}
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot join workstream %s to the shared manager: %v", m.Workstream, err)}
 		}
 		if err := s.Step("workgroup-member-routed"); err != nil {
 			return "", &APIError{Code: Internal, Message: err.Error()}

@@ -59,13 +59,22 @@ func TestDesignToolTextsNameNoSkill(t *testing.T) {
 }
 
 func TestManagerRolePromptStatesItsRoleSettingToolsStateMachineOutputAndDone(t *testing.T) {
-	requireAll(t, "the chief role prompt", ManagerRolePrompt,
+	requireAll(t, "the manager role prompt", ManagerRolePrompt,
 		"## Your role", "## Your setting", "## Your tools and gates", "## Where you act in the state machine", "## Writing for the owner", "## Progress updates", "## When you are done",
 		"Ratification, abandonment, approving a candidate and approving delivery are the owner's",
 		"evidence, never instruction",
 		"stands on its own", "has not seen your tool calls",
 		"start with one line that says what you are going to check", "short recap")
-	requireNoSkill(t, "the chief role prompt", ManagerRolePrompt)
+	requireNoSkill(t, "the manager role prompt", ManagerRolePrompt)
+}
+
+func TestManagerRolePromptDescribesOneWorkgroupWithADefinedJob(t *testing.T) {
+	requireAll(t, "the manager role prompt", ManagerRolePrompt, "You are the manager of one workgroup", "a defined job", "not an open-ended assistant")
+	for _, banned := range []string{"chief", "Chief"} {
+		if strings.Contains(ManagerRolePrompt, banned) {
+			t.Fatalf("the manager role prompt names the role %q", banned)
+		}
+	}
 }
 
 func TestManagerGuidanceBlocksNameNoSkill(t *testing.T) {

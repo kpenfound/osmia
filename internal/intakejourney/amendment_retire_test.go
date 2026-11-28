@@ -70,7 +70,7 @@ func checkRetirement(t *testing.T, f *journey.ShedFixture, repo *trace.Repositor
 	fixturekit.Must(t, err)
 	for _, tr := range transitions {
 		if tr.ID == intake.AmendmentDecided(id, 1) || tr.ID == trace.UnitSubject(unit)+"_resumed_amendment_"+id {
-			if tr.Actor != intake.AmendmentActor || strings.Contains(tr.Reason, "the owner") || strings.Contains(tr.Reason, "the chief of staff") {
+			if tr.Actor != intake.AmendmentActor || strings.Contains(tr.Reason, "the owner") || strings.Contains(tr.Reason, "the manager") {
 				t.Errorf("retirement attributed incorrectly: %+v", tr)
 			}
 		}
@@ -88,7 +88,7 @@ func checkRetirement(t *testing.T, f *journey.ShedFixture, repo *trace.Repositor
 				t.Errorf("ruling misses %q: %s", part, q.Request.Prompt)
 			}
 		}
-		for _, part := range []string{"owner_response", "the owner rejected", "the chief of staff rejected"} {
+		for _, part := range []string{"owner_response", "the owner rejected", "the manager rejected"} {
 			if strings.Contains(q.Request.Prompt, part) {
 				t.Errorf("ruling misattributes retirement: %s", q.Request.Prompt)
 			}

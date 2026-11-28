@@ -784,7 +784,7 @@ func TestAConfidentJevReviewsAnEscalatedContestAgain(t *testing.T) {
 	c.f.s.jev = gateJudge(c.f.clock.Now, p)
 	contest := c.contest(t)
 	if gate, carried, err := c.f.s.contestedGate(c.repo, c.stream, "resume"); err != nil || gate != nil || carried != nil {
-		t.Fatalf("a contest the chief of staff did not raise is a gate: %+v %+v %v", gate, carried, err)
+		t.Fatalf("a contest the manager did not raise is a gate: %+v %+v %v", gate, carried, err)
 	}
 	if out := c.resolve(t, `{"unit":"resume","decision":"escalate","note":"The reviewer ends every turn without a verdict."}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("escalate: %s", out)

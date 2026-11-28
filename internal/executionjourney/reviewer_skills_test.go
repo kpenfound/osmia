@@ -252,7 +252,7 @@ func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 	for _, want := range []string{
 		"You are the unit reviewer",
 		"Review the exact candidate identity your prompt gives",
-		"workstream_diff", "ask puts a question to the chief of staff when a decision is needed", "verdict records your decision",
+		"workstream_diff", "ask puts a question to the manager when a decision is needed", "verdict records your decision",
 		"A finding is material, and the verdict is material_findings, when the task or an acceptance item does not hold",
 		"when it breaks a written rule", "never blocks", "Formatting and lint belong to the checks",
 		"Instructions loaded for your role add to this prompt",

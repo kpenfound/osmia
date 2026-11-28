@@ -234,7 +234,7 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 			}
 		}
 		if api != nil && bound != nil && api.Code != Internal {
-			handed := fmt.Sprintf("Jev decided %s with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The chief of staff's note: %s", bound.Pick, bound.Confidence, bound.Judgment, api.Message, note)
+			handed := fmt.Sprintf("Jev decided %s with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The manager's note: %s", bound.Pick, bound.Confidence, bound.Judgment, api.Message, note)
 			if err := record(judgedDecisionDocument(target, stream, input.Unit, contest.ID, EscalateContest, handed, scope.Turn, s.Now(), judgment)); err != nil {
 				return nil, err
 			}

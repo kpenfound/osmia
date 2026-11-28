@@ -31,10 +31,13 @@ func TestCapacityToolAndStatusSerializeUnboundedPools(t *testing.T) {
 	controls.service.Store(s)
 
 	tool := controls.capacity(repo, scope)
-	for _, want := range []string{"config.toml", "reload", "not bounded factory-wide", "nothing to raise", "capacity.manager", "background chief-of-staff"} {
+	for _, want := range []string{"config.toml", "reload", "not bounded factory-wide", "nothing to raise", "capacity.manager", "background manager"} {
 		if !strings.Contains(tool.Description, want) {
 			t.Fatalf("capacity tool description lacks %q: %s", want, tool.Description)
 		}
+	}
+	if strings.Contains(strings.ToLower(tool.Description), "chief") {
+		t.Fatalf("capacity tool description names the role chief: %s", tool.Description)
 	}
 	out, err := tool.Handle(ctx, json.RawMessage(`{}`))
 	fixturekit.Must(t, err)

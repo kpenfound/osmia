@@ -142,7 +142,7 @@ func (r *Repository) LogAssumption(ctx context.Context, agent string, scope core
 	slices.Sort(targets)
 	for i, target := range targets {
 		if !slices.Contains(members, target) {
-			return Assumption{}, refused("workstream %s does not share this chief of staff", target)
+			return Assumption{}, refused("workstream %s does not share this manager", target)
 		}
 		if i > 0 && targets[i-1] == target {
 			return Assumption{}, refused("workstream %s is listed twice", target)

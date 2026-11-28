@@ -15,7 +15,7 @@ import (
 
 // ManagerEvents opens the system prompt of every event turn; the question
 // guidance and the workstream's rendered bundle follow it.
-const ManagerEvents = "You are the chief of staff for workstream %s. This turn delivers service events, which the prompt lists. The project context in the turn context was assembled when the events were delivered."
+const ManagerEvents = "You are the manager for workstream %s. This turn delivers service events, which the prompt lists. The project context in the turn context was assembled when the events were delivered."
 
 // ManagerEventsOtherMember notes, for a workgroup of more than one member,
 // that this delivery's events are about a member other than the manager's own
@@ -28,7 +28,7 @@ const ManagerEventsOtherMember = " These events are about workstream %s, a membe
 const FollowUpGuidance = "## Keeping work moving\n" +
 	"Events and messages are information you act on to keep the work moving. Every action tool's result lists under queued the work the service queued or is running because of it, or says under nothing_will_run why nothing will run and until when. " +
 	"Tell the owner work is under way only when a result shows it queued, because a promise the factory does not keep costs the owner's trust. " +
-	"When nothing is queued and you expect something to change later, call follow_up with after (5m to 24h), a reason and, for a shared chief, the workstream. You get a turn back then with what changed. A newer follow_up for the same workstream replaces an unfired one, and your pending follow-ups are listed in the project context. " +
+	"When nothing is queued and you expect something to change later, call follow_up with after (5m to 24h), a reason and, for a shared manager, the workstream. You get a turn back then with what changed. A newer follow_up for the same workstream replaces an unfired one, and your pending follow-ups are listed in the project context. " +
 	"When an action of yours starts no work and you schedule no follow_up, the service schedules one at the stall window."
 
 func (s *Controller) ManagerEventsSkip(repository *trace.Repository) func(config.WorkstreamID) (bool, error) {

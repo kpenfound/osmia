@@ -63,7 +63,7 @@ func TestCreateWorkstreamCreatesOneManagerThread(t *testing.T) {
 		t.Fatalf("identity changed: %+v", again.Identity)
 	}
 	if got := managerAgents(t, reopened, streamID); len(got) != 1 {
-		t.Fatalf("chief-of-staff agents = %d", len(got))
+		t.Fatalf("manager agents = %d", len(got))
 	}
 }
 
@@ -107,7 +107,7 @@ func TestEnsureManagerBackfillsOnce(t *testing.T) {
 		t.Fatalf("thread = %+v", th.Identity)
 	}
 	if got := managerAgents(t, reopened, threadlessStream); len(got) != 1 {
-		t.Fatalf("chief-of-staff agents = %d", len(got))
+		t.Fatalf("manager agents = %d", len(got))
 	}
 }
 

@@ -207,7 +207,7 @@ func newFollowUpTool(r *trace.Repository, scope coreadapter.Scope, now func() ti
 				return nil, err
 			}
 			if scope.Role != trace.Manager {
-				return nil, errors.New("follow_up is granted to the chief of staff only")
+				return nil, errors.New("follow_up is granted to the manager only")
 			}
 			var in struct {
 				After      string              `json:"after"`
@@ -542,7 +542,7 @@ func (f followUps) summary(r *trace.Repository, stream config.WorkstreamID, sinc
 	return b.String(), nil
 }
 
-const followUpPrompt = "You are the chief of staff for workstream %s. This turn is a follow-up you scheduled that came due. The prompt says why it was scheduled, when, and what changed since. The project context in the turn context was assembled when it came due."
+const followUpPrompt = "You are the manager for workstream %s. This turn is a follow-up you scheduled that came due. The prompt says why it was scheduled, when, and what changed since. The project context in the turn context was assembled when it came due."
 
 const followUpEvery = 5 * time.Second
 

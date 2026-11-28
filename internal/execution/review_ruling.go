@@ -253,7 +253,7 @@ func (s *Controller) RecordContestedRulingJudged(ctx context.Context, repo *trac
 		for i := range docs {
 			var decision ManagerContestDecision
 			if err := json.Unmarshal([]byte(docs[i].Content), &decision); err != nil {
-				return ContestedRulingResponse{}, &APIError{Code: Internal, Message: "cannot read chief decision"}
+				return ContestedRulingResponse{}, &APIError{Code: Internal, Message: "cannot read manager decision"}
 			}
 			decision.Decision, decision.Note = ruling.Decision, ruling.Note
 			data, _ := json.MarshalIndent(decision, "", "  ")

@@ -210,7 +210,7 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 		if strings.Contains(req.Prompt, "asked by the mason: "+question1) || strings.Contains(req.Prompt, "asked by the mason: "+question2) {
 			return intakefixture.QuestionResult(req, "session-chief", "Nothing further"), nil
 		}
-		f.problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
+		f.problem("unexpected manager turn:\n%s", req.Prompt)
 		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
 	}
 	f.engine.Turns[questions.TurnID("1")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -269,10 +269,10 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 	}
 
 	if _, err := repo1.ManagerThread(f.stream1); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("member1's own repository got a chief-of-staff thread: %v", err)
+		t.Fatalf("member1's own repository got a manager thread: %v", err)
 	}
 	if _, err := repo2.ManagerThread(f.stream2); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("member2's own repository got a chief-of-staff thread: %v", err)
+		t.Fatalf("member2's own repository got a manager thread: %v", err)
 	}
 
 	resumedWith := func(repo *trace.Repository, stream config.WorkstreamID, agentID, text string) bool {
@@ -539,12 +539,12 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 	sent1, err := f.C.Send(ctx, f.Stream1, "Where does the acknowledgment live?")
 	fixturekit.Must(t, err)
 	if _, err := repo1.ManagerThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("member1's own repository got a chief-of-staff thread of its own: %v", err)
+		t.Fatalf("member1's own repository got a manager thread of its own: %v", err)
 	}
 	sent2, err := f.C.Send(ctx, f.Stream2, "Does the client ever see the offset?")
 	fixturekit.Must(t, err)
 	if _, err := repo2.ManagerThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("member2's own repository got a chief-of-staff thread of its own: %v", err)
+		t.Fatalf("member2's own repository got a manager thread of its own: %v", err)
 	}
 
 	for i, member := range []struct {
@@ -636,10 +636,10 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 	}
 
 	if _, err := repo1.ManagerThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("member1's own repository got a chief-of-staff thread after restart: %v", err)
+		t.Fatalf("member1's own repository got a manager thread after restart: %v", err)
 	}
 	if _, err := repo2.ManagerThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("member2's own repository got a chief-of-staff thread after restart: %v", err)
+		t.Fatalf("member2's own repository got a manager thread after restart: %v", err)
 	}
 
 	checkWorkgroupRecord(t)

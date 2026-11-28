@@ -275,7 +275,7 @@ func TestRebaseConflictGoesToTheMasonAndNeverToTheReviewer(t *testing.T) {
 	if !slices.ContainsFunc(outbox, func(e trace.OutboxEntry) bool {
 		return e.TransitionID == transition+"-conflicted" && e.Event.Kind == trace.NoticeKind && strings.Contains(e.Event.Body, "Unit dedupe conflicts with feature branch") && strings.Contains(e.Event.Body, fixturekit.MasonWrote)
 	}) {
-		t.Fatal("the chief of staff was not told of the conflict")
+		t.Fatal("the manager was not told of the conflict")
 	}
 
 	fixturekit.Must(t, lands.Pass(ctx))

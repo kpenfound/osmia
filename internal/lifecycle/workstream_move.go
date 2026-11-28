@@ -517,7 +517,7 @@ func (s *Controller) proposeShed(ctx context.Context, repo *trace.Repository, st
 	case err != nil:
 		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot record the move"}
 	case res.Committed && res.Target == intake.TargetWait:
-		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s stays where it is and was not moved to %s: the chief of staff does not ask for a redraft or another round of debate by default, and Jev judged that the evidence does not support it. The proposal and Jev's judgment are in the trace", stream, to)}
+		return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s stays where it is and was not moved to %s: the manager does not ask for a redraft or another round of debate by default, and Jev judged that the evidence does not support it. The proposal and Jev's judgment are in the trace", stream, to)}
 	case res.Committed:
 		feature, err := repo.Workflow(stream, trace.FeatureSubject)
 		if err != nil {
@@ -742,7 +742,7 @@ func (c *Controls) ReopenForRevision(repository *trace.Repository, scope coreada
 		}
 		reopened := ""
 		if feature.Value == AssembledState || feature.Value == DeliveredState {
-			note := "Reopened so the revision the chief of staff commissioned can be built"
+			note := "Reopened so the revision the manager commissioned can be built"
 			if r := strings.TrimSpace(input.Reason); r != "" {
 				note += ": " + r
 			}

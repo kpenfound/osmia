@@ -365,7 +365,7 @@ func (s *Controller) LoopEntry(repository *trace.Repository, stream config.Works
 	e := Decision(InboxLoop, stream, pause.SetAt, "/runtime/pause", map[string]any{"scope": target.Scope, "project": target.Project, "workstream": target.Workstream})
 	e.Answer.Method = http.MethodDelete
 	e.Question = pause.Reason + "."
-	e.Blocked = fmt.Sprintf("Everything on the workstream but the chief of staff. Look at its status and feed, then resume it with osmia resume %s; the count of sessions without progress starts over.", stream)
+	e.Blocked = fmt.Sprintf("Everything on the workstream but the manager. Look at its status and feed, then resume it with osmia resume %s; the count of sessions without progress starts over.", stream)
 	return e, true
 }
 
@@ -429,8 +429,8 @@ func (s *Controller) HeldNoticesEntry(ctx context.Context, repository *trace.Rep
 		failure = last.Response.Failure
 	}
 	e := Decision(InboxNotices, stream, opened, "/conversation/"+string(stream), map[string]any{})
-	e.Question = fmt.Sprintf("%d notices for the chief of staff are held: the chief of staff's turns delivering them failed %d times in a row. The latest failure: %s", held, events.MaxDeliveryFailures, failure)
-	e.Blocked = fmt.Sprintf("The chief of staff hearing what happened on the workstream. Send it a message with osmia send %s once the cause is fixed; when its answer completes, the held notices are delivered again.", stream)
+	e.Question = fmt.Sprintf("%d notices for the manager are held: the manager's turns delivering them failed %d times in a row. The latest failure: %s", held, events.MaxDeliveryFailures, failure)
+	e.Blocked = fmt.Sprintf("The manager hearing what happened on the workstream. Send it a message with osmia send %s once the cause is fixed; when its answer completes, the held notices are delivered again.", stream)
 	return e, true, nil
 }
 

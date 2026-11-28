@@ -41,10 +41,10 @@ func TestManagerDecidesObjectionsBeforeTheOwnerSeesThem(t *testing.T) {
 	f.AwaitPacket(t, stream, blocked)
 
 	if notice := f.Concluded(t, stream, 1).Event.Body; !strings.Contains(notice, "decide 2 objections with resolve_objection: "+veto+", "+advice+".") {
-		t.Fatalf("notice %q asks the chief of staff to decide nothing", notice)
+		t.Fatalf("notice %q asks the manager to decide nothing", notice)
 	}
 	if entries := f.InboxEntries(t, stream, api.InboxRatification); len(entries) != 0 {
-		t.Fatalf("the packet reached the owner before the chief of staff decided its objections: %+v", entries)
+		t.Fatalf("the packet reached the owner before the manager decided its objections: %+v", entries)
 	}
 
 	tool := f.ManagerObjectionTool(t, stream)
@@ -109,7 +109,7 @@ func TestManagerDecidesObjectionsBeforeTheOwnerSeesThem(t *testing.T) {
 	}
 	docs := f.Documents(t, stream, shed.ManagerDocumentID(1))
 	if len(docs) != 2 || docs[1].Path != shed.ManagerPath(1) || docs[1].Actor != intake.ManagerActor {
-		t.Fatalf("the chief of staff's decision documents %+v", docs)
+		t.Fatalf("the manager's decision documents %+v", docs)
 	}
 	actions, err := service.ManagerActions(f.Repository(), stream)
 	fixturekit.Must(t, err)
@@ -140,7 +140,7 @@ func TestManagerDecidesObjectionsBeforeTheOwnerSeesThem(t *testing.T) {
 		t.Fatalf("a judgment was recorded for the owner's objection: %+v %v", res, err)
 	}
 	if out := intakefixture.Handle(t, tool, `{"objection":"`+objected.Objection+`","decision":"dismiss","note":"Answered."}`); !strings.Contains(out, "the owner's own") {
-		t.Fatalf("the chief of staff decided the owner's objection: %s", out)
+		t.Fatalf("the manager decided the owner's objection: %s", out)
 	}
 	if entries := f.InboxEntries(t, stream, api.InboxRatification); len(entries) != 1 || len(entries[0].Options) != 0 {
 		t.Fatalf("inbox entries with the owner's objection %+v", entries)

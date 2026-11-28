@@ -75,9 +75,9 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 		}
 
 		if !slices.Equal(names, []string{"answer", "escalate", "file_read", "log_assumption", "propose_charter", "relay_ruling", "route_amendment"}) {
-			problem("chief of staff tools %v", names)
+			problem("manager tools %v", names)
 		}
-		for _, part := range []string{"You are the chief of staff for workstream " + string(fixturekit.Stream), questions.Guidance} {
+		for _, part := range []string{"You are the manager for workstream " + string(fixturekit.Stream), questions.Guidance} {
 			if !strings.Contains(req.SystemPrompt, part) {
 				problem("event turn system prompt lacks %q:\n%s", part, req.SystemPrompt)
 			}
@@ -141,7 +141,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 			return nil, ctx.Err()
 		}
 		mu.Unlock()
-		problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
+		problem("unexpected manager turn:\n%s", req.Prompt)
 		return result(req, "session-chief", "Nothing to do"), nil
 	}
 
@@ -244,11 +244,11 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 			waiting = false
 		case <-time.After(fixturekit.DemoTimeout):
 			s.Close()
-			t.Fatal("chief of staff did not answer")
+			t.Fatal("manager did not answer")
 		}
 	}
 	if got := turnsOf(repo, fixturekit.DemoAgent); !slices.Equal(got, []string{"build"}) {
-		t.Fatalf("answer delivered inside the chief-of-staff turn: %v", got)
+		t.Fatalf("answer delivered inside the manager turn: %v", got)
 	}
 	fixturekit.Must(t, s.Close())
 
@@ -278,7 +278,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	select {
 	case <-escalated:
 	default:
-		t.Fatal("chief of staff did not escalate")
+		t.Fatal("manager did not escalate")
 	}
 	fixturekit.Must(t, s.Close())
 

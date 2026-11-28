@@ -253,7 +253,7 @@ func TestDeclinedCharterProposalChangesNothing(t *testing.T) {
 		}
 	}
 	if events := intakefixture.CharterEvents(t, repo, fixturekit.Stream); !reflect.DeepEqual(events, []string{"the owner declined the charter proposal of question 1; the charter is unchanged: It is this feature's call."}) {
-		t.Fatalf("chief of staff notices %q", events)
+		t.Fatalf("manager notices %q", events)
 	}
 }
 

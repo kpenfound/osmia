@@ -27,9 +27,9 @@ func Prompt(q trace.Question, ruling trace.Ruling) string {
 	var b strings.Builder
 	opening := "Answer to your question %s."
 	if ruling.Decision == trace.DecisionRuling {
-		opening = "The owner ruled on your question %s. The chief of staff relays the ruling."
+		opening = "The owner ruled on your question %s. The manager relays the ruling."
 		if ruling.DecidedBy == trace.DecidedByJev {
-			opening = "Jev, the decision maker for the owner, ruled on your question %s. The chief of staff relays the ruling."
+			opening = "Jev, the decision maker for the owner, ruled on your question %s. The manager relays the ruling."
 		}
 	}
 	fmt.Fprintf(&b, opening+"\n\n", q.ID)

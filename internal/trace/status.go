@@ -115,7 +115,7 @@ func (r *Repository) SetStatus(ctx context.Context, agent string, scope coreadap
 		return 0, err
 	}
 	if scope.Role != StatusRole {
-		return 0, fmt.Errorf("only a chief-of-staff turn may set the status")
+		return 0, fmt.Errorf("only a manager turn may set the status")
 	}
 	_, q, err := r.turnScope(agent, scope, true)
 	if err != nil {

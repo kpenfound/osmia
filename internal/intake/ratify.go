@@ -258,7 +258,7 @@ func (s *Controller) ratifyMember(ctx context.Context, o *ShedOwner, asked shed.
 		reason += fmt.Sprintf(", over %s the owner disposed of", shed.Objections(len(record.Dispositions)))
 	}
 	if dismissed := len(entries) - len(shed.ForOwner(entries)); dismissed > 0 {
-		reason += fmt.Sprintf(", with %s the chief of staff dismissed", shed.Objections(dismissed))
+		reason += fmt.Sprintf(", with %s the manager dismissed", shed.Objections(dismissed))
 	}
 	if api := s.recordRatification(ctx, o, d, string(content), reason); api != nil {
 		return RatifyResponse{}, api

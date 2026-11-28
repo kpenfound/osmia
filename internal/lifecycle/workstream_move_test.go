@@ -83,7 +83,7 @@ func TestMoveToAssembledRerunsAFailedFinalReview(t *testing.T) {
 		t.Fatalf("the move %+v", out)
 	}
 	if body := intakefixture.NoticeOf(t, repository, stream, lifecycle.WorkstreamMoveDocument(1)+"-recorded"); !strings.Contains(body, "the owner asked for a fresh final review of the assembled branch: "+note) {
-		t.Fatalf("the chief of staff heard %q", body)
+		t.Fatalf("the manager heard %q", body)
 	}
 	fixturekit.Must(t, a.Pass(ctx))
 	ops := journey.FinalOperations(t, repository, stream)
@@ -131,7 +131,7 @@ func TestManagerMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 	for _, to := range []string{intake.SketchedState, intake.InShedState, intake.RatifiedState, intake.AbandonedState} {
 		out := intakefixture.Handle(t, tool, fmt.Sprintf(`{"to":%q,"note":"Do it."}`, to))
 		if !strings.Contains(out, `"recorded":false`) || strings.Contains(out, "owner_decided") || strings.Contains(out, "present it to the owner") {
-			t.Fatalf("the chief of staff moved the workstream to %s on its own: %s", to, out)
+			t.Fatalf("the manager moved the workstream to %s on its own: %s", to, out)
 		}
 		if (to == intake.RatifiedState || to == intake.AbandonedState) && !strings.Contains(out, "pending as an owner decision") {
 			t.Fatalf("the proposal to %s does not point to its card: %s", to, out)
@@ -433,7 +433,7 @@ func TestTheManagerReopensAWorkstreamPastTheFinalRoundLimit(t *testing.T) {
 	journey.InspectForTest(f.S).SetRouterJudge(jevfixture.TransitionJudge(f.S.Now, jev))
 	out := intakefixture.Handle(t, tool, `{"to":"building","note":"Reopen it."}`)
 	if !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"state":"building"`) {
-		t.Fatalf("the chief of staff did not reopen the workstream: %s", out)
+		t.Fatalf("the manager did not reopen the workstream: %s", out)
 	}
 	moved := lastOn(t, repository, stream, trace.FeatureSubject)
 	if moved.To != intake.BuildingState || moved.DecidedBy != trace.DecidedByManager || moved.Departed() {
@@ -463,7 +463,7 @@ func TestARevisionCommissionedOnAnAssembledWorkstreamReopensIt(t *testing.T) {
 	fixturekit.Must(t, err)
 	i := slices.IndexFunc(tools, func(t coreadapter.Tool) bool { return t.Name == questions.RouteAmendmentTool })
 	if i < 0 {
-		t.Fatal("the chief of staff has no route_amendment tool")
+		t.Fatal("the manager has no route_amendment tool")
 	}
 	controls := &journey.RuntimeControls{}
 	controls.Service.Store(f.S)

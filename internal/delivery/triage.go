@@ -141,7 +141,7 @@ func TriageToolOf(load func() *Controller, repository *trace.Repository, scope c
 			return nil, err
 		}
 		if scope.Role != trace.Manager {
-			return intake.PriorityRefusal(TriageToolName + " is only available to the chief of staff")
+			return intake.PriorityRefusal(TriageToolName + " is only available to the manager")
 		}
 		target, stream, refusal, err := repository.ManagerMember(config.WorkstreamID(scope.Workstream), input.Workstream)
 		if err != nil {
@@ -188,7 +188,7 @@ func TriageToolOf(load func() *Controller, repository *trace.Repository, scope c
 				return intake.PriorityRefusal(why)
 			}
 			t.Outcome, t.Refused = followup.TriageOwner, why
-			t.Note = fmt.Sprintf("Jev decided code with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The chief of staff's note: %s", bound.Confidence, bound.Judgment, why, note)
+			t.Note = fmt.Sprintf("Jev decided code with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The manager's note: %s", bound.Confidence, bound.Judgment, why, note)
 			detail = "the service could not carry out Jev's decision (" + why + "); the finding is left to the owner with Jev's judgment"
 		}
 		if err := followup.RecordTriage(ctx, target, stream, t, s.Now()); err != nil {

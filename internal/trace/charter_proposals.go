@@ -340,7 +340,7 @@ func (r *Repository) ProposeCharterFor(ctx context.Context, agent string, scope 
 	h := Header{Schema: "osmia.trace.transition", Version: Version, ID: subject + "_" + CharterProposed, Revision: 1, Project: r.project, Workstream: stream,
 		At: at, Actor: actor, Cause: turn.Request.ID, Depth: turn.Request.Depth + 1}
 	tx := Transaction{ExpectedVersion: v.states[subject].Version, Transition: Transition{Header: h, Subject: subject, From: "", To: CharterProposed,
-		Reason: fmt.Sprintf("The chief of staff proposed the owner's ruling on question %s as charter rule %d", id, number)}}
+		Reason: fmt.Sprintf("The manager proposed the owner's ruling on question %s as charter rule %d", id, number)}}
 	files, err := r.documentFiles(ctx, []Document{doc})
 	if err != nil {
 		return CharterProposal{}, err

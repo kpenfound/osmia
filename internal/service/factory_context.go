@@ -25,7 +25,7 @@ func memberSchema(scope coreadapter.Scope, properties string) json.RawMessage {
 func managerMember(r *trace.Repository, scope coreadapter.Scope, named config.WorkstreamID) (*trace.Repository, config.WorkstreamID, string, error) {
 	own := config.WorkstreamID(scope.Workstream)
 	if named != "" && named != own && scope.Role != trace.Manager {
-		return nil, "", "only the chief of staff names another workstream; omit workstream to read your own", nil
+		return nil, "", "only the manager names another workstream; omit workstream to read your own", nil
 	}
 	return r.ManagerMember(own, named)
 }

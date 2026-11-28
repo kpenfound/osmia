@@ -235,7 +235,7 @@ func TestCleanupRemovesTheTurnDirectoriesOfAFinishedWorkstream(t *testing.T) {
 	fixturekit.Must(t, err)
 	request := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_owner-message", Revision: 1, Project: repository.Project(), Workstream: stream, At: f.S.Now(), Actor: intake.OwnerActor, Cause: "fixture"}
 	_, err = repository.EnqueueTurn(ctx, trace.TurnRequest{Header: request, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "owner-message",
-		Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are the chief of staff.", Prompt: "Anything left?"})
+		Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are the manager.", Prompt: "Anything left?"})
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, c.Pass(ctx))
 	assertUnitWorkspace(t, f, repository, stream, "upload", false)

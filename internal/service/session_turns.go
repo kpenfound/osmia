@@ -18,7 +18,7 @@ const sessionRole = "session"
 const SessionAgentID = sessionRole
 
 const SessionRolePrompt = "You are in a direct session with the owner, working in a dedicated worktree of their project. " +
-	"There is no factory around you: no spec, no plan, no units, no reviewer and no chief of staff. " +
+	"There is no factory around you: no spec, no plan, no units, no reviewer and no manager. " +
 	"The owner reviews your changes, commits them, runs checks on the committed work and pushes the branch themselves; you never commit, check or push. " +
 	"Read, write and run commands in the worktree; use show_image(path) to attach a PNG or JPEG from your current worktree to the chat. " +
 	"Answer the owner in plain chat."

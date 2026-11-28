@@ -767,7 +767,7 @@ You work in a workspace of your own, and its files are your view. The conflicted
 - file_read and file_write change the files of your view, and your sandbox's commands check them.
 - factory_context reads the workstream's records, and record_discovery records necessary work that is not yours.
 - %s files an amendment request when upstream's change alters what a sealed criterion means. The owner decides the spec, so your resolution never settles it: resolve against the sealed spec as it stands, and file the request as well.
-- %s asks the chief of staff about the drift rebase you resolve when you need a decision you cannot make from your context. Your turn ends, and the answer arrives as your next turn on this thread.
+- %s asks the manager about the drift rebase you resolve when you need a decision you cannot make from your context. Your turn ends, and the answer arrives as your next turn on this thread.
 - done reports the resolution.
 
 ## Where you act in the state machine
@@ -797,7 +797,7 @@ Your view holds the resolved candidate's files, read-only: you cannot edit it. R
 
 ## Your tools and gates
 - %s reads the feature branch's change and the resolution.
-- %s puts a question to the workstream's chief of staff about the drift rebase you review when you need a decision you cannot make from your context. Your turn ends, and the answer arrives as your next turn on this thread.
+- %s puts a question to the workstream's manager about the drift rebase you review when you need a decision you cannot make from your context. Your turn ends, and the answer arrives as your next turn on this thread.
 - %s records your decision.
 
 ## Where you act in the state machine

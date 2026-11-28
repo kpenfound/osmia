@@ -262,7 +262,7 @@ func TestFinalReviewPushesNothingToAMergedOrClosedPullRequest(t *testing.T) {
 				t.Fatalf("the fork's branch moved from %s to %s after %d pushes, %+v", before, tip, d.pushCount(t), d.pushes(t))
 			}
 			if body := intakefixture.NoticeOf(t, d.repository, d.stream, "final-review-2-failed"); !strings.Contains(body, fmt.Sprintf("pull request #%d", d.pulls.Prs[0].Number)) || !strings.Contains(body, name) || !strings.Contains(body, "nothing was pushed") {
-				t.Fatalf("the chief of staff's notice %q", body)
+				t.Fatalf("the manager's notice %q", body)
 			}
 			outcome, revision, err := delivery.OwnPullRequestOutcomeAt(d.repository, d.stream)
 			if err != nil || revision == 0 || outcome.PullRequest != d.pulls.Prs[0].Number || outcome.Outcome != name {

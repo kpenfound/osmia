@@ -333,7 +333,7 @@ func (s *Controller) RecordAmendmentDecisionBy(ctx context.Context, project conf
 	case judgment != "":
 		reason = strings.ReplaceAll(reason, "the owner", "Jev")
 	case actor.Kind != "owner":
-		reason = strings.ReplaceAll(reason, "the owner", "the chief of staff")
+		reason = strings.ReplaceAll(reason, "the owner", "the manager")
 	}
 	if record.Note != "" {
 		reason += ": " + record.Note
@@ -569,7 +569,7 @@ func (s *Controller) PlanAmendmentSubject(repository *trace.Repository, stream c
 		if api.Code == Internal {
 			return "", errors.New(api.Message)
 		}
-		return fmt.Sprintf("amendment %s is the owner's to decide, not the chief of staff's: %s", id, api.Message), nil
+		return fmt.Sprintf("amendment %s is the owner's to decide, not the manager's: %s", id, api.Message), nil
 	}
 	return "", nil
 }
@@ -934,7 +934,7 @@ func (a AmendmentDebate) ResumeUnit(ctx context.Context, stream config.Workstrea
 	}
 	reason := fmt.Sprintf("unit %s resumes %s: the owner %s amendment %s, and the ruling is the %s's next turn", req.Unit, stage, verb, req.ID, wait.Actor.ID)
 	if actor == trace.Manager {
-		reason = strings.ReplaceAll(reason, "the owner", "the chief of staff")
+		reason = strings.ReplaceAll(reason, "the owner", "the manager")
 	} else if actor == AmendmentActor.ID {
 		reason = strings.ReplaceAll(reason, "the owner", "the service")
 	} else if actor == trace.DecidedByJev {

@@ -524,7 +524,7 @@ func (f *HandInFixture) CheckHanded(t *testing.T, out api.HandInResponse, key, n
 	th, err := r.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	if th.Identity.Role != trace.Manager {
-		t.Fatalf("chief of staff %+v", th)
+		t.Fatalf("manager %+v", th)
 	}
 	if _, err := r.EnsureManager(ctx, stream, time.Now(), owner); err != nil {
 		t.Fatal(err)

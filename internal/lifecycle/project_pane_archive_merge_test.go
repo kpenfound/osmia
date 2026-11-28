@@ -185,7 +185,7 @@ func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
 		_, revision, _ := groupResolution()
 		return revision == 1
 	})
-	journey.LifecycleAwait(t, f, "chief of staff archived and cleaned the merged sink", func() bool {
+	journey.LifecycleAwait(t, f, "manager archived and cleaned the merged sink", func() bool {
 		a, ok := intakefixture.ArchiveRecord(t, f.S.Store, f.Stream2)
 		return ok && a.Actor == runtime.ArchiveActorManager && !a.CleanedAt.IsZero()
 	})

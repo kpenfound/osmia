@@ -84,7 +84,7 @@ func briefDocuments(t *testing.T, repository *trace.Repository, stream config.Wo
 func TestDeliveryBriefToolReachesOnlyOrdinaryManagerTurns(t *testing.T) {
 	t.Parallel()
 	if !slices.Contains(managerOrdinaryNarrow.Tools, briefToolName) || !slices.Contains(managerGrant.Tools, briefToolName) {
-		t.Fatalf("an ordinary chief-of-staff turn is not granted %s: %v", briefToolName, managerOrdinaryNarrow.Tools)
+		t.Fatalf("an ordinary manager turn is not granted %s: %v", briefToolName, managerOrdinaryNarrow.Tools)
 	}
 	for name, tools := range map[string][]string{"design session": designNarrow.Tools, "mason": masonGrant.Tools, "unit mason": unitMasonGrant.Tools, "reviewer": reviewerGrant.Tools} {
 		if slices.Contains(tools, briefToolName) {

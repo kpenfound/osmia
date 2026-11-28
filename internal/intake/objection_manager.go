@@ -82,7 +82,7 @@ func (s *Controller) ObjectionSubject(repository *trace.Repository, stream confi
 	case i < 0:
 		return shed.Entry{}, 0, &APIError{Code: NotFound, Message: fmt.Sprintf("no objection %s stands in workstream %s", objection, stream)}
 	case entries[i].Kind == shed.CharterConflict:
-		return shed.Entry{}, 0, &APIError{Code: Conflict, Message: "a conflict between member charters is escalated to the owner; the chief cannot resolve it"}
+		return shed.Entry{}, 0, &APIError{Code: Conflict, Message: "a conflict between member charters is escalated to the owner; the manager cannot resolve it"}
 	case entries[i].Member == shed.OwnerMember:
 		return shed.Entry{}, 0, &APIError{Code: Conflict, Message: fmt.Sprintf("objection %s is the owner's own; the owner decides it", objection)}
 	case entries[i].By == trace.Manager || entries[i].Escalated:
@@ -184,7 +184,7 @@ func RegisterObjectionEffects(reg *router.Effects, load func() *Controller) {
 			switch p.Routing.DecidedBy {
 			case trace.DecidedByJev:
 				judgment = p.Routing.Judgment
-				note = fmt.Sprintf("Jev decided %s instead of the chief of staff's %s (judgment %s). The chief of staff's note: %s", objectionDecision(p.Target.Name), x.Default, judgment, x.Note)
+				note = fmt.Sprintf("Jev decided %s instead of the manager's %s (judgment %s). The manager's note: %s", objectionDecision(p.Target.Name), x.Default, judgment, x.Note)
 			case trace.DecidedByJevGate:
 				judgment = p.Routing.Judgment
 			}
@@ -223,8 +223,8 @@ func (s *Controller) objectionExit(repository *trace.Repository, stream config.W
 		},
 		TransitionID: func(t router.Target) string { return objectionSubject(req.Objection) + "-" + t.Name },
 		Evidence: router.Evidence{
-			Intent:  "The committee's objection stands at the ratification gate. The chief of staff dismisses it only when the record answers it, and escalates it when it needs the owner.",
-			Records: []router.Entry{{Kind: "chief-note", Text: req.Note}},
+			Intent:  "The committee's objection stands at the ratification gate. The manager dismisses it only when the record answers it, and escalates it when it needs the owner.",
+			Records: []router.Entry{{Kind: "manager-note", Text: req.Note}},
 		},
 		Prereq: router.Prerequisites{Other: func(_ context.Context, _ router.Target) (string, error) {
 			if _, _, api := s.ObjectionSubject(repository, stream, req.Objection); api != nil {
@@ -274,7 +274,7 @@ func (s *Controller) DecideObjection(ctx context.Context, repository *trace.Repo
 	case err != nil:
 		return shed.Entry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the decision on objection %s of workstream %s; check the trace repository", req.Objection, stream)}
 	case !res.Committed:
-		return shed.Entry{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the decision on objection %s is not recorded: the router %s it (%s); the chief of staff's notice has what Jev saw", req.Objection, routeWord(res), res.Hold)}
+		return shed.Entry{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the decision on objection %s is not recorded: the router %s it (%s); the manager's notice has what Jev saw", req.Objection, routeWord(res), res.Hold)}
 	}
 	entries, err := Dissent(repository, stream)
 	if err != nil {
@@ -368,7 +368,7 @@ func (c *Controls) ResolveObjection(repository *trace.Repository, scope coreadap
 		entry, api := s.DecideObjection(ctx, target, stream, request)
 		if api != nil && bound != nil && api.Code != Internal && decision != shed.Escalate {
 			request.Decision = shed.Escalate
-			request.Note = fmt.Sprintf("Jev decided %s with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The chief of staff's note: %s", bound.Pick, bound.Confidence, bound.Judgment, api.Message, note)
+			request.Note = fmt.Sprintf("Jev decided %s with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The manager's note: %s", bound.Pick, bound.Confidence, bound.Judgment, api.Message, note)
 			if entry, handed := s.DecideObjection(ctx, target, stream, request); handed == nil {
 				return json.Marshal(struct {
 					Recorded  bool   `json:"recorded"`

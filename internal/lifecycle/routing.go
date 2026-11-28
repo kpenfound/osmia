@@ -182,11 +182,11 @@ func (d Drifter) heldExit(stream config.WorkstreamID, state trace.WorkflowState,
 	if trigger == "" {
 		trigger = TriggerDriftHeld
 	}
-	reason := fmt.Sprintf("drift rebase %d is held for the owner: %s; feature branch %s stays at %s, the seal is unchanged, and no drift rebase is asked for until the owner asks for one or the chief of staff hands this one back with a note for its drift mason and reviewer", rebase.Drift, held.Why, rebase.Branch, rebase.Before)
+	reason := fmt.Sprintf("drift rebase %d is held for the owner: %s; feature branch %s stays at %s, the seal is unchanged, and no drift rebase is asked for until the owner asks for one or the manager hands this one back with a note for its drift mason and reviewer", rebase.Drift, held.Why, rebase.Branch, rebase.Before)
 	if rebase.Verdict != nil && rebase.Verdict.Summary != "" {
 		reason += "; the last review found: " + rebase.Verdict.Summary
 	}
-	visible := fmt.Sprintf("Drift rebase %d onto upstream %s is held for the owner: %s. The feature branch and the seal stay, and no drift rebase is asked for until the owner asks for one or the chief of staff hands this one back with a note for its drift mason and reviewer.", rebase.Drift, rebase.Upstream.Commit, held.Why)
+	visible := fmt.Sprintf("Drift rebase %d onto upstream %s is held for the owner: %s. The feature branch and the seal stay, and no drift rebase is asked for until the owner asks for one or the manager hands this one back with a note for its drift mason and reviewer.", rebase.Drift, rebase.Upstream.Commit, held.Why)
 	id := transition + "-" + DriftHeld
 	retry := router.Target{Name: DriftRetryTarget, State: fmt.Sprintf("requested-%d", rebase.Drift+1), Bar: router.BarModest, Works: true,
 		Description: "Ask for the drift rebase again from the start: the conflicts are replayed and fresh turns of the drift mason and reviewer resolve them.",
@@ -201,7 +201,7 @@ func (d Drifter) heldExit(stream config.WorkstreamID, state trace.WorkflowState,
 		records = append(records, router.Entry{Kind: "drift-conflicts", Text: strings.Join(rebase.Conflicts, ", ")})
 	}
 	targets := []router.Target{{Name: DriftHoldTarget, State: fmt.Sprintf("%s-%d", DriftHeld, rebase.Drift), Reason: reason,
-		Description: "Hold the drift rebase for the owner: the feature branch and the seal stay, and no drift rebase is asked for until the owner asks or the chief of staff hands it back."}}
+		Description: "Hold the drift rebase for the owner: the feature branch and the seal stay, and no drift rebase is asked for until the owner asks or the manager hands it back."}}
 	if !held.Hard {
 		targets = append(targets, retry)
 	}

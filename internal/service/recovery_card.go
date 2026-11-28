@@ -186,7 +186,7 @@ func (s *Service) recoveryCards(repo *trace.Repository, stream config.Workstream
 				return nil, err
 			}
 		case rec.Machine == lifecycle.DependencyMachine && dependencyWaitExit(rec.Trigger) && window > 0 && (rec.State == router.StateHeld || rec.State == router.StateRefused) && now.Sub(opened) >= window:
-			reason := fmt.Sprintf("the router held the exit from %s and neither Jev nor the chief of staff cleared it for %d minutes; dropping the dependency lets the workstream go on without waiting for it", rec.Subject, int(window/time.Minute))
+			reason := fmt.Sprintf("the router held the exit from %s and neither Jev nor the manager cleared it for %d minutes; dropping the dependency lets the workstream go on without waiting for it", rec.Subject, int(window/time.Minute))
 			if err := add(recordMove(rec, lifecycle.DependencyWaived, api.RecoveryStall, reason), opened); err != nil {
 				return nil, err
 			}
@@ -395,9 +395,9 @@ func (w stallWatch) openRecovery(ctx context.Context, stream config.WorkstreamID
 	if unit != "" {
 		name = "unit " + unit
 	}
-	reason := fmt.Sprintf("%s has made no progress and neither Jev nor the chief of staff cleared the stall within a further %d minutes, so starting %s again is yours to approve", name, int(after/time.Minute), state.Value)
+	reason := fmt.Sprintf("%s has made no progress and neither Jev nor the manager cleared the stall within a further %d minutes, so starting %s again is yours to approve", name, int(after/time.Minute), state.Value)
 	if target != state.Value {
-		reason = fmt.Sprintf("%s has made no progress and neither Jev nor the chief of staff cleared the stall within a further %d minutes, so moving it to %s is yours to approve", name, int(after/time.Minute), target)
+		reason = fmt.Sprintf("%s has made no progress and neither Jev nor the manager cleared the stall within a further %d minutes, so moving it to %s is yours to approve", name, int(after/time.Minute), target)
 	}
 	move := recordMove(rec, target, api.RecoveryStall, reason)
 	err = writeRecoveryRecord(ctx, w.repository, stream, recoveryRecord{RecoveryMove: move, State: recoveryOpen, Opened: now}, revisions[rec.Occurrence], stallActor, now)

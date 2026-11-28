@@ -64,7 +64,7 @@ type previewOperation struct {
 func (c *runtimeControls) preview(cfg *config.Config, repo *trace.Repository, scope coreadapter.Scope, view isolation.View, now func() time.Time) coreadapter.Tool {
 	var mu sync.Mutex
 	tool := coreadapter.Tool{Name: "preview", Effect: coreadapter.ToolMemory,
-		Description: "Ask the service to capture a static screenshot of built code. Set workstream to the member to show (required for a shared chief). Defaults to its feature-branch head, or set unit for its recorded candidate. Use inspect_code at the member's committed feature head or unit candidate to find the Service call and port in its Dagger configuration and module source. Supply call as the dagger call argument list returning that Service, and port as its exposed HTTP port. Only module arguments and paths within the exported source are allowed; CLI options, providers, environment names and host-writing or interactive steps are refused. path defaults to /; timeout defaults to 5m and must be from 1m to 30m; viewport is desktop (default) or phone, full_page defaults to false. Returns an image_id to refer to in your reply and a copy under images/ in this read-only view. Limitations do not fail your turn. Recovered results from an interrupted turn are in previews/results.json; read them before requesting another capture.",
+		Description: "Ask the service to capture a static screenshot of built code. Set workstream to the member to show (required for a shared manager). Defaults to its feature-branch head, or set unit for its recorded candidate. Use inspect_code at the member's committed feature head or unit candidate to find the Service call and port in its Dagger configuration and module source. Supply call as the dagger call argument list returning that Service, and port as its exposed HTTP port. Only module arguments and paths within the exported source are allowed; CLI options, providers, environment names and host-writing or interactive steps are refused. path defaults to /; timeout defaults to 5m and must be from 1m to 30m; viewport is desktop (default) or phone, full_page defaults to false. Returns an image_id to refer to in your reply and a copy under images/ in this read-only view. Limitations do not fail your turn. Recovered results from an interrupted turn are in previews/results.json; read them before requesting another capture.",
 		InputSchema: memberSchema(scope, `"call":{"type":"array","items":{"type":"string"},"minItems":1},"port":{"type":"integer","minimum":1,"maximum":65535},"timeout":{"type":"string"},"unit":{"type":"string"},"path":{"type":"string"},"viewport":{"type":"string","enum":["desktop","phone"]},"full_page":{"type":"boolean"}`)}
 	var schema map[string]any
 	_ = json.Unmarshal(tool.InputSchema, &schema)
@@ -77,7 +77,7 @@ func (c *runtimeControls) preview(cfg *config.Config, repo *trace.Repository, sc
 			return json.Marshal(previewResult{Limitation: previewDiagnostic(message)})
 		}
 		if scope.Role != trace.Manager {
-			return limitation("preview is only available to the chief of staff")
+			return limitation("preview is only available to the manager")
 		}
 		var in previewInput
 		decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -124,7 +124,7 @@ func (c *runtimeControls) preview(cfg *config.Config, repo *trace.Repository, sc
 				return limitation(err.Error())
 			}
 			if len(members) > 1 && in.Workstream == "" {
-				return limitation("a shared chief must qualify workstream for preview")
+				return limitation("a shared manager must qualify workstream for preview")
 			}
 			target, stream, refusal, err := managerMember(repo, scope, in.Workstream)
 			if err != nil {

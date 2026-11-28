@@ -413,7 +413,7 @@ func AmendedMasonPrompt(app amendment.Application, m bundle.Mason, rework bool) 
 		what = fmt.Sprintf("The owner approved amendment %s. It changed the entry of unit %s in the plan; the criteria the unit serves keep their meaning. Continue in your existing workspace against the amended task and acceptance below.", app.Amendment, m.Unit)
 	}
 	if app.Actor == trace.Manager {
-		what = strings.ReplaceAll(what, "The owner", "The chief of staff")
+		what = strings.ReplaceAll(what, "The owner", "The manager")
 	}
 	return fmt.Sprintf("%s When the task is done and its acceptance holds, call done with the outcome of your work, then end your turn.\n\n%s", what, m.Render())
 }

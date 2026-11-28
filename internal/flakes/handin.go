@@ -8,7 +8,7 @@ import (
 
 // NotesHeading heads the manager's notes, the one part of the hand-in
 // the service does not write from evidence.
-const NotesHeading = "## Notes from the chief of staff"
+const NotesHeading = "## Notes from the manager"
 
 // RenderHandIn writes the hand-in for the occurrence of run in the group, as
 // Markdown: the evidence its run recorded, the group's earlier history, what

@@ -303,7 +303,7 @@ func (w stallWatch) openChangeRecovery(ctx context.Context, host config.Workstre
 	if _, opened := marks[rec.Occurrence]; opened {
 		return nil
 	}
-	reason := fmt.Sprintf("%s has sat %s and neither Jev nor the chief of staff moved it within a further %d minutes, so ending it as failed, which lets a new change be requested, is yours to approve", c.what, c.state, int(after/time.Minute))
+	reason := fmt.Sprintf("%s has sat %s and neither Jev nor the manager moved it within a further %d minutes, so ending it as failed, which lets a new change be requested, is yours to approve", c.what, c.state, int(after/time.Minute))
 	move := api.RecoveryMove{Occurrence: rec.Occurrence, Machine: rec.Machine, Subject: rec.Subject, From: c.state, Version: c.version, Target: changeStateTarget, Origin: api.RecoveryStall, Reason: reason}
 	err = writeRecoveryRecord(ctx, w.repository, host, recoveryRecord{RecoveryMove: move, State: recoveryOpen, Opened: now}, revisions[rec.Occurrence], stallActor, now)
 	if errors.Is(err, trace.ErrConflict) {

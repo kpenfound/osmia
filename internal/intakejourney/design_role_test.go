@@ -62,7 +62,7 @@ func TestADesignTurnRunsOnTheDesignerRoleAndItsOwnThreadWithOnlyTheDesignTools(t
 	stream := opened.Design.Workstream
 	repository := s.Sole().Repository
 	if manager, err := repository.ManagerThread(stream); err != nil || len(manager.Turns) != 0 {
-		t.Fatalf("a new design session's chief-of-staff thread holds turns: %+v %v", manager.Turns, err)
+		t.Fatalf("a new design session's manager thread holds turns: %+v %v", manager.Turns, err)
 	}
 	if th, err := repository.DesignerThread(stream); err != nil || th.Identity.Role != trace.Designer || th.Identity.ThreadID != trace.Designer {
 		t.Fatalf("design thread: %+v %v", th.Identity, err)
@@ -87,7 +87,7 @@ func TestADesignTurnRunsOnTheDesignerRoleAndItsOwnThreadWithOnlyTheDesignTools(t
 			fail("native grants %+v", req.Grants)
 		}
 		if req.SystemPrompt != intake.DesignRolePrompt || strings.Contains(req.Prompt, "Current factory operating policy") {
-			fail("the designer's turn carries the chief of staff's policy or a changed system prompt")
+			fail("the designer's turn carries the manager's policy or a changed system prompt")
 		}
 		if !slices.Equal(req.Profile.Skills, []string{designerSkillRef}) {
 			fail("skills %v, want only the designer's %s", req.Profile.Skills, designerSkillRef)
@@ -110,7 +110,7 @@ func TestADesignTurnRunsOnTheDesignerRoleAndItsOwnThreadWithOnlyTheDesignTools(t
 		t.Fatalf("design thread turns: %+v", th.Turns)
 	}
 	if manager, err := repository.ManagerThread(stream); err != nil || len(manager.Turns) != 0 {
-		t.Fatalf("a design turn reached the chief-of-staff thread: %+v %v", manager.Turns, err)
+		t.Fatalf("a design turn reached the manager thread: %+v %v", manager.Turns, err)
 	}
 }
 
@@ -298,11 +298,11 @@ func TestStartingFromASessionOpenedBeforeTheDesignerRoleNeverResumesItsBackendSe
 	if _, err := c.DesignStart(ctx, stream); err != nil {
 		t.Fatal(err)
 	}
-	s.Until(t, "the chief of staff accepts a message once Start has settled", func() bool {
+	s.Until(t, "the manager accepts a message once Start has settled", func() bool {
 		_, err := c.Send(ctx, stream, "What is next?")
 		return err == nil
 	})
-	s.Until(t, "the chief of staff answered after Start", func() bool {
+	s.Until(t, "the manager answered after Start", func() bool {
 		manager, err := repository.ManagerThread(stream)
 		fixturekit.Must(t, err)
 		return slices.ContainsFunc(manager.Turns, func(q trace.QueuedTurn) bool {

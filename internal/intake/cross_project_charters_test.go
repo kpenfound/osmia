@@ -261,8 +261,8 @@ func TestCrossProjectCharterConflictCannotBeDismissed(t *testing.T) {
 	tool := controls.ResolveObjection(f.group, scope)
 	out, err := tool.Handle(ctx, json.RawMessage(`{"workstream":"`+string(fixturekit.Stream)+`","objection":"`+id+`","decision":"dismiss","note":"Ignore it."}`))
 	fixturekit.Must(t, err)
-	if !strings.Contains(string(out), `"recorded":false`) || !strings.Contains(string(out), "chief cannot resolve") {
-		t.Fatalf("chief dismissal tool: %s", out)
+	if !strings.Contains(string(out), `"recorded":false`) || !strings.Contains(string(out), "manager cannot resolve") {
+		t.Fatalf("manager dismissal tool: %s", out)
 	}
 
 	conflict := shed.Objection{ID: "conflict", Kind: shed.CharterConflict, Part: "spec#1", Argument: "Rules conflict.", Citations: []string{"charter#1", string(charterProjectB) + "/charter#1"}}

@@ -257,7 +257,7 @@ func AwaitEventTurns(t *testing.T, repository *trace.Repository, stream config.W
 	t.Helper()
 	wake, release := fixturekit.Ticks(50 * time.Millisecond)
 	defer release()
-	fixturekit.Until(t, fmt.Sprintf("the chief of staff of %s to receive event turns with %q", stream, want), wake, func() bool {
+	fixturekit.Until(t, fmt.Sprintf("the manager of %s to receive event turns with %q", stream, want), wake, func() bool {
 		th, err := repository.ManagerThread(stream)
 		fixturekit.Must(t, err)
 		found := 0

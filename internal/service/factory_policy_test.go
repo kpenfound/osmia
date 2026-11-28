@@ -244,3 +244,21 @@ func TestTurnContextCarriesTheOperatingPolicyOfTheWorkstreamsKind(t *testing.T) 
 		}
 	}
 }
+
+func TestFactoryPolicyNamesTheManagerAndNeverTheChief(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{kindreg.Feature, kindreg.HillClimb} {
+		for _, role := range policyRoles {
+			text := policyFor(t, role, kind, "turn-1")
+			if strings.Contains(strings.ToLower(text), "chief") {
+				t.Errorf("%s policy of a %s workstream names the chief: %s", role, kind, text)
+			}
+		}
+	}
+	if text := policyFor(t, trace.Manager, kindreg.Feature, "turn-1"); !strings.Contains(text, "## Manager: investigating and deciding") {
+		t.Errorf("the manager's policy has no manager section: %s", text)
+	}
+	if text := policyFor(t, reviewerRole, kindreg.Feature, "turn-1"); !strings.Contains(text, "ask the manager to coordinate") {
+		t.Errorf("the reviewer's policy does not send coordination to the manager: %s", text)
+	}
+}

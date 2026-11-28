@@ -40,7 +40,7 @@ func TestHeldCoversPausedScopes(t *testing.T) {
 				t.Fatalf("worker held %v, want %v", got, tc.held)
 			}
 			if Held(tc.pauses, project, manager) {
-				t.Fatal("chief-of-staff turn held")
+				t.Fatal("manager turn held")
 			}
 			if got := Paused(tc.pauses, project, stream); got != tc.held {
 				t.Fatalf("workstream paused %v, want %v", got, tc.held)

@@ -394,7 +394,7 @@ func (f *flakeRecorder) notice(ctx context.Context, run flakeRun, occurrences []
 		fmt.Fprintf(&b, "\nFor information (%d), already decided:\n", len(decided))
 		for _, o := range decided {
 			if o.Decision.State == flakes.Joined {
-				fmt.Fprintf(&b, "\n- Occurrence `%s`, flake group `%s`: flaky %s. It joined the open flake-fix workstream `%s`, whose chief of staff has these links as new evidence. Nothing for you to decide.\n", o.ID, o.group, codeList(o.Links), o.Decision.Workstream)
+				fmt.Fprintf(&b, "\n- Occurrence `%s`, flake group `%s`: flaky %s. It joined the open flake-fix workstream `%s`, whose manager has these links as new evidence. Nothing for you to decide.\n", o.ID, o.group, codeList(o.Links), o.Decision.Workstream)
 			} else {
 				fmt.Fprintf(&b, "\n- Occurrence `%s`, flake group `%s`: flaky %s. Its decision is %s. Nothing for you to decide.\n", o.ID, o.group, codeList(o.Links), o.Decision.State)
 			}

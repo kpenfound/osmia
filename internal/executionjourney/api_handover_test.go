@@ -45,7 +45,7 @@ func (h *handoverManager) turn(ctx context.Context, req agent.Request, _ *agent.
 		names = append(names, tool.Name)
 	}
 	if !slices.Equal(names, []string{status.ToolName}) {
-		return nil, fmt.Errorf("chief of staff tools %v", names)
+		return nil, fmt.Errorf("manager tools %v", names)
 	}
 	stream := filepath.Base(filepath.Dir(filepath.Dir(req.SessionDir)))
 	h.mu.Lock()
@@ -224,11 +224,11 @@ func TestHandInToSketchedPlan(t *testing.T) {
 			"Workstream state changed from handed to sketched: " + sketches[stream],
 		} {
 			if !strings.Contains(prompts, want) {
-				t.Fatalf("chief of staff of %s was not told %q:\n%s", stream, want, prompts)
+				t.Fatalf("manager of %s was not told %q:\n%s", stream, want, prompts)
 			}
 		}
 		if strings.Contains(prompts, "is invalid") {
-			t.Fatalf("chief of staff of %s heard of the invalid draft:\n%s", stream, prompts)
+			t.Fatalf("manager of %s heard of the invalid draft:\n%s", stream, prompts)
 		}
 	}
 	drafts := slices.DeleteFunc(f.Runs(), func(run string) bool { return !strings.HasPrefix(run, "draft-") })

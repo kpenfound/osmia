@@ -62,7 +62,7 @@ func TestAManagerRequestAfterTheDebateConcludesIsPinned(t *testing.T) {
 				t.Fatalf("the request is not recorded: %+v", docs)
 			}
 			if c.redraft && !strings.Contains(docs[len(docs)-1].Content, note) {
-				t.Fatalf("the redraft request lost the chief of staff's note: %s", docs[len(docs)-1].Content)
+				t.Fatalf("the redraft request lost the manager's note: %s", docs[len(docs)-1].Content)
 			}
 		})
 	}

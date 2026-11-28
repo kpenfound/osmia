@@ -22,7 +22,7 @@ import (
 func TestDecideIsAManagerToolOnly(t *testing.T) {
 	t.Parallel()
 	if !slices.Contains(managerGrant.Tools, decideTool) || !slices.Contains(managerOrdinaryNarrow.Tools, decideTool) {
-		t.Fatalf("an ordinary chief-of-staff turn does not hold decide: %v", managerOrdinaryNarrow.Tools)
+		t.Fatalf("an ordinary manager turn does not hold decide: %v", managerOrdinaryNarrow.Tools)
 	}
 	for name, tools := range map[string][]string{"design session": designNarrow.Tools, "mason": masonGrant.Tools, "unit mason": unitMasonGrant.Tools, "reviewer": reviewerGrant.Tools} {
 		if slices.Contains(tools, decideTool) {
@@ -132,7 +132,7 @@ func TestADecisionThatIsNotConfidentLeavesTheManagerFree(t *testing.T) {
 			t.Parallel()
 			k := newDecideKit(t, p, masonRole)
 			got := k.call(t, k.decide, decideQuestion)
-			if got["decision"] != "chief" || got["pick"] != nil {
+			if got["decision"] != "manager" || got["pick"] != nil {
 				t.Fatalf("decide: %v", got)
 			}
 			if got := k.call(t, k.tools["escalate"], escalateUpload); got["recorded"] != true {
@@ -287,7 +287,7 @@ func TestAContestRulingThatIsNotConfidentLeavesTheManagerFree(t *testing.T) {
 			c.f.s.jev = gateJudge(c.f.clock.Now, p)
 			c.contest(t)
 			decide := c.controls.decide(c.repo, c.scope)
-			if out := intakefixture.Handle(t, decide, `{"kind":"contested-ruling","subject":"resume","evidence":"The reviewer ended without a verdict."}`); !strings.Contains(out, `"decision":"chief"`) || strings.Contains(out, `"pick"`) {
+			if out := intakefixture.Handle(t, decide, `{"kind":"contested-ruling","subject":"resume","evidence":"The reviewer ended without a verdict."}`); !strings.Contains(out, `"decision":"manager"`) || strings.Contains(out, `"pick"`) {
 				t.Fatalf("decide: %s", out)
 			}
 			if out := intakefixture.Handle(t, c.tool, `{"unit":"resume","decision":"review","note":"Check the verdict file."}`); !strings.Contains(out, `"recorded":true`) {

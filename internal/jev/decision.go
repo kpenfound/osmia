@@ -68,24 +68,24 @@ var kinds = map[DecisionKind]kindSpec{
 	KindRatification: {1, "The state is a ratification packet of a feature the factory drafted: the spec and plan revisions, what the committee objected to and how those objections stand. " +
 		"Should the owner's ratification be given, so the feature is built as drafted? Choose ratify only when nothing in the packet needs the owner's attention.", false},
 	KindIntentAmendment:    {1, "The state is an amendment request that changes the approved intent of a feature, with the debate about it. Choose whether to approve or decline it.", false},
-	KindEscalatedQuestion:  {1, "The state is a question the chief of staff escalated to the owner, with the options the chief wrote and its evidence. Choose the option the owner would choose.", false},
+	KindEscalatedQuestion:  {2, "The state is a question the manager escalated to the owner, with the options the manager wrote and its evidence. Choose the option the owner would choose.", false},
 	KindEscalatedContest:   {1, "The state is a unit of work contested after repeated failed attempts, escalated to the owner with the options its card offers. Choose the option the owner would choose.", false},
 	KindEscalatedObjection: {1, "The state is a committee objection escalated to the owner at the ratification gate, with the options its card offers. Choose the option the owner would choose.", false},
-	KindQuestionRouting:    {1, "The state is a question a worker asked while building a feature, with the chief of staff's evidence. Choose how it is routed: answered within the approved intent, routed as an amendment, or escalated to the owner.", false},
-	KindContestedRuling:    {1, "The state is a contested unit of work, with the chief of staff's evidence. Choose how the chief of staff rules: review again, revise the unit, or escalate to the owner.", false},
-	KindObjection:          {1, "The state is a committee objection to the spec or plan, with the chief of staff's evidence. Choose whether the chief dismisses it or escalates it to the owner.", false},
+	KindQuestionRouting:    {2, "The state is a question a worker asked while building a feature, with the manager's evidence. Choose how it is routed: answered within the approved intent, routed as an amendment, or escalated to the owner.", false},
+	KindContestedRuling:    {2, "The state is a contested unit of work, with the manager's evidence. Choose how the manager rules: review again, revise the unit, or escalate to the owner.", false},
+	KindObjection:          {2, "The state is a committee objection to the spec or plan, with the manager's evidence. Choose whether the manager dismisses it or escalates it to the owner.", false},
 	KindPlanAmendment:      {1, "The state is an amendment request that leaves the approved intent unchanged, with the debate about it. Choose whether to approve or decline it.", false},
 	KindDiscovery:          {1, "The state is a piece of work a worker discovered during a feature. Choose its disposition: assign it to a unit, decline it, or retain it as a suggestion.", false},
-	KindTriage:             {1, "The state is one blocking finding of a final review, with the chief of staff's evidence. Choose whether it needs code in the revision or is left to the owner.", false},
+	KindTriage:             {2, "The state is one blocking finding of a final review, with the manager's evidence. Choose whether it needs code in the revision or is left to the owner.", false},
 	KindDeliveryRoute: {1, "The state is a finished workstream of a project that may land directly: its spec summary, the final review report, the check results, and the size of the change and the areas it touches. No code is shown. " +
 		"Choose how the workstream is delivered: land it, so the base branch is fast-forwarded to the checked commit, or deliver it as the draft pull request that already exists, marked ready for review. " +
 		"Choose land only when the review found nothing that needs a person's eyes and the change is small and contained enough to go straight to the base branch. Choose pull-request when a person should see the change first. Defer when neither is clearly right.", false},
 
-	KindDeliveryApproval: {1, "The state is the owner's delivery card for an assembled feature: the final review's findings, the check result, the chief of staff's delivery brief and the pull request text the service will publish. " +
+	KindDeliveryApproval: {2, "The state is the owner's delivery card for an assembled feature: the final review's findings, the check result, the manager's delivery brief and the pull request text the service will publish. " +
 		"Should the owner mark the pull request ready for review with exactly that text? Choose approve only when nothing on the card needs the owner's attention.", true},
-	KindCharterProposal:     {1, "The state is a rule the chief of staff proposed for the project's charter from an owner ruling, with the charter as it stands. Choose whether the owner ratifies the rule as written or declines it.", true},
+	KindCharterProposal:     {2, "The state is a rule the manager proposed for the project's charter from an owner ruling, with the charter as it stands. Choose whether the owner ratifies the rule as written or declines it.", true},
 	KindCharterConflict:     {1, "The state is a conflict between the charters of the projects a feature touches, put to the owner with the options the card offers. Choose the option the owner would choose.", true},
-	KindArchitectEscalation: {1, "The state is a question the architect raised and the chief of staff escalated to the owner, such as the judgment that a selected project needs no change, with the options the chief wrote. Choose the option the owner would choose.", true},
+	KindArchitectEscalation: {2, "The state is a question the architect raised and the manager escalated to the owner, such as the judgment that a selected project needs no change, with the options the manager wrote. Choose the option the owner would choose.", true},
 	KindOwnerObjection:      {1, "The state is an objection the owner raised to the spec or plan, standing at the ratification gate, with the debate about it. Choose how the owner disposes of it now: dismiss it, or overrule it and proceed.", true},
 	KindCancellation:        {1, "The state is the impact summary of cancelling a workgroup or one of its member workstreams: what happens to each workstream and to its open pull requests. Choose the option the owner would choose.", true},
 }

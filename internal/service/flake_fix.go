@@ -40,7 +40,7 @@ func (c *runtimeControls) flakeFix(repository *trace.Repository, scope coreadapt
 			"reason (decline only, required): why the flake needs no workstream, for example the flaky test was added by the unit itself; it is recorded and shown in the originating workstream. " +
 			"workstream: the originating workstream when it is a member of your workgroup other than this conversation's own. " +
 			"An occurrence is decided once: calling the tool again for it returns its decision and does nothing else, even after its workstream was delivered or abandoned. " +
-			"When the occurrence's group already has an open flake-fix workstream, open adds the occurrence to it and tells that workstream's chief of staff instead of opening another. " +
+			"When the occurrence's group already has an open flake-fix workstream, open adds the occurrence to it and tells that workstream's manager instead of opening another. " +
 			"The tool refuses when the project has flake-fix workstreams off, for an unknown occurrence, and for a run that belongs to a flake-fix workstream.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"action":{"type":"string","enum":["open","decline"]},"occurrence":{"type":"string"},"notes":{"type":"string"},"reason":{"type":"string"},"workstream":{"type":"string"}},"required":["action","occurrence"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -178,7 +178,7 @@ func (s *Service) actOnFlake(ctx context.Context, repository *trace.Repository, 
 	case flakes.Opened:
 		res.Next = fmt.Sprintf("Flake-fix workstream %s was handed in for group %s. It goes through the architect, the committee and the owner's ratification like any hand-in; the originating workstream carries on regardless.", d.Workstream, group)
 	case flakes.Joined:
-		res.Next = fmt.Sprintf("Group %s already has flake-fix workstream %s open. The occurrence joined it and its chief of staff has the evidence; nothing was opened.", group, d.Workstream)
+		res.Next = fmt.Sprintf("Group %s already has flake-fix workstream %s open. The occurrence joined it and its manager has the evidence; nothing was opened.", group, d.Workstream)
 	case flakes.Declined:
 		res.Next = "The occurrence is declined and its reason is recorded in the originating workstream. A later flake in the group notifies you again."
 	default:
@@ -269,7 +269,7 @@ func flakeHandIn(repository *trace.Repository, workstream config.WorkstreamID) (
 
 func flakeHandInReason(o flakes.Occurrence, group string) string {
 	origin := flakeRun{stream: o.Source.Workstream, source: o.Source}
-	return fmt.Sprintf("the chief of staff opened this flake-fix workstream from flake occurrence %s of group %s, recorded by %s in %s", o.ID, group, origin.describe(), o.RunPath())
+	return fmt.Sprintf("the manager opened this flake-fix workstream from flake occurrence %s of group %s, recorded by %s in %s", o.ID, group, origin.describe(), o.RunPath())
 }
 
 func flakeDecisionSubject(occurrence string) string {
@@ -294,11 +294,11 @@ func (s *Service) announceFlakeDecision(ctx context.Context, repository *trace.R
 func flakeDecisionText(o flakes.Occurrence, group string) (to, reason string) {
 	switch o.Decision.State {
 	case flakes.Opened:
-		return "opened", fmt.Sprintf("the chief of staff opened flake-fix workstream %s for flake occurrence %s of group %s (%s)", o.Decision.Workstream, o.ID, group, codeList(o.Links))
+		return "opened", fmt.Sprintf("the manager opened flake-fix workstream %s for flake occurrence %s of group %s (%s)", o.Decision.Workstream, o.ID, group, codeList(o.Links))
 	case flakes.Joined:
 		return "joined", fmt.Sprintf("flake occurrence %s of group %s joined the open flake-fix workstream %s (%s)", o.ID, group, o.Decision.Workstream, codeList(o.Links))
 	}
-	return "declined", fmt.Sprintf("the chief of staff declined flake occurrence %s of group %s (%s): %s", o.ID, group, codeList(o.Links), o.Decision.Reason)
+	return "declined", fmt.Sprintf("the manager declined flake occurrence %s of group %s (%s): %s", o.ID, group, codeList(o.Links), o.Decision.Reason)
 }
 
 func (s *Service) closeFlakeDestination(ctx context.Context, store *flakes.Store, group string, o flakes.Occurrence, destination string, workstream config.WorkstreamID, archive runtime.Archive) error {

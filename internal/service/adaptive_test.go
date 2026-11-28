@@ -54,12 +54,12 @@ func TestManagerDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
 					t.Fatalf("plan revision lost across restart: %v", got)
 				}
 				turns := f.ruling(t, stream, requester)
-				if len(turns) != 1 || !strings.Contains(turns[0].Request.Prompt, "osmia:answer | chief of staff") || strings.Contains(turns[0].Request.Prompt, "osmia:owner_response") {
+				if len(turns) != 1 || !strings.Contains(turns[0].Request.Prompt, "osmia:answer | manager") || strings.Contains(turns[0].Request.Prompt, "osmia:owner_response") {
 					t.Fatalf("misattributed engineering ruling: %+v", turns)
 				}
 				m, err := newMasonController(f.s, f.repository()).bundle(context.Background(), stream, "resume")
 				fixturekit.Must(t, err)
-				if text := m.RenderAmendments(); !strings.Contains(text, "the chief of staff approved") || strings.Contains(text, "osmia:owner_response") {
+				if text := m.RenderAmendments(); !strings.Contains(text, "the manager approved") || strings.Contains(text, "osmia:owner_response") {
 					t.Fatalf("misattributed assignment: %s", text)
 				}
 			} else if api == nil || !strings.Contains(api.Message, "owner decision") {

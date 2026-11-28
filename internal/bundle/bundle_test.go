@@ -351,7 +351,7 @@ func TestBundleNotices(t *testing.T) {
 		if !reflect.DeepEqual(b.Notices, want) {
 			t.Fatalf("notices of scope %+v: %#v", scope, b.Notices)
 		}
-		if !strings.Contains(b.Render(), "<<< osmia:owner_response | owner (copied by Osmia) | bytes=19 >>>\n| No new dependencies\n<<< /osmia:owner_response >>>\n<<< osmia:returned_answer | chief of staff relay | bytes=37 >>>\n| The owner allows no new\n| dependencies.\n<<< /osmia:returned_answer >>>") || strings.Count(b.Render(), "<<< osmia:owner_response") != 3 {
+		if !strings.Contains(b.Render(), "<<< osmia:owner_response | owner (copied by Osmia) | bytes=19 >>>\n| No new dependencies\n<<< /osmia:owner_response >>>\n<<< osmia:returned_answer | manager relay | bytes=37 >>>\n| The owner allows no new\n| dependencies.\n<<< /osmia:returned_answer >>>") || strings.Count(b.Render(), "<<< osmia:owner_response") != 3 {
 			t.Fatalf("render of scope %+v:\n%s", scope, b.Render())
 		}
 	}
@@ -361,7 +361,7 @@ func TestBundleNotices(t *testing.T) {
 	}
 	text := f.assemble(t, bundle.Scope{Workstream: first}).Render()
 	for _, part := range []string{
-		"  decision: ruling\n  owner: Use files\n  answer: waiting for the chief of staff to relay the ruling\n",
+		"  decision: ruling\n  owner: Use files\n  answer: waiting for the manager to relay the ruling\n",
 		"  decision: ruling\n  owner: Keep it\n  answer: Answer to local\n",
 	} {
 		if !strings.Contains(text, part) {
@@ -562,7 +562,7 @@ func TestBundleCharterNotices(t *testing.T) {
 		}
 		if !strings.Contains(b.Render(), "\n## Notices\n- "+source+"charter.json (record charter_4 revision 3, workstream "+string(first)+"): the owner ratified charter#4, recorded in charter.md revision 7, from "+source+"rulings.jsonl revision 2\n"+
 			"<<< osmia:owner_response | owner (copied by Osmia) | bytes=23 >>>\n| Keep uploads resumable.\n<<< /osmia:owner_response >>>\n"+
-			"<<< osmia:charter_rule | chief of staff proposal, ratified by the owner | bytes=15 >>>\n| Uploads resume.\n<<< /osmia:charter_rule >>>\n") {
+			"<<< osmia:charter_rule | manager proposal, ratified by the owner | bytes=15 >>>\n| Uploads resume.\n<<< /osmia:charter_rule >>>\n") {
 			t.Fatalf("render of scope %+v:\n%s", scope, b.Render())
 		}
 	}

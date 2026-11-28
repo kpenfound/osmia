@@ -36,7 +36,7 @@ func TestArchitectQuestionParksTheDraftUntilTheAnswerArrives(t *testing.T) {
 		return errors.Join(intakefixture.Delivers(p, plan.SpecPath, fixturekit.ValidSpec, intake.DraftInvalid)(ctx, req, verified, tools), intakefixture.Asks(p, "1")(ctx, req, verified, tools))
 	})
 	answering := f.Answer("1", func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
-		for _, want := range []string{"The owner ruled on your question 1. The chief of staff relays the ruling.", "| " + intakefixture.AskedQuestion, "<<< osmia:owner_response", "| " + intakefixture.RelayedRuling} {
+		for _, want := range []string{"The owner ruled on your question 1. The manager relays the ruling.", "| " + intakefixture.AskedQuestion, "<<< osmia:owner_response", "| " + intakefixture.RelayedRuling} {
 			if !strings.Contains(req.Prompt, want) {
 				p.Report("answer prompt lacks %q:\n%s", want, req.Prompt)
 			}

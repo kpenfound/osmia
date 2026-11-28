@@ -40,9 +40,9 @@ func (s *Service) contestedGate(repository *trace.Repository, stream config.Work
 		Options: []jev.DecisionOption{{Name: "review", Description: "Have the unit's candidate reviewed again; the unit continues from that review."}}}
 	g.State = func(ctx context.Context) (string, []jev.Source, error) {
 		var b strings.Builder
-		intake.GateSection(&b, "Decision", fmt.Sprintf("Unit %s of workstream %s is contested and the chief of staff escalated it to the owner. The owner may have it reviewed again, or direct its mason to revise it. Revising needs the owner's own words on what to change and is not offered here.", unit, stream), 0)
+		intake.GateSection(&b, "Decision", fmt.Sprintf("Unit %s of workstream %s is contested and the manager escalated it to the owner. The owner may have it reviewed again, or direct its mason to revise it. Revising needs the owner's own words on what to change and is not offered here.", unit, stream), 0)
 		intake.GateSection(&b, "Card", e.Question+"\nBlocked: "+e.Blocked, 0)
-		intake.GateSection(&b, "Chief of staff's note", e.Recommendation, 0)
+		intake.GateSection(&b, "Manager's note", e.Recommendation, 0)
 		if u, err := sealedUnit(repository, coreadapter.Scope{Workstream: string(stream), Unit: unit}); err == nil {
 			intake.GateSection(&b, "The unit", fmt.Sprintf("%s: %s\nAcceptance:\n- %s", u.ID, u.Task, strings.Join(u.Acceptance, "\n- ")), 0)
 		}

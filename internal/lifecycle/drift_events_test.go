@@ -253,7 +253,7 @@ func TestDriftCarryReturnsApprovalsAndTheirReviewerMayAmend(t *testing.T) {
 		t.Fatalf("the review prompt lacks %q:\n%s", want, review.Request.Prompt)
 	}
 	if !strings.Contains(review.Request.Prompt, "call "+questions.AskTool+" to raise it") || !strings.Contains(review.Request.Prompt, "citing upstream commit "+upstream) {
-		t.Fatalf("the review prompt does not send upstream's change to the chief of staff:\n%s", review.Request.Prompt)
+		t.Fatalf("the review prompt does not send upstream's change to the manager:\n%s", review.Request.Prompt)
 	}
 	q, err := repository.ClaimTurn(ctx, stream, agent, "reviewing", filepath.Join(f.S.Cfg.Root.String(), "threads", "reviewing"), f.Clock.Now())
 	fixturekit.Must(t, err)

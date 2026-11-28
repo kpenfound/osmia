@@ -58,7 +58,7 @@ func TestOwnerMovesACheckingUnitBackToImplementing(t *testing.T) {
 		t.Fatalf("unit %s after %+v", state.Value, moved)
 	}
 	if !strings.Contains(intakefixture.NoticeOf(t, repo, stream, moved.ID), "owner moved unit resume from checking to implementing") {
-		t.Fatal("the move did not tell the chief of staff")
+		t.Fatal("the move did not tell the manager")
 	}
 
 	m := journey.NewMasonController(f.S, repo)
@@ -211,7 +211,7 @@ func TestManagerRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 		t.Fatalf("held unit raised %t with %q", raised, note)
 	}
 	if out := m.Resolve(t, `{"unit":"resume","decision":"review","note":"Review it."}`); !strings.Contains(out, "moved to contested for the owner") {
-		t.Fatalf("the chief of staff ruled on the owner's contest: %s", out)
+		t.Fatalf("the manager ruled on the owner's contest: %s", out)
 	}
 	entry, ok, err := journey.InspectForTest(m.F.S).ContestedEntry(m.Repo, m.Stream, "resume")
 	fixturekit.Must(t, err)
@@ -219,7 +219,7 @@ func TestManagerRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 		t.Fatalf("inbox entry %+v", entry)
 	}
 
-	if entry.Question != "Unit resume is contested: the chief of staff moved it here from implementing for you to rule on." {
+	if entry.Question != "Unit resume is contested: the manager moved it here from implementing for you to rule on." {
 		t.Fatalf("inbox question %q", entry.Question)
 	}
 	out, apiErr := recordContestedRuling(m.F.S, ctx, m.Repo, m.Stream, "resume", api.ContestedRulingRequest{Decision: "revise", Note: "Close the gap the reviews keep finding."}, intake.OwnerActor)

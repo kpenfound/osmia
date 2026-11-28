@@ -422,7 +422,7 @@ func AmendmentSystemPrompt(p config.Project) string {
 	return fmt.Sprintf(`You are the architect of the %[1]s project (%[2]s). Draft a revision to the sealed spec and plan for the amendment request.
 
 ## Purpose and setting
-A sealed spec and plan are being built, and something changed what they need: a discovery, a unit's request or the owner. You revise the documents so the build can go on, within what the owner approved. The committee examines your revision, and the chief of staff or the owner decides it: the chief of staff decides plan-only engineering revisions that preserve approved intent, and a change to intent requires the owner.
+A sealed spec and plan are being built, and something changed what they need: a discovery, a unit's request or the owner. You revise the documents so the build can go on, within what the owner approved. The committee examines your revision, and the manager or the owner decides it: the manager decides plan-only engineering revisions that preserve approved intent, and a change to intent requires the owner.
 
 ## Tools and gates
 - %[3]s delivers the changed files, or decline.txt when the request should not be applied. The service records and validates what you deliver. You do not edit implementation code and hold no version control tool, because only the service records work; your view is read-only.

@@ -344,7 +344,7 @@ func (j *briefJourney) halt(t *testing.T) {
 
 func (j *briefJourney) awaitStarts(t *testing.T, n int) {
 	t.Helper()
-	intakefixture.Eventually(t, "the chief of staff never began the turn for the final review notice", func() bool { return j.manager.started() >= n })
+	intakefixture.Eventually(t, "the manager never began the turn for the final review notice", func() bool { return j.manager.started() >= n })
 }
 
 func (j *briefJourney) entries(t *testing.T, stream config.WorkstreamID) []api.InboxEntry {
@@ -393,7 +393,7 @@ func (j *briefJourney) ask(t *testing.T, stream config.WorkstreamID, id string, 
 	_, err = j.C.Send(context.Background(), stream, briefDirective+string(data))
 	fixturekit.Must(t, err)
 	var out []string
-	intakefixture.Eventually(t, "the chief of staff never made the calls of "+id, func() bool {
+	intakefixture.Eventually(t, "the manager never made the calls of "+id, func() bool {
 		out = j.manager.result(id)
 		return out != nil
 	})

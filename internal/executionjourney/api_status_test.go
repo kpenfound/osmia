@@ -40,7 +40,7 @@ func queueManagerTurn(t *testing.T, repo *trace.Repository, turn string, at time
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at, Actor: owner, Cause: "message_" + turn, Depth: 1},
 		AgentID: intakefixture.ManagerAgent, ThreadID: intakefixture.ManagerThread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
-		SystemPrompt: "You are the chief of staff.", Prompt: "Owner message: " + turn}
+		SystemPrompt: "You are the manager.", Prompt: "Owner message: " + turn}
 	_, err := repo.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
 	event := trace.EventID("deliver_"+turn, "turn")
@@ -48,7 +48,7 @@ func queueManagerTurn(t *testing.T, repo *trace.Repository, turn string, at time
 	fixturekit.Must(t, err)
 	tx := trace.Transaction{Transition: trace.Transition{
 		Header:  trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "deliver_" + turn, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at, Actor: trace.Actor{Kind: "service", ID: "inbox"}, Cause: req.ID, Depth: 1},
-		Subject: "chief_inbox", To: "delivering", Reason: "Owner message accepted for the chief of staff"},
+		Subject: "chief_inbox", To: "delivering", Reason: "Owner message accepted for the manager"},
 		Events: []trace.Event{{ID: event, Kind: "turn", Body: "Deliver " + turn, Operation: &op}}}
 	_, err = repo.Transact(ctx, tx)
 	fixturekit.Must(t, err)
@@ -125,7 +125,7 @@ func TestManagerStatusAcrossRestart(t *testing.T) {
 			names = append(names, tool.Name)
 		}
 		if want := []string{"set_status"}; !slices.Equal(names, want) {
-			t.Errorf("chief of staff tools %v, want %v", names, want)
+			t.Errorf("manager tools %v, want %v", names, want)
 		}
 		mu.Lock()
 		defer mu.Unlock()
@@ -157,14 +157,14 @@ func TestManagerStatusAcrossRestart(t *testing.T) {
 			TelemetryTraceID: telemetry.WorkstreamTrace(w).String(), TelemetryRootSpanID: telemetry.WorkstreamRoot(w).String()}
 	}
 	if want := []api.WorkstreamStatus{empty(fixturekit.Stream), empty(fixturekit.Quiet)}; !sameStatuses(list.Workstreams, want) || len(list.Diagnostics) != 0 {
-		t.Fatalf("before the chief of staff wrote: %+v", list)
+		t.Fatalf("before the manager wrote: %+v", list)
 	}
 	close(startTurn)
 	close(release)
 	select {
 	case <-finished:
 	case <-time.After(fixturekit.DemoTimeout):
-		t.Fatal("chief-of-staff turn did not run")
+		t.Fatal("manager turn did not run")
 	}
 	mu.Lock()
 	want := []string{

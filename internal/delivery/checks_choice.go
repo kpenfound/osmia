@@ -537,7 +537,7 @@ func ChecksChoiceEntry(repository *trace.Repository, w trace.WorkstreamStatus) (
 	e := decision(InboxChecksChoice, stream, record.OfferedAt, "/checks-choice/"+string(stream), body)
 	e.Revision = record.Revision
 	e.Options = []string{ChecksChoiceKeepWaiting, ChecksChoiceContinue}
-	e.Question = fmt.Sprintf("No check results are available for push %d, commit %s of pull request #%d in %s. The chief of staff found: %s Keep waiting for the checks, or continue the final review without check results? Continuing applies to this push only: a later push waits for its own results.", current.Number, current.Commit, current.PullRequest, current.Upstream, strings.TrimSpace(record.Note))
+	e.Question = fmt.Sprintf("No check results are available for push %d, commit %s of pull request #%d in %s. The manager found: %s Keep waiting for the checks, or continue the final review without check results? Continuing applies to this push only: a later push waits for its own results.", current.Number, current.Commit, current.PullRequest, current.Upstream, strings.TrimSpace(record.Note))
 	e.Blocked = "The final review of the assembled branch. It starts when the checks of this push complete, or when you choose to continue without them; the service keeps reading the pull request's check statuses meanwhile, and this entry closes once a run completes."
 	return e, true, nil
 }
@@ -571,7 +571,7 @@ func managerChecksTarget(load func() *Controller, repository *trace.Repository, 
 		return nil, nil, "", nil, err
 	}
 	if scope.Role != trace.Manager {
-		out, err := refusal(name + " is only available to the chief of staff")
+		out, err := refusal(name + " is only available to the manager")
 		return nil, nil, "", out, err
 	}
 	target, stream, why, err := repository.ManagerMember(config.WorkstreamID(scope.Workstream), workstream())

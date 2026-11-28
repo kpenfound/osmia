@@ -102,7 +102,7 @@ func TestSharedManagerCannotReadAWorkstreamOutsideItsWorkgroup(t *testing.T) {
 	d := openMemberDiscovery(t)
 	raw, err := factoryContext(d.wg, d.scope).Handle(context.Background(), json.RawMessage(`{"workstream":"w_00000000000000000000000000000099"}`))
 	fixturekit.Must(t, err)
-	if !strings.Contains(string(raw), "does not share this chief of staff") {
+	if !strings.Contains(string(raw), "does not share this manager") {
 		t.Fatalf("a workstream outside the workgroup was read: %s", raw)
 	}
 }

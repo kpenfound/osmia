@@ -146,7 +146,7 @@ func newPriorityRig(t *testing.T) *priorityRig {
 	select {
 	case <-seeded:
 	case <-time.After(fixturekit.DemoTimeout):
-		t.Fatal("the service's chief-of-staff turn did not run")
+		t.Fatal("the service's manager turn did not run")
 	}
 	intakefixture.Mutation(t, r.c, "PUT", "priority", PriorityRequest{Project: fixturekit.Project, Workstreams: []config.WorkstreamID{fixturekit.Stream}})
 	return r
@@ -314,7 +314,7 @@ func TestOwnerTurnsOfTheManagerHaveTheManagerToolsAndGuidance(t *testing.T) {
 	}
 	slices.Sort(names)
 	if wantNames := []string{"answer", "ask_owner_about_checks", "capacity", "decide", "decide_amendment", "decide_change", "decide_charter", "drop_dependency", "escalate", "factory_context", "file_read", "flake_fix", "follow_up", "hand_back_drift", "inspect_code", "log_assumption", "move_unit", "move_workstream", "notify", "pause", "preview", "prioritise", "project_context", "propose_charter", "pull_request_checks", "read_cloud_trace", "read_remote_file", "record_delivery_brief", "record_discovery", "relay_ruling", "request_change", "resolve_contested", "resolve_objection", "resume", "retry_change", "route_amendment", "set_status", "triage_finding"}; !slices.Equal(names, wantNames) {
-		t.Fatalf("chief-of-staff tools %v, want %v", names, wantNames)
+		t.Fatalf("manager tools %v, want %v", names, wantNames)
 	}
 	for prompt, system := range r.prompts {
 		if !strings.Contains(system, priorityGuidance) || !strings.Contains(system, amendmentGuidance) {

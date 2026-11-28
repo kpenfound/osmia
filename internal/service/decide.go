@@ -169,11 +169,11 @@ func decisionResult(sub decisionSubject, res jev.Result) (json.RawMessage, error
 		return json.Marshal(result{"binding", string(sub.kind), res.Pick, res.Confidence,
 			fmt.Sprintf("Jev decided %s with confidence %.2f. The outcome tool now records only %s, and you write the text it needs.", res.Pick, res.Confidence, res.Pick)})
 	case res.Status == jev.Binding:
-		return json.Marshal(result{Decision: "chief", Kind: string(sub.kind), Next: "Jev's decision could not be carried out and the subject is with the owner."})
+		return json.Marshal(result{Decision: "manager", Kind: string(sub.kind), Next: "Jev's decision could not be carried out and the subject is with the owner."})
 	case res.Status == jev.None || res.Status == jev.FallbackOnly && res.Judgment == "":
 		return json.Marshal(result{Decision: "unavailable", Kind: string(sub.kind), Next: "Jev's decision could not be recorded now. Call decide again; the outcome tool refuses this subject until a result exists."})
 	}
-	return json.Marshal(result{Decision: "chief", Kind: string(sub.kind), Next: "Jev's decision is not binding here. The decision is yours: record any outcome the record supports."})
+	return json.Marshal(result{Decision: "manager", Kind: string(sub.kind), Next: "Jev's decision is not binding here. The decision is yours: record any outcome the record supports."})
 }
 
 type stateSections struct {
@@ -233,15 +233,15 @@ func (s *Service) questionSubject(ctx context.Context, repository *trace.Reposit
 	asked := q.Question.Asked
 	return decisionSubject{repository: q.Repository, stream: q.Stream, unit: asked.Unit, kind: jev.KindQuestionRouting, key: q.Key(),
 		options: decisionOptions(
-			questions.OutcomeAnswer, "Answer the question within the approved intent: it is an engineering decision the spec, the plan and the owner's rulings leave to the chief of staff.",
+			questions.OutcomeAnswer, "Answer the question within the approved intent: it is an engineering decision the spec, the plan and the owner's rulings leave to the manager.",
 			questions.OutcomeRouteAmendment, "Route the question as an amendment: it needs revised assignments, dependencies, newly discovered work, or a change to the plan, which the amendment flow decides.",
 			questions.OutcomeEscalate, "Escalate the question to the owner: answering it would contradict or extend the agreed design, relax a constraint, contradict an owner ruling, or needs an owner-reserved tradeoff."),
 		state: func(evidence string) (string, []jev.Source, error) {
 			var b stateSections
-			b.add("Decision", fmt.Sprintf("The chief of staff routes an open question that a %s asked while building workstream %s. Choose how it is routed.", q.Role, q.Stream), 0)
+			b.add("Decision", fmt.Sprintf("The manager routes an open question that a %s asked while building workstream %s. Choose how it is routed.", q.Role, q.Stream), 0)
 			b.add("Question", asked.Question, 0)
 			b.add("The asker's unit", unitSection(q.Repository, q.Stream, asked.Unit), 0)
-			b.add("Chief of staff's evidence", evidence, 0)
+			b.add("Manager's evidence", evidence, 0)
 			if rulings := ownerRulings(q.Repository, q.Stream); rulings != "" {
 				b.add("The owner's rulings on this workstream", rulings, 0)
 			}
@@ -291,14 +291,14 @@ func (s *Service) contestSubject(ctx context.Context, repository *trace.Reposito
 	return decisionSubject{repository: repository, stream: stream, unit: unit, kind: jev.KindContestedRuling, key: jev.ContestKey(contest.ID),
 		options: decisionOptions(
 			"review", "Have the unit's candidate reviewed again; the unit continues from that review.",
-			"revise", "Send the unit back to its mason to revise it, with the chief of staff's note on what to change.",
+			"revise", "Send the unit back to its mason to revise it, with the manager's note on what to change.",
 			"escalate", "Put the contest to the owner: the fix changes approved intent, needs an owner-reserved tradeoff, or the contest cannot be resolved by engineering."),
 		state: func(evidence string) (string, []jev.Source, error) {
 			var b stateSections
-			b.add("Decision", fmt.Sprintf("Unit %s of workstream %s is contested. The chief of staff rules on it first, on the owner's behalf. Choose how it is ruled.", unit, stream), 0)
+			b.add("Decision", fmt.Sprintf("Unit %s of workstream %s is contested. The manager rules on it first, on the owner's behalf. Choose how it is ruled.", unit, stream), 0)
 			b.add("The contest", fmt.Sprintf("Raised at %s: %s", contest.At.UTC().Format("2006-01-02 15:04 MST"), contest.Reason), 0)
 			b.add("The unit", unitSection(repository, stream, unit), 0)
-			b.add("Chief of staff's evidence", evidence, 0)
+			b.add("Manager's evidence", evidence, 0)
 			specText, planText, sources := sealedText(repository, stream)
 			b.add("Sealed spec", specText, decideSpec)
 			b.add("Sealed plan", planText, decidePlan)
@@ -321,13 +321,13 @@ func (s *Service) objectionSubject(ctx context.Context, repository *trace.Reposi
 			string(shed.Escalate), "Escalate the objection: the owner rules on it at the ratification gate."),
 		state: func(evidence string) (string, []jev.Source, error) {
 			var b stateSections
-			b.add("Decision", fmt.Sprintf("Committee objection %s of workstream %s stands at the ratification gate. The chief of staff decides it before the owner sees the packet. Choose whether it is dismissed or escalated.", entry.ID, stream), 0)
+			b.add("Decision", fmt.Sprintf("Committee objection %s of workstream %s stands at the ratification gate. The manager decides it before the owner sees the packet. Choose whether it is dismissed or escalated.", entry.ID, stream), 0)
 			part := ""
 			if entry.Part != "" {
 				part = " on " + entry.Part
 			}
 			b.add("The objection", fmt.Sprintf("%s (%s, by %s in round %d%s, against %s): %s", entry.ID, entry.Kind, entry.Member, entry.Round, part, entry.Revision, entry.Argument), 0)
-			b.add("Chief of staff's evidence", evidence, 0)
+			b.add("Manager's evidence", evidence, 0)
 			var sources []jev.Source
 			if packet, doc, found, err := shed.LatestPacket(repository, stream); err == nil && found {
 				b.add("Ratification packet", fmt.Sprintf("Round %d, %s. %s", packet.Round, packet.Revision, packet.Conclusion), 0)
@@ -343,7 +343,7 @@ func (s *Service) objectionSubject(ctx context.Context, repository *trace.Reposi
 				sources = append(sources, jev.Source{Kind: "packet", ID: shed.PacketDocumentID(packet.Round), Revision: doc.Revision})
 			}
 			b.add("Charter", s.charterSection(ctx, repository), decideCharter)
-			return b.String(), append([]jev.Source{{Kind: "objection", ID: entry.ID}, {Kind: "chief-decisions", ID: shed.ManagerDocumentID(round)}}, sources...), nil
+			return b.String(), append([]jev.Source{{Kind: "objection", ID: entry.ID}, {Kind: "manager-decisions", ID: shed.ManagerDocumentID(round)}}, sources...), nil
 		}}, "", nil
 }
 
@@ -367,9 +367,9 @@ func (s *Service) planAmendmentSubject(ctx context.Context, repository *trace.Re
 			intake.AmendmentReject, "Decline the amendment: the sealed spec and plan stay in force and the requester is told."),
 		state: func(evidence string) (string, []jev.Source, error) {
 			var b stateSections
-			b.add("Decision", fmt.Sprintf("Amendment %s of workstream %s revises the plan and leaves the approved intent unchanged, so the chief of staff decides it on the owner's behalf. Choose whether it is approved or declined.", id, stream), 0)
+			b.add("Decision", fmt.Sprintf("Amendment %s of workstream %s revises the plan and leaves the approved intent unchanged, so the manager decides it on the owner's behalf. Choose whether it is approved or declined.", id, stream), 0)
 			b.add("Request", fmt.Sprintf("Requested by %s (%s). Citations: %s\nChange: %s\nReason: %s", c.Request.Requester.ID, c.Request.Role, strings.Join(c.Request.Citations, ", "), c.Request.Change, c.Request.Reason), 0)
-			b.add("Chief of staff's evidence", evidence, 0)
+			b.add("Manager's evidence", evidence, 0)
 			var dissent []string
 			for _, e := range entries {
 				dissent = append(dissent, fmt.Sprintf("%s (%s, by %s): %s", e.ID, e.Kind, e.Member, e.Argument))
@@ -416,9 +416,9 @@ func (s *Service) discoverySubject(ctx context.Context, repository *trace.Reposi
 			"retain", "Retain it as an optional suggestion: worth keeping, but not necessary for the approved intent, and it blocks nothing."),
 		state: func(evidence string) (string, []jev.Source, error) {
 			var b stateSections
-			b.add("Decision", fmt.Sprintf("A worker discovered a piece of work while building workstream %s. The chief of staff decides its disposition. Choose whether it is assigned to a unit, declined or retained.", stream), 0)
+			b.add("Decision", fmt.Sprintf("A worker discovered a piece of work while building workstream %s. The manager decides its disposition. Choose whether it is assigned to a unit, declined or retained.", stream), 0)
 			b.add("The discovery", fmt.Sprintf("%s\nCriterion: %s\n%s", d.ID, d.Criterion, d.Description), 0)
-			b.add("Chief of staff's evidence", evidence, 0)
+			b.add("Manager's evidence", evidence, 0)
 			specText, planText, sources := sealedText(repository, stream)
 			b.add("Sealed spec", specText, decideSpec)
 			b.add("Sealed plan", planText, decidePlan)
@@ -439,11 +439,11 @@ func (s *Service) triageSubject(ctx context.Context, repository *trace.Repositor
 	}
 	return decisionSubject{repository: repository, stream: stream, kind: jev.KindTriage, key: sub.Key,
 		options: decisionOptions(
-			followup.TriageCode, "The finding needs code: it goes into the one plan revision the chief of staff files, which a mason builds before a fresh final review.",
+			followup.TriageCode, "The finding needs code: it goes into the one plan revision the manager files, which a mason builds before a fresh final review.",
 			followup.TriageOwner, "Leave it to the owner: the finding is mistaken or not worth building, so the owner reads it at delivery approval and can accept it as it is."),
 		state: func(evidence string) (string, []jev.Source, error) {
 			var b stateSections
-			b.add("Decision", fmt.Sprintf("Final review %d of workstream %s found blocking problems. The chief of staff triages them one by one before the owner decides delivery. Choose how this finding is triaged: it needs code in a plan revision, or it is left to the owner.", review, stream), 0)
+			b.add("Decision", fmt.Sprintf("Final review %d of workstream %s found blocking problems. The manager triages them one by one before the owner decides delivery. Choose how this finding is triaged: it needs code in a plan revision, or it is left to the owner.", review, stream), 0)
 			b.add("The finding", fmt.Sprintf("%s: %s", sub.Finding.ID, sub.Finding.Text), 0)
 			var others []string
 			for _, o := range delivery.BlockingFindings(sub.Report) {
@@ -453,7 +453,7 @@ func (s *Service) triageSubject(ctx context.Context, repository *trace.Repositor
 			}
 			b.add("The review's other blocking findings", strings.Join(others, "\n"), 0)
 			b.add("The final review's summary", sub.Report.Summary, 0)
-			b.add("Chief of staff's evidence", evidence, 0)
+			b.add("Manager's evidence", evidence, 0)
 			specText, planText, sources := sealedText(repository, stream)
 			b.add("Sealed spec", specText, decideSpec)
 			b.add("Sealed plan", planText, decidePlan)

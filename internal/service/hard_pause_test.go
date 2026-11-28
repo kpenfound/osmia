@@ -152,7 +152,7 @@ func TestHardPauseStopsATurnBeforeItStarts(t *testing.T) {
 	result, err = a.Apply(ctx, op)
 	fixturekit.Must(t, err)
 	if result.Outcome != "idle" || len(backend.Calls()) != 1 {
-		t.Fatalf("chief-of-staff turn under a factory hard pause: %+v, backend calls %d", result, len(backend.Calls()))
+		t.Fatalf("manager turn under a factory hard pause: %+v, backend calls %d", result, len(backend.Calls()))
 	}
 	s.turns.mu.Lock()
 	defer s.turns.mu.Unlock()
@@ -325,12 +325,12 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "chief", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message: how is it going?"}
 	_, err = repo.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
-	await(managerEntered, "the chief of staff did not answer during a factory hard pause")
+	await(managerEntered, "the manager did not answer during a factory hard pause")
 	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "project", Project: fixturekit.Project}, Mode: "hard", Reason: "Really stop", Source: "owner"})
 	close(managerRelease)
 	manager := completed(trace.Manager, "chief")
 	if managerErr != nil || manager.Status() != "idle" || manager.Response.Stop != nil {
-		t.Fatalf("chief-of-staff turn under a hard pause: %v %+v", managerErr, manager)
+		t.Fatalf("manager turn under a hard pause: %v %+v", managerErr, manager)
 	}
 	tick()
 	tick()

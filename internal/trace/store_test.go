@@ -328,7 +328,7 @@ func TestCommitsReportWorkflowChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(observed) != 1 || observed[0].Workflow == nil || !slices.Equal(observed[0].Workflow.Threads, []string{Manager}) || observed[0].Workflow.Deliveries || !slices.Contains(observed[0].Paths, workflow) {
-		t.Fatalf("chief-of-staff thread change: %+v", observed)
+		t.Fatalf("manager thread change: %+v", observed)
 	}
 
 	tx := transaction("first", 0, "", "active", 1)

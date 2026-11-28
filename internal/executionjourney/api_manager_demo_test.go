@@ -261,10 +261,10 @@ func (f *managerFixture) managerTurn(ctx context.Context, req agent.Request, _ *
 	case len(f.sent) > 0 && req.Name == f.sent[0].Turn:
 
 		if listed, err := intakefixture.ReadTool(ctx, session, "."); err != nil || listed != plan.SpecPath {
-			f.problem("chief of staff view lists", listed, err)
+			f.problem("manager view lists", listed, err)
 		}
 		if spec, err := intakefixture.ReadTool(ctx, session, plan.SpecPath); err != nil || spec != managerDemoSpec {
-			f.problem("chief of staff reads spec", spec, err)
+			f.problem("manager reads spec", spec, err)
 		}
 
 		refused := map[string]any{"goal": managerDemoStatus.Goal, "note": managerDemoStatus.Note, "agents": []string{fixturekit.DemoAgent + " is building."}}
@@ -281,7 +281,7 @@ func (f *managerFixture) managerTurn(ctx context.Context, req agent.Request, _ *
 			f.problem("the questions were not delivered together", req.Prompt)
 		}
 		for _, id := range []string{"1", "2"} {
-			f.use(ctx, session, "decide", "decide", map[string]any{"kind": "question-routing", "subject": id, "evidence": "The chief of staff investigated the question."})
+			f.use(ctx, session, "decide", "decide", map[string]any{"kind": "question-routing", "subject": id, "evidence": "The manager investigated the question."})
 		}
 		f.use(ctx, session, "chief", "answer", map[string]any{"question": "1", "text": managerDemoAnswer, "citations": []string{"charter#1"}})
 		f.use(ctx, session, "chief", "escalate", map[string]any{"questions": []string{"2"}, "rephrasing": "May the upload API's response change?",
@@ -292,7 +292,7 @@ func (f *managerFixture) managerTurn(ctx context.Context, req agent.Request, _ *
 		f.use(ctx, session, "chief", "relay_ruling", map[string]any{"question": "2", "text": managerDemoRelayed, "scope": "notify"})
 		return intakefixture.QuestionResult(req, "session-chief", "Relayed"), nil
 	}
-	f.problem("unexpected chief-of-staff turn", req.Name, req.Prompt)
+	f.problem("unexpected manager turn", req.Name, req.Prompt)
 	return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
 }
 
@@ -723,7 +723,7 @@ func TestManagerAnswersOneQuestionAndEscalatesAnother(t *testing.T) {
 		t.Fatalf("chief tool results:\n%v\nwant\n%v", manager, wantManager)
 	}
 	if f.events["questions"] != 1 || f.events["ruling"] != 0 {
-		t.Fatalf("chief-of-staff event turns: %v", f.events)
+		t.Fatalf("manager event turns: %v", f.events)
 	}
 	if len(f.problems) != 0 {
 		t.Fatalf("fake agents saw:\n%s", strings.Join(f.problems, "\n"))
@@ -891,7 +891,7 @@ func TestManagerQuestionsAndInbox(t *testing.T) {
 		t.Fatalf("relay_ruling results: %v", manager)
 	}
 	if f.events["questions"] != 1 || f.events["ruling"] != 1 {
-		t.Fatalf("chief-of-staff event turns: %v", f.events)
+		t.Fatalf("manager event turns: %v", f.events)
 	}
 	if len(f.problems) != 0 {
 		t.Fatalf("fake agents saw:\n%s", strings.Join(f.problems, "\n"))

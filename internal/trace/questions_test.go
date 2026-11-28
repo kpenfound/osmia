@@ -81,7 +81,7 @@ func TestAskRecordsTheQuestionAndOneEventTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	failure(t, second(r.Ask(ctx, "chief", manager, "May I ask?", at)), "the chief of staff answers questions and cannot ask one")
+	failure(t, second(r.Ask(ctx, "chief", manager, "May I ask?", at)), "the manager answers questions and cannot ask one")
 	if got := refusal(t, second(r.Ask(ctx, "mason1", mason, " \n", at))); !strings.Contains(got, "question is required") {
 		t.Fatalf("empty question: %s", got)
 	}
@@ -168,8 +168,8 @@ func TestManagerChoosesOnceForEachQuestion(t *testing.T) {
 	mason := coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Unit: "unit1", Thread: "mason1_thread", Turn: "build_mason1", Role: "mason"}
 	when := at.Add(time.Hour)
 
-	failure(t, second(r.AnswerQuestion(ctx, "mason1", mason, "1", "Use the file store.", []string{"charter#1"}, when)), "only a chief-of-staff turn may choose what happens to a question")
-	failure(t, second(r.EscalateQuestions(ctx, "mason1", mason, EscalationRequest{Questions: []string{"1"}, Rephrasing: "r", Blocked: "b", Recommendation: "c"}, when)), "only a chief-of-staff turn may choose what happens to a question")
+	failure(t, second(r.AnswerQuestion(ctx, "mason1", mason, "1", "Use the file store.", []string{"charter#1"}, when)), "only a manager turn may choose what happens to a question")
+	failure(t, second(r.EscalateQuestions(ctx, "mason1", mason, EscalationRequest{Questions: []string{"1"}, Rephrasing: "r", Blocked: "b", Recommendation: "c"}, when)), "only a manager turn may choose what happens to a question")
 	stale := manager
 	stale.Turn = "other"
 	failure(t, second(r.AnswerQuestion(ctx, "chief", stale, "1", "Use the file store.", []string{"charter#1"}, when)), "turn scope denied")

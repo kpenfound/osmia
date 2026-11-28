@@ -446,7 +446,7 @@ func TestRepeatedBlockingFinalReviewsLeaveRevisionsToTheOwner(t *testing.T) {
 	}
 	record(4, delivery.FindingBlocking)
 	if apiErr := manager(); apiErr == nil || apiErr.Message != owners {
-		t.Fatalf("three blocking reviews left the revision to the chief of staff: %v", apiErr)
+		t.Fatalf("three blocking reviews left the revision to the manager: %v", apiErr)
 	}
 	if body := delivery.FinalReviewNotice(api.FinalReport{}, []string{"x"}, intake.MaxFinalRounds, false); !strings.Contains(body, "Further revisions of the assembled plan are the owner's decision") {
 		t.Fatalf("the notice %q", body)

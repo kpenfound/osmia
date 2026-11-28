@@ -95,7 +95,7 @@ func TestPublishJevRulingIsAWorkDecisionAndTheOwnersStaysTheOwners(t *testing.T)
 	if jev.Str("outcome") != "Stream without a cap." || jev.Str("question") != string(stream)+":2" || jev.Str("workstream") != string(stream) {
 		t.Fatalf("Jev's ruling: %s", jev.Raw)
 	}
-	for _, want := range []string{"Should uploads be capped?", "spec.md: Upload limits", "- Stream without a cap", "The chief of staff recommended: Cap at 10 MiB"} {
+	for _, want := range []string{"Should uploads be capped?", "spec.md: Upload limits", "- Stream without a cap", "The manager recommended: Cap at 10 MiB"} {
 		if !strings.Contains(jev.Str("context")+jev.Str("rationale"), want) {
 			t.Fatalf("Jev's ruling lacks %q: %s", want, jev.Raw)
 		}

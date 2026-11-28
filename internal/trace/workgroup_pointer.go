@@ -111,7 +111,7 @@ func (r *Repository) JoinCrossRepoWorkgroup(ctx context.Context, stream config.W
 	}
 	manager, hasManager := log.Threads[Manager]
 	if hasManager && len(manager.Turns) > 0 {
-		return refused("workstream %s already has chief-of-staff turns of its own", stream)
+		return refused("workstream %s already has manager turns of its own", stream)
 	}
 	if state.Value == string(id) && !hasManager {
 		return nil

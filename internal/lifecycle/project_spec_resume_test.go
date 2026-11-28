@@ -266,7 +266,7 @@ func TestProjectSpecDraftResumeLeavesNoOwnerOrManagerAction(t *testing.T) {
 		}
 	}
 	if got := leaderNotices(t, f, refusalNotice); len(got) != 0 {
-		t.Fatalf("interruption reached the chief of staff: %v", got)
+		t.Fatalf("interruption reached the manager: %v", got)
 	}
 }
 
@@ -315,7 +315,7 @@ func TestProjectSpecDraftServiceStopKeepsRefusalHistory(t *testing.T) {
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	intakefixture.Eventually(t, "the chief of staff is told drafting stopped", func() bool { return len(leaderNotices(t, f, refusalNotice)) == 1 })
+	intakefixture.Eventually(t, "the manager is told drafting stopped", func() bool { return len(leaderNotices(t, f, refusalNotice)) == 1 })
 	haltGuardControllers(t, f)
 
 	note := "Cite no charter rule; neither charter numbers any."
@@ -353,7 +353,7 @@ func TestProjectSpecDraftServiceStopKeepsRefusalHistory(t *testing.T) {
 		}
 	}
 	if got := leaderNotices(t, f, refusalNotice); len(got) != 1 {
-		t.Fatalf("interruption sent the chief of staff a refusal notice: %d notices", len(got))
+		t.Fatalf("interruption sent the manager a refusal notice: %d notices", len(got))
 	}
 
 	for _, turn := range []string{"project-spec-draft-10", "project-spec-draft-12", "project-spec-draft-14"} {

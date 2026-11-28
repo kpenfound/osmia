@@ -26,7 +26,7 @@ func TestHandInCreatesAOneWorkstreamWorkgroup(t *testing.T) {
 	host, err := f.Repository().ManagerHost(out.Workstream)
 	fixturekit.Must(t, err)
 	if host != out.Workstream {
-		t.Fatalf("a one-workstream workgroup's chief of staff should be the workstream's own thread, got host %s", host)
+		t.Fatalf("a one-workstream workgroup's manager should be the workstream's own thread, got host %s", host)
 	}
 
 	firstGroupID := g.ID

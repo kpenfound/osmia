@@ -711,7 +711,7 @@ func TestUnitReviewSystemPromptCarriesTheProtocol(t *testing.T) {
 		"Test passing is decided by the service-owned check gate",
 		"read-only", "workstream_diff",
 		"factory_context", "record_discovery",
-		"ask puts a question to the chief of staff when a decision is needed", "review resumes when the answer arrives",
+		"ask puts a question to the manager when a decision is needed", "review resumes when the answer arrives",
 		"verdict records your decision",
 	})
 }

@@ -61,7 +61,7 @@ func TestPlanOnlyReopensUnderOneSealEachReassemble(t *testing.T) {
 			t.Fatalf("reassembly %d recorded %+v", k+1, moved)
 		}
 		if body := intakefixture.NoticeOf(t, repository, stream, want); body == "" {
-			t.Fatalf("reassembly %d told the chief of staff nothing", k+1)
+			t.Fatalf("reassembly %d told the manager nothing", k+1)
 		}
 		if again, _, _, err := seal.Latest(repository, stream); err != nil || again.Seal != sealed.Seal {
 			t.Fatalf("a plan-only revision changed the seal: %+v %v", again, err)

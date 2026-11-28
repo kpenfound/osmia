@@ -456,7 +456,7 @@ func (r *Repository) RetractManager(ctx context.Context, stream config.Workstrea
 		return nil
 	}
 	if len(t.Turns) > 0 {
-		return fmt.Errorf("%w: workstream %s already has chief-of-staff turns of its own", ErrConflict, stream)
+		return fmt.Errorf("%w: workstream %s already has manager turns of its own", ErrConflict, stream)
 	}
 	delete(log.Threads, Manager)
 	return sr.saveThread(ctx, stream, log)

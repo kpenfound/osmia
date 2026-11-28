@@ -194,7 +194,7 @@ func TestFinalReviewTriageThatIsNotConfidentLeavesTheManagerFree(t *testing.T) {
 				t.Fatalf("triage before decide: %s", out)
 			}
 			for _, finding := range []string{"finding-1", "finding-2"} {
-				if out := k.decide("1:" + finding); !strings.Contains(out, `"decision":"chief"`) || strings.Contains(out, `"pick"`) {
+				if out := k.decide("1:" + finding); !strings.Contains(out, `"decision":"manager"`) || strings.Contains(out, `"pick"`) {
 					t.Fatalf("decide %s: %s", finding, out)
 				}
 			}

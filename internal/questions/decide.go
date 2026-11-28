@@ -77,15 +77,15 @@ func RoutingSubjectOf(repository *trace.Repository, host config.WorkstreamID, id
 	case q.State != trace.QuestionOpen:
 		return s, fmt.Sprintf("question %s is %s, not open; only an open question is routed", id, q.State), nil
 	case len(q.Asked.CharterConflict) > 0:
-		return s, fmt.Sprintf("question %s reports a conflict between member charters; it goes straight to the owner's gate and the chief of staff does not route it with Jev", id), nil
+		return s, fmt.Sprintf("question %s reports a conflict between member charters; it goes straight to the owner's gate and the manager does not route it with Jev", id), nil
 	}
 	thread, err := target.Thread(member, q.Asked.AskedBy.ID)
 	if err != nil {
-		return s, fmt.Sprintf("the asker of question %s is unknown; the chief of staff does not route it with Jev", id), nil
+		return s, fmt.Sprintf("the asker of question %s is unknown; the manager does not route it with Jev", id), nil
 	}
 	s.Role = thread.Identity.Role
 	if !slices.Contains(RoutingRoles, s.Role) {
-		return s, fmt.Sprintf("question %s was asked by the %s, whose questions the chief of staff escalates as it judges and the owner's gate decides; the chief of staff does not route it with Jev", id, s.Role), nil
+		return s, fmt.Sprintf("question %s was asked by the %s, whose questions the manager escalates as it judges and the owner's gate decides; the manager does not route it with Jev", id, s.Role), nil
 	}
 	return s, "", nil
 }

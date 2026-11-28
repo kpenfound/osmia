@@ -354,7 +354,7 @@ func (c dependencyCase) evidence() string {
 	case c.Ended == ownerEnded:
 		return "the owner dropped it"
 	case c.Ended == managerEnded:
-		return "the chief of staff dropped it"
+		return "the manager dropped it"
 	}
 	return "it was abandoned without being delivered"
 }

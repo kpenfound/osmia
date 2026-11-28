@@ -50,7 +50,7 @@ func TestRoutedAmendmentFreesSlotForAnotherUnit(t *testing.T) {
 		t.Fatalf("entangled unit state %q: %v", state, err)
 	}
 	var requests []trace.Amendment
-	f.S.Until(t, "the chief of staff to route the question", func() bool {
+	f.S.Until(t, "the manager to route the question", func() bool {
 		var err error
 		requests, err = trace.Read[trace.Amendment](f.Repository(), stream)
 		if err != nil {

@@ -15,10 +15,13 @@ func TestEveryManagerSystemPromptCarriesTheRolePromptAndNamesNoSkill(t *testing.
 		"follow-up":     fmt.Sprintf(followUpPrompt, "w_1") + "\n\n" + managerGuidance(),
 		"events":        fmt.Sprintf(intake.ManagerEvents, "w_1") + "\n\n" + intake.ManagerRolePrompt + "\n\n" + questions.Guidance,
 	} {
-		if !strings.HasPrefix(prompt, "You are the chief of staff for workstream w_1.") || !strings.Contains(prompt, intake.ManagerRolePrompt) {
-			t.Errorf("%s prompt does not open with the chief's role: %.200s", name, prompt)
+		if !strings.HasPrefix(prompt, "You are the manager for workstream w_1.") || !strings.Contains(prompt, intake.ManagerRolePrompt) {
+			t.Errorf("%s prompt does not open with the manager's role: %.200s", name, prompt)
 		}
 		lower := strings.ToLower(prompt)
+		if strings.Contains(lower, "chief") {
+			t.Errorf("%s prompt names the role chief", name)
+		}
 		for _, skill := range []string{"handoff-reports", "design-sketch", "hill-climb-evaluator", "behavioral-testing", "simple-code", "no-deltas", "lint-discipline", "unslop", "typescript-best-practices", "pr-review", "no-comments", "pr-writing", "skill"} {
 			if strings.Contains(lower, skill) {
 				t.Errorf("%s prompt names %q", name, skill)

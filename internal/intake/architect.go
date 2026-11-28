@@ -379,7 +379,7 @@ func (d *Drafter) RequestAgain(ctx context.Context, stream config.WorkstreamID, 
 	case by.Kind == OwnerActor.Kind:
 		asker = "the owner"
 	case by.ID == trace.Manager:
-		asker = "the chief of staff"
+		asker = "the manager"
 	}
 	reason := fmt.Sprintf("drafting had stopped; %s asked for another run of %d drafts: %s", asker, MaxDrafts, note)
 	if err := d.request(ctx, stream, state, DraftInput{Draft: n + 1, Note: note}, DraftAgainCause, reason, by); err != nil {
@@ -1304,7 +1304,7 @@ You turn what the owner handed in into this workstream's feature spec and plan. 
 - inspect_code reads the repository, read_remote_file retrieves GitHub files the handed input references, and factory_context retrieves workstream records.
 - %[3]s delivers spec.md and plan.json. The service records and validates what you deliver. You hold no version control tool, because only the service records work; your view is read-only.
 - When your view does not settle something you must know, call %[4]s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.
-- The owner fixed the selected projects. Never add or drop a member of the workgroup this workstream belongs to, because the member list is the owner's decision. If you judge that a selected project needs no change, ask the chief of staff to escalate that judgment to the owner and keep the member while you wait.
+- The owner fixed the selected projects. Never add or drop a member of the workgroup this workstream belongs to, because the member list is the owner's decision. If you judge that a selected project needs no change, ask the manager to escalate that judgment to the owner and keep the member while you wait.
 
 ## Your part of the state machine
 You act in four kinds of turn: the first draft, a corrected draft after the service refused one, a reply to the committee's objections once a round of debate ends, and the draft of an amendment to the sealed spec and plan. Each turn's prompt says which one it is. After a draft the committee debates it, and the owner ratifies it before anything is built.

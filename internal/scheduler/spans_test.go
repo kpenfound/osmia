@@ -113,7 +113,7 @@ func TestScheduledTurnHoldsOneSlotSpanFromDispatchToWhereThePoolStopsCounting(t 
 	t0 := r.clock.Now()
 	must(t, s.Pass(ctx))
 	if got := len(dispatched(t, repo)); got != 3 {
-		t.Fatalf("dispatched %d turns, want mason, reviewer and chief of staff", got)
+		t.Fatalf("dispatched %d turns, want mason, reviewer and manager", got)
 	}
 	if got := r.spans("osmia.slot.held"); len(got) != 0 {
 		t.Fatalf("held spans while the slots are held: %d", len(got))

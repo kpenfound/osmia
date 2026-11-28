@@ -352,13 +352,13 @@ func CheckChartered(t *testing.T, repo *trace.Repository, want string, number in
 			t.Fatalf("charter notices of %s: %+v", ws, b.CharterNotices)
 		}
 		text := b.Render()
-		if strings.Count(text, "<<< osmia:charter_rule | chief of staff proposal, ratified by the owner | bytes=31 >>>\n| "+CharterRule+"\n<<< /osmia:charter_rule >>>\n") != 1 ||
+		if strings.Count(text, "<<< osmia:charter_rule | manager proposal, ratified by the owner | bytes=31 >>>\n| "+CharterRule+"\n<<< /osmia:charter_rule >>>\n") != 1 ||
 			!strings.Contains(text, "- charter#"+string(rune('0'+number))+" [Standing rulings]: "+CharterRule+"\n") {
 			t.Fatalf("bundle of %s:\n%s", ws, text)
 		}
 	}
 	if events := CharterEvents(t, repo, fixturekit.Stream); len(events) != 1 || !strings.HasPrefix(events[0], "Charter rule "+string(rune('0'+number))+" is recorded from the owner's ruling on question 1") {
-		t.Fatalf("chief of staff notices %q", events)
+		t.Fatalf("manager notices %q", events)
 	}
 }
 
@@ -646,7 +646,7 @@ func (d *ExitDemo) Manager(ctx context.Context, req agent.Request, _ *agent.Turn
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Nothing built", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
 	if !strings.HasPrefix(req.Name, "events_") {
-		d.Problem("chief of staff turn %s of %q", req.Name, title)
+		d.Problem("manager turn %s of %q", req.Name, title)
 	}
 	d.Mu.Lock()
 	d.Ran[title] = append(d.Ran[title], "events")
@@ -1164,7 +1164,7 @@ func NoticeOf(t *testing.T, repository *trace.Repository, stream config.Workstre
 			return entry.Event.Body
 		}
 	}
-	t.Fatalf("transition %s told the chief of staff nothing", transition)
+	t.Fatalf("transition %s told the manager nothing", transition)
 	return ""
 }
 

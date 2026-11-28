@@ -211,12 +211,12 @@ func TestDriftMasonAnswerContinuationResumesTheResolutionWorkspaceThroughDoneAcr
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte("/internal/ @upstream @feature\n"), 0600))
 	scoped, err = turns.Scoped(ctx, answerScope)
 	fixturekit.Must(t, err)
-	out, err = intakefixture.AskTool(t, scoped, execution.DoneTool).Handle(ctx, json.RawMessage(`{"outcome":"Kept both owners on one line, as the chief of staff answered"}`))
+	out, err = intakefixture.AskTool(t, scoped, execution.DoneTool).Handle(ctx, json.RawMessage(`{"outcome":"Kept both owners on one line, as the manager answered"}`))
 	fixturekit.Must(t, err)
 	if !strings.Contains(string(out), `"recorded":true`) {
 		t.Fatalf("the answer turn's done call: %s", out)
 	}
-	journey.CompleteClaimedTurn(t, f, repository, stream, intake.DriftMasonAgent, answer, journey.ResolvedDone("Kept both owners on one line, as the chief of staff answered"))
+	journey.CompleteClaimedTurn(t, f, repository, stream, intake.DriftMasonAgent, answer, journey.ResolvedDone("Kept both owners on one line, as the manager answered"))
 
 	journey.AwaitResolution(t, f.S, d, stream, op, "review 1 of candidate")
 	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1), questions.TurnID("1")}) {
@@ -307,7 +307,7 @@ func TestDriftReviewerAnswerContinuationSeesCandidateAndDiffsAndCompletesTheRevi
 		}
 	}
 	verdict := intakefixture.AskTool(t, scoped, execution.VerdictTool)
-	out, err = verdict.Handle(ctx, json.RawMessage(`{"decision":"satisfactory","summary":"Both owners kept, dedupe.go untouched as the chief of staff confirmed.","findings":[]}`))
+	out, err = verdict.Handle(ctx, json.RawMessage(`{"decision":"satisfactory","summary":"Both owners kept, dedupe.go untouched as the manager confirmed.","findings":[]}`))
 	fixturekit.Must(t, err)
 	if !strings.Contains(string(out), `"recorded":true`) {
 		t.Fatalf("the second answer turn's verdict: %s", out)

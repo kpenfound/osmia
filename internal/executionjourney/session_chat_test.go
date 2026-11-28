@@ -666,7 +666,7 @@ func confinementManagerTurn(t *testing.T, s *journey.Service, c *journey.Client,
 	engine.mu.Lock()
 	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		if req.ResumeID != "" {
-			t.Errorf("chief-of-staff first turn asked to resume %q", req.ResumeID)
+			t.Errorf("manager first turn asked to resume %q", req.ResumeID)
 		}
 		return &agent.Result{ClaudeID: "chief-session-1", ResultText: "First chief reply"}, nil
 	}
@@ -716,16 +716,16 @@ func TestResumeConfinedToSessionTurns(t *testing.T) {
 
 	managerResume, managerPrompt := confinementManagerTurn(t, s, c, engine)
 	if managerResume != "" {
-		t.Fatalf("a chief-of-staff turn resumed although only the session role may: %q", managerResume)
+		t.Fatalf("a manager turn resumed although only the session role may: %q", managerResume)
 	}
 	if !strings.Contains(managerPrompt, "second chief message") {
-		t.Fatalf("chief-of-staff turn input: %q", managerPrompt)
+		t.Fatalf("manager turn input: %q", managerPrompt)
 	}
 
 	s2, c2, _, engine2 := newConfinementFixture(t)
 	_, basePrompt := confinementManagerTurn(t, s2, c2, engine2)
 	if normalizeReplayPrompt(basePrompt) != normalizeReplayPrompt(managerPrompt) {
-		t.Fatalf("chief-of-staff turn input with a session present %q, without one %q", managerPrompt, basePrompt)
+		t.Fatalf("manager turn input with a session present %q, without one %q", managerPrompt, basePrompt)
 	}
 }
 

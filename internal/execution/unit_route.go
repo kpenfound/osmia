@@ -522,7 +522,7 @@ var triggerSpecs = map[string]triggerSpec{
 	},
 	TriggerMoveProposal: {
 		describe: map[string]string{
-			TargetWait: "Leave the unit where it is: the chief of staff raised or ruled the contest it sits in, and by default does not move it out; it stays held for the owner.",
+			TargetWait: "Leave the unit where it is: the manager raised or ruled the contest it sits in, and by default does not move it out; it stays held for the owner.",
 		},
 		questions: []router.Question{question("proposal_fits", "The proposed move fits the evidence."), question("evidence_supports", "The history and rulings support the move.")},
 	},

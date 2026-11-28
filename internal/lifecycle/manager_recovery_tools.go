@@ -64,7 +64,7 @@ func (c *Controls) DropDependency(repository *trace.Repository, scope coreadapte
 		if refusal != "" {
 			return priorityRefusal(refusal)
 		}
-		authority := &router.Authority{Kind: router.AuthorityManager, Target: DependencyWaived, Ref: "chief of staff: " + input.Reason}
+		authority := &router.Authority{Kind: router.AuthorityManager, Target: DependencyWaived, Ref: "manager: " + input.Reason}
 		out, api := s.dropDependency(ctx, target.Project(), stream, target, DropDependencyRequest{Upstream: input.Upstream, Type: input.Type}, managerActor, authority)
 		if api != nil {
 			if api.Code == Internal {

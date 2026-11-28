@@ -55,7 +55,7 @@ func TestAMoveToSketchedDraftsAStoppedWorkstreamAgain(t *testing.T) {
 		byID[tr.ID] = tr
 	}
 	first := byID[fmt.Sprintf("draft-%d", intake.MaxDrafts+1)]
-	if first.Actor != manager || first.Cause != intake.DraftAgainCause || first.From != "exhausted" || !strings.Contains(first.Reason, "the chief of staff asked for another run of 3 drafts: "+note) {
+	if first.Actor != manager || first.Cause != intake.DraftAgainCause || first.From != "exhausted" || !strings.Contains(first.Reason, "the manager asked for another run of 3 drafts: "+note) {
 		t.Fatalf("first draft of the new run: %+v", first)
 	}
 	if stopped := byID[last]; stopped.From != fmt.Sprintf("invalid-%d", 2*intake.MaxDrafts) || stopped.To != "exhausted" || !strings.Contains(stopped.Reason, "none of the architect's 3 drafts") {

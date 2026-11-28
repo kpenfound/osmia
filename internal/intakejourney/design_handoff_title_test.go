@@ -249,7 +249,7 @@ func TestDesignStartDeliversOneHandoffTitleTurnToTheThreadThatContinues(t *testi
 				t.Fatalf("hand-off turn problems:\n%s", problems)
 			}
 			if got := f.deliveredTurns(); got != 1 {
-				t.Fatalf("%d hand-off turns reached the chief of staff, want 1", got)
+				t.Fatalf("%d hand-off turns reached the manager, want 1", got)
 			}
 			thread := f.managerThread(t, which.adopted)
 			turns := handoffTitleTurns(thread)

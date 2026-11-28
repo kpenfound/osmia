@@ -155,14 +155,14 @@ func TestDesignTitleToolRecordsReplacesAndSurvivesRestart(t *testing.T) {
 		return false
 	})
 	var names []string
-	restarted.Until(t, "the started workstream's chief of staff to receive its tools", func() bool {
+	restarted.Until(t, "the started workstream's manager to receive its tools", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		names = postStart
 		return names != nil
 	})
 	if names == nil || slices.Contains(names, intake.DesignTitleToolName) || slices.Contains(names, intake.DraftBriefToolName) {
-		t.Fatalf("started workstream's chief-of-staff tools: %v", names)
+		t.Fatalf("started workstream's manager tools: %v", names)
 	}
 }
 

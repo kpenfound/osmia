@@ -93,7 +93,7 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 		if p.Prompt != prompt || p.Scope.Role != trace.Manager || p.Scope.Thread != trace.Manager || p.Profile.Name != "default" {
 			t.Fatalf("turn %d: %+v", i, p)
 		}
-		if !strings.Contains(p.SystemPrompt, "You are the chief of staff for workstream "+string(fixturekit.Stream)) || strings.Contains(p.SystemPrompt, "# Project context") {
+		if !strings.Contains(p.SystemPrompt, "You are the manager for workstream "+string(fixturekit.Stream)) || strings.Contains(p.SystemPrompt, "# Project context") {
 			t.Fatalf("turn %d system prompt %q", i, p.SystemPrompt)
 		}
 		current := strings.Join(p.Context, "\n")

@@ -43,7 +43,7 @@ func TestAnOwnerMoveIsAPinnedMoveThroughTheRouter(t *testing.T) {
 		t.Fatalf("unit %s after %+v", state.Value, moved)
 	}
 	if !strings.Contains(intakefixture.NoticeOf(t, repo, stream, moved.ID), "owner moved unit resume from checking to implementing") {
-		t.Fatal("the move did not tell the chief of staff")
+		t.Fatal("the move did not tell the manager")
 	}
 	ruling, found, err := execution.LatestMasonRuling(repo, stream, "resume")
 	fixturekit.Must(t, err)

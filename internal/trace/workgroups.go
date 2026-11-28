@@ -239,7 +239,7 @@ func (r *Repository) ManagerQuestionTarget(host config.WorkstreamID, id string) 
 		return "", "", err
 	}
 	if !slices.Contains(members, config.WorkstreamID(stream)) {
-		return "", "", refused("workstream %s does not share this chief of staff", stream)
+		return "", "", refused("workstream %s does not share this manager", stream)
 	}
 	return config.WorkstreamID(stream), local, nil
 }
@@ -259,7 +259,7 @@ func (r *Repository) ManagerMember(own, named config.WorkstreamID) (*Repository,
 		return nil, "", "", err
 	}
 	if !slices.Contains(members, named) {
-		return nil, "", fmt.Sprintf("workstream %s does not share this chief of staff", named), nil
+		return nil, "", fmt.Sprintf("workstream %s does not share this manager", named), nil
 	}
 	project, err := r.ProjectFor(named)
 	if err != nil {

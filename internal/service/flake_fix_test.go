@@ -127,7 +127,7 @@ func (l *flakeFixLive) manager(t *testing.T, stream config.WorkstreamID, name st
 			if attempt < 5 {
 				continue
 			}
-			t.Fatalf("claiming a chief-of-staff turn: %v", err)
+			t.Fatalf("claiming a manager turn: %v", err)
 		}
 		controls := &runtimeControls{}
 		controls.service.Store(l.s)
@@ -222,7 +222,7 @@ func expectedFlakeFixWorkstream(project config.ProjectID, group string, generati
 func TestFlakeFixIsAManagerToolOnly(t *testing.T) {
 	t.Parallel()
 	if !slices.Contains(managerGrant.Tools, flakeFixToolName) || !slices.Contains(managerOrdinaryNarrow.Tools, flakeFixToolName) {
-		t.Fatalf("an ordinary chief-of-staff turn does not hold %s: %v", flakeFixToolName, managerOrdinaryNarrow.Tools)
+		t.Fatalf("an ordinary manager turn does not hold %s: %v", flakeFixToolName, managerOrdinaryNarrow.Tools)
 	}
 	for name, tools := range map[string][]string{"design session": designNarrow.Tools, "mason": masonGrant.Tools, "unit mason": unitMasonGrant.Tools, "reviewer": reviewerGrant.Tools} {
 		if slices.Contains(tools, flakeFixToolName) {
@@ -305,7 +305,7 @@ func TestOpeningAFlakeFixRecordsTheManagersHandInWithoutSkippingTheDebate(t *tes
 		switch {
 		case tr.ID == intake.HandInTransition:
 			handedIn = true
-			if tr.Actor != managerActor || tr.To != intake.HandedState || !strings.Contains(tr.Reason, "chief of staff") || !strings.Contains(tr.Reason, string(o.stream)) || !strings.Contains(tr.Reason, o.occ.ID) {
+			if tr.Actor != managerActor || tr.To != intake.HandedState || !strings.Contains(tr.Reason, "manager") || !strings.Contains(tr.Reason, string(o.stream)) || !strings.Contains(tr.Reason, o.occ.ID) {
 				t.Fatalf("the hand-in transition: %+v", tr)
 			}
 		case tr.ID == intake.SkipTransition:

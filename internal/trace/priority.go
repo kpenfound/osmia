@@ -62,7 +62,7 @@ func (r *Repository) SetProjectPriority(ctx context.Context, agent string, scope
 		return PriorityChange{}, err
 	}
 	if scope.Role != Manager {
-		return PriorityChange{}, fmt.Errorf("only a chief-of-staff turn may set the priority")
+		return PriorityChange{}, fmt.Errorf("only a manager turn may set the priority")
 	}
 	_, q, err := r.turnScope(agent, scope, true)
 	if err != nil {

@@ -367,7 +367,7 @@ func TestJourneyAnUnresolvedHoldBecomesAStallAndARecoveryCardTheOwnerApproves(t 
 		t.Fatalf("a held stall moved the unit to %s", state.Value)
 	}
 	if hold, stalled := j.holdNotices(), j.stalledNotices(); hold != 1 || stalled != 0 {
-		t.Fatalf("the chief of staff got %d notices that Jev held the first stall and %d that the unit stalled, want 1 and 0", hold, stalled)
+		t.Fatalf("the manager got %d notices that Jev held the first stall and %d that the unit stalled, want 1 and 0", hold, stalled)
 	}
 	if cards := j.recoveryCards(); len(cards) != 0 {
 		t.Fatalf("a hold just made has %d recovery cards", len(cards))
@@ -382,7 +382,7 @@ func TestJourneyAnUnresolvedHoldBecomesAStallAndARecoveryCardTheOwnerApproves(t 
 		t.Fatalf("the stall after the hold: %+v", second)
 	}
 	if hold, stalled := j.holdNotices(), j.stalledNotices(); hold != 1 || stalled != 1 {
-		t.Fatalf("the chief of staff got %d notices of the hold and %d of the second stall, want one each", hold, stalled)
+		t.Fatalf("the manager got %d notices of the hold and %d of the second stall, want one each", hold, stalled)
 	}
 	if cards := j.recoveryCards(); len(cards) != 0 {
 		t.Fatalf("a stall inside its further window has %d recovery cards", len(cards))
@@ -489,7 +489,7 @@ func TestJourneyAStallJevKeepsHoldingEndsOnARecoveryCardTheOwnerApproves(t *test
 		}
 	}
 	if n := j.holdNotices(); n != 2 {
-		t.Fatalf("the chief of staff got %d notices of the holds, want 2", n)
+		t.Fatalf("the manager got %d notices of the holds, want 2", n)
 	}
 	if cards := j.recoveryCards(); len(cards) != 0 {
 		t.Fatalf("a stall held once has %d recovery cards", len(cards))

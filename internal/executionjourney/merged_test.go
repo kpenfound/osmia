@@ -105,7 +105,7 @@ func TestOwnerRecordsAnAssembledWorkstreamMergedOutsideTheFactory(t *testing.T) 
 			if !slices.ContainsFunc(outbox, func(e trace.OutboxEntry) bool {
 				return e.TransitionID == intake.DeliveredState && e.Event.Kind == trace.NoticeKind && strings.Contains(e.Event.Body, "No pull request was opened")
 			}) {
-				t.Fatalf("no delivery notice for the chief of staff in %+v", outbox)
+				t.Fatalf("no delivery notice for the manager in %+v", outbox)
 			}
 
 			presented, apiErr := f.S.Delivery().PresentDelivery(ctx, repo.Project(), stream, repo)

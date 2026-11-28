@@ -50,7 +50,7 @@ func TestManagerDecisionsShapeTheDissentTheOwnerSees(t *testing.T) {
 
 	entries := shed.DissentRecord(records, nil, nil)
 	if undecided := shed.Undecided(entries); len(undecided) != 3 || undecided[0].ID != veto || undecided[1].ID != vetoed || undecided[2].ID != advice {
-		t.Fatalf("undecided before the chief of staff decided %+v", undecided)
+		t.Fatalf("undecided before the manager decided %+v", undecided)
 	}
 
 	decided := []shed.ManagerDecisions{manager(1, one,
@@ -73,7 +73,7 @@ func TestManagerDecisionsShapeTheDissentTheOwnerSees(t *testing.T) {
 		t.Fatalf("the owner's objection %+v", e)
 	}
 	if undecided := shed.Undecided(entries); len(undecided) != 0 {
-		t.Fatalf("undecided once the chief of staff decided %+v", undecided)
+		t.Fatalf("undecided once the manager decided %+v", undecided)
 	}
 	if shown := shed.ForOwner(entries); len(shown) != 3 || shown[0].ID == veto || shown[1].ID == veto || shown[2].ID == veto {
 		t.Fatalf("the owner is shown %+v", shown)

@@ -57,7 +57,7 @@ func TestNewProjectStartRefusedAfterStartReachesTheInboxAndTheManager(t *testing
 			return !strings.HasPrefix(q.Request.TurnID, "design-project-refused-")
 		})
 	}
-	f.await(t, "the chief of staff's turn about the refusal", func() bool {
+	f.await(t, "the manager's turn about the refusal", func() bool {
 		turns := refusalTurns()
 		return len(turns) == 1 && turns[0].Response != nil
 	})

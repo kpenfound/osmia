@@ -417,7 +417,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		if strings.Contains(req.Prompt, "asked by the mason:") || strings.Contains(req.Prompt, "escalation_1") {
 			return intakefixture.QuestionResult(req, "session-chief", "Nothing further"), nil
 		}
-		f.problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
+		f.problem("unexpected manager turn:\n%s", req.Prompt)
 		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
 	}
 	f.engine.Turns[questions.TurnID("1")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {

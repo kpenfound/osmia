@@ -117,7 +117,7 @@ func TestWorkgroupSharesOneManagerAcrossMembersAndARestart(t *testing.T) {
 			strings.Contains(req.Prompt, ownersRuling) {
 			return intakefixture.QuestionResult(req, "session-chief", "Nothing further"), nil
 		}
-		problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
+		problem("unexpected manager turn:\n%s", req.Prompt)
 		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
 	}
 	engine.Turns[questions.TurnID("1")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -138,7 +138,7 @@ func TestWorkgroupSharesOneManagerAcrossMembersAndARestart(t *testing.T) {
 		}
 		describe("first workstream", fixturekit.Stream)
 		describe("second workstream", second)
-		describeThread("shared chief of staff", fixturekit.Stream, trace.Manager)
+		describeThread("shared manager", fixturekit.Stream, trace.Manager)
 		describeThread("first asker", fixturekit.Stream, fixturekit.DemoAgent)
 		describeThread("second asker", second, "agent_second")
 		a1, e2, r := flags()
@@ -205,20 +205,20 @@ func TestWorkgroupSharesOneManagerAcrossMembersAndARestart(t *testing.T) {
 		t.Fatalf("hosts: %s, %s, want %s for both", host1, host2, fixturekit.Stream)
 	}
 	if own, err := repo.Thread(second, trace.Manager); err == nil && len(own.Turns) != 0 {
-		t.Fatalf("workstream %s's own chief-of-staff identity gained a turn: %+v", second, own)
+		t.Fatalf("workstream %s's own manager identity gained a turn: %+v", second, own)
 	}
 	manager1, err := repo.ManagerThread(fixturekit.Stream)
 	fixturekit.Must(t, err)
 	manager2, err := repo.ManagerThread(second)
 	fixturekit.Must(t, err)
 	if manager1.Identity.ID != trace.Manager || manager2.Identity.ID != trace.Manager || len(manager1.Turns) != len(manager2.Turns) {
-		t.Fatalf("workstreams do not share one chief-of-staff thread: %+v vs %+v", manager1, manager2)
+		t.Fatalf("workstreams do not share one manager thread: %+v vs %+v", manager1, manager2)
 	}
 
 	ruling1, err := repo.Questions(fixturekit.Stream)
 	fixturekit.Must(t, err)
 	if ruling1[0].Ruling == nil || ruling1[0].Ruling.Actor != (trace.Actor{Kind: "agent", ID: trace.Manager}) {
-		t.Fatalf("question 1 of %s should be answered by the chief of staff: %+v", fixturekit.Stream, ruling1[0])
+		t.Fatalf("question 1 of %s should be answered by the manager: %+v", fixturekit.Stream, ruling1[0])
 	}
 
 	fixturekit.Must(t, s.Close())

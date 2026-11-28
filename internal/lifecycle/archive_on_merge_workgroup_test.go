@@ -189,7 +189,7 @@ func TestAutoArchiveMergedWorkgroupMemberThroughBackgroundPasses(t *testing.T) {
 	fixturekit.Must(t, err)
 	journey.RecordResolutionMerge(t, second, g.Stream2)
 	g.merge(t)
-	journey.LifecycleAwait(t, g.ProductionDesignFixture, "the chief of staff archives the merged member", func() bool { _, ok := g.archive(); return ok })
+	journey.LifecycleAwait(t, g.ProductionDesignFixture, "the manager archives the merged member", func() bool { _, ok := g.archive(); return ok })
 	g.gate.Await(t)
 	a, _ := g.archive()
 	if a.Actor != runtime.ArchiveActorManager || a.State != intake.DeliveredState || a.DeliveryLink != g.pubs[0].URL || a.ResolutionEvidence != "merged" || !a.Resolved ||

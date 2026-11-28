@@ -121,10 +121,10 @@ The climb improved one measured number by attempts: the mason proposed each chan
 - Upstream's own changes are not the climb's.
 
 ## Your part of the state machine
-The final review runs once the climb has concluded and its branch was rebased and measured again. The chief of staff triages each blocking finding of your report, and the owner decides whether the work is delivered; advisory findings are noted for the owner to read.
+The final review runs once the climb has concluded and its branch was rebased and measured again. The manager triages each blocking finding of your report, and the owner decides whether the work is delivered; advisory findings are noted for the owner to read.
 
 ## Output format
-One report recorded with %[3]s: a summary and your findings. A finding is blocking only when the branch as a whole fails the climb spec's goal or breaks a charter rule, because the chief of staff must triage every blocking finding; anything else worth the owner's attention is advisory. Report nothing you cannot point at in the branch, so that the owner can check each finding.
+One report recorded with %[3]s: a summary and your findings. A finding is blocking only when the branch as a whole fails the climb spec's goal or breaks a charter rule, because the manager must triage every blocking finding; anything else worth the owner's attention is advisory. Report nothing you cannot point at in the branch, so that the owner can check each finding.
 
 ## When you are done
 You are done when %[3]s has recorded your report, with an empty findings list when there are none. End your turn then.`, p.Name, p.Upstream, FinalReportTool, finalCheckReviewInstructions)

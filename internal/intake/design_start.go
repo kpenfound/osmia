@@ -60,7 +60,7 @@ func HandoffTitleBody(workgroup bool, handed string) string {
 func (s *Controller) RequestHandoffTitle(ctx context.Context, r *trace.Repository, stream config.WorkstreamID, handed trace.Document, workgroup bool) error {
 	h := OwnerHeader(DesignHandoffTitleTransition, r.Project(), stream, DesignStartTransition, handed.At)
 	_, err := r.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: DesignHandoffTitleSubject, To: "requested",
-		Reason: "the owner started work from the design brief; the chief of staff titles it through its status"},
+		Reason: "the owner started work from the design brief; the manager titles it through its status"},
 		Events: []trace.Event{trace.Notice(h.ID, "title", HandoffTitleBody(workgroup, handed.Content))}})
 	return err
 }

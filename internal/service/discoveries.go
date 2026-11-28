@@ -95,8 +95,8 @@ func unresolvedWork(r *trace.Repository, stream config.WorkstreamID) (bool, erro
 
 func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	description := "Record work you found that the plan does not cover, without ending your turn. Give key (a stable name of your own, so recording the same work again does not duplicate it), description, and criterion (the spec#<n> it serves). It is recorded as open. A necessary open discovery blocks completion of the workstream, and an assigned one stays required until its unit lands. " +
-		"Do not take another unit's work without coordination: the chief of staff assigns discoveries. " +
-		"Only the chief of staff changes a discovery: pass its id and revision, as factory_context reads them, with a disposition (assigned with unit, declined, suggestion for optional work, or open) and a reason against the approved intent. Call decide for the discovery first (kind discovery-disposition, subject its id). When Jev's decision is binding, only the disposition Jev picked is recorded, with your reasoning."
+		"Do not take another unit's work without coordination: the manager assigns discoveries. " +
+		"Only the manager changes a discovery: pass its id and revision, as factory_context reads them, with a disposition (assigned with unit, declined, suggestion for optional work, or open) and a reason against the approved intent. Call decide for the discovery first (kind discovery-disposition, subject its id). When Jev's decision is binding, only the disposition Jev picked is recorded, with your reasoning."
 	properties := `"key":{"type":"string"},"id":{"type":"string"},"revision":{"type":"integer"},"description":{"type":"string"},"criterion":{"type":"string"},"disposition":{"type":"string","enum":["open","assigned","declined","suggestion"]},"unit":{"type":"string"},"reason":{"type":"string"}`
 	if scope.Role == trace.Manager {
 		description += " workstream: the member workstream ID of your workgroup the discovery belongs to, as factory_context read it. Omit it for this conversation's own workstream. owner_decided: true only to record a disposition the owner gave in the message this turn answers; that needs no decide result."
@@ -180,13 +180,13 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 			return priorityRefusal("discovery changed since you read it; read its latest revision with factory_context and pass that revision")
 		}
 		if prior.Revision > 0 && scope.Role != trace.Manager {
-			return priorityRefusal("only the chief of staff changes a discovery or gives it a disposition other than open; a discovery you record stays open until the chief decides it")
+			return priorityRefusal("only the manager changes a discovery or gives it a disposition other than open; a discovery you record stays open until the manager decides it")
 		}
 		if in.Disposition == "" {
 			in.Disposition = "open"
 		}
 		if in.Disposition != "open" && scope.Role != trace.Manager {
-			return priorityRefusal("only the chief of staff changes a discovery or gives it a disposition other than open; a discovery you record stays open until the chief decides it")
+			return priorityRefusal("only the manager changes a discovery or gives it a disposition other than open; a discovery you record stays open until the manager decides it")
 		}
 		var old workDiscovery
 		if prior.Revision > 0 {
@@ -204,7 +204,7 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		}
 		if in.OwnerDecided {
 			if prior.Revision == 0 || scope.Role != trace.Manager {
-				return priorityRefusal("owner_decided names an existing discovery, and only the chief of staff relays the owner's disposition")
+				return priorityRefusal("owner_decided names an existing discovery, and only the manager relays the owner's disposition")
 			}
 			if _, owner, err := r.OwnerTurn(trace.Manager, scope); err != nil {
 				return nil, err
@@ -247,7 +247,7 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 				if bound == nil {
 					return priorityRefusal(refused)
 				}
-				handed = fmt.Sprintf("Jev decided assign with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The chief of staff's reasoning: %s", bound.Confidence, bound.Judgment, refused, in.Reason)
+				handed = fmt.Sprintf("Jev decided assign with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The manager's reasoning: %s", bound.Confidence, bound.Judgment, refused, in.Reason)
 				in.HandedToOwner, in.Disposition, in.Unit = handed, "open", ""
 			}
 		}

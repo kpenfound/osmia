@@ -70,7 +70,7 @@ func TestLandingFastForwardsTheBaseToTheSignedCommitAndRecordsIt(t *testing.T) {
 		t.Fatalf("the delivered transitions are %+v", delivered)
 	}
 	if f.notices("landed on main of acme/widgets") != 1 {
-		t.Fatal("the chief of staff has no notice of the landing")
+		t.Fatal("the manager has no notice of the landing")
 	}
 }
 

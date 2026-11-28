@@ -25,7 +25,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const managerPrompt = "You are the chief of staff for workstream %s. This turn answers a message from the owner, which is the prompt. The project context in the turn context was assembled when the message was accepted."
+const managerPrompt = "You are the manager for workstream %s. This turn answers a message from the owner, which is the prompt. The project context in the turn context was assembled when the message was accepted."
 
 func managerGuidance() string {
 	return strings.Join([]string{intake.ManagerRolePrompt, intake.FollowUpGuidance, intake.ManagerDocumentsGuidance, priorityGuidance, pauseGuidance, lifecycle.ChangeGuidance, amendmentGuidance, intake.CharterGuidance, intake.ContestGuidance, intake.ObjectionGuidance, intake.DriftHandbackGuidance, intake.OwnerWritingGuidance}, "\n\n")

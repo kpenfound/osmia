@@ -23,9 +23,9 @@ func TestJevRulingsAreWrittenByJevAndNeverByAnotherActor(t *testing.T) {
 	owner := Actor{Kind: "owner", ID: "local"}
 	for name, bad := range map[string]Ruling{
 		"Jev's decision with the owner as actor":          ruling("b1", 1, DecidedByJev, "judgment_ab12", owner, ""),
-		"Jev's decision with the chief of staff as actor": ruling("b2", 1, DecidedByJev, "judgment_ab12", manager, ""),
+		"Jev's decision with the manager as actor": ruling("b2", 1, DecidedByJev, "judgment_ab12", manager, ""),
 		"Jev as the actor of an owner decision":           ruling("b3", 1, "", "", JevActor, ""),
-		"Jev as the actor of a chief of staff decision":   ruling("b4", 1, DecidedByManager, "", JevActor, ""),
+		"Jev as the actor of a manager decision":   ruling("b4", 1, DecidedByManager, "", JevActor, ""),
 		"Jev's decision by a service other than Jev":      ruling("b5", 1, DecidedByJev, "judgment_ab12", Actor{Kind: "service", ID: "questions"}, ""),
 	} {
 		if err := r.Append(ctx, bad); err == nil {
@@ -48,7 +48,7 @@ func TestJevRulingsAreWrittenByJevAndNeverByAnotherActor(t *testing.T) {
 		}
 	}
 	if err := r.Append(ctx, ruling("r1", 2, DecidedByJev, "judgment_ab12", manager, "Files.")); err != nil {
-		t.Fatalf("the chief of staff's relay of Jev's decision: %v", err)
+		t.Fatalf("the manager's relay of Jev's decision: %v", err)
 	}
 }
 

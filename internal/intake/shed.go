@@ -461,7 +461,7 @@ func DecideFirst(entries []shed.Entry) string {
 func Unopposed(records []shed.Record, open []shed.Entry, n int) string {
 	if len(open) > 0 && len(shed.Standing(open)) == 0 {
 		if len(shed.ForOwner(open)) < len(open) {
-			return fmt.Sprintf("debate concluded after round %d: every objection that stood was disposed of, by the owner or by the chief of staff on the owner's behalf", n)
+			return fmt.Sprintf("debate concluded after round %d: every objection that stood was disposed of, by the owner or by the manager on the owner's behalf", n)
 		}
 		return fmt.Sprintf("debate concluded after round %d: the owner disposed of every objection that stood", n)
 	}
@@ -1515,7 +1515,7 @@ You test the architect's draft against the project's charter, the owner's handed
 - When your view does not settle something you must know to judge the revision, call %[5]s: the round waits for the answer, which arrives as your next turn, and your contributions so far are kept.
 
 ## Your part of the state machine
-A round of debate follows each draft. After a round the architect answers every objection that stands and may redraft, and the chief of staff or the owner disposes of what still blocks before the owner ratifies. A charter objection is a veto on the part it names; fit, size and acceptance objections are advice.
+A round of debate follows each draft. After a round the architect answers every objection that stands and may redraft, and the manager or the owner disposes of what still blocks before the owner ratifies. A charter objection is a veto on the part it names; fit, size and acceptance objections are advice.
 
 ## Output format
 Objections and concessions recorded with %[3]s and %[4]s. Ending your turn without objecting or conceding says you have no new dissent on this revision.

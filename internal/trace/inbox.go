@@ -548,7 +548,7 @@ func (r *Repository) RelayRuling(ctx context.Context, agent string, scope coread
 					return err
 				}
 				relayed = append(relayed, next)
-				txs = append(txs, questionTransition(v, next.Header, qid, QuestionRuled, QuestionAnswered, fmt.Sprintf("The chief of staff relayed the owner's ruling on question %s with scope %s", qid, reach)))
+				txs = append(txs, questionTransition(v, next.Header, qid, QuestionRuled, QuestionAnswered, fmt.Sprintf("The manager relayed the owner's ruling on question %s with scope %s", qid, reach)))
 			}
 			files, _, err := tr.stage(ctx, ws, log, v, relayed, txs...)
 			if err != nil {

@@ -132,7 +132,7 @@ func TestServiceDeliversEventsToTheManagerOnceAcrossRestart(t *testing.T) {
 	th, err = repo.ManagerThread(fixturekit.Stream)
 	fixturekit.Must(t, err)
 	if len(th.Turns) != 1 || th.Turns[0].CompletedAt.IsZero() || th.Turns[0].Request.Profile.Name != "other" || th.Turns[0].Request.Profile.Backend != "codex" {
-		t.Fatalf("chief-of-staff thread %+v", th)
+		t.Fatalf("manager thread %+v", th)
 	}
 	worker, err := repo.Thread(fixturekit.Stream, fixturekit.DemoAgent)
 	fixturekit.Must(t, err)

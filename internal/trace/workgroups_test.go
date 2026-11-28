@@ -114,10 +114,10 @@ func TestManagerHostAndMembersOfATwoWorkstreamWorkgroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := Get[Agent](r, streamID, Manager, 1); err != nil {
-		t.Fatalf("the host's own chief-of-staff identity: %v", err)
+		t.Fatalf("the host's own manager identity: %v", err)
 	}
 	if _, err := Get[Agent](r, second, Manager, 1); err == nil {
-		t.Fatal("the second member should have no chief-of-staff identity of its own")
+		t.Fatal("the second member should have no manager identity of its own")
 	}
 }
 
@@ -142,7 +142,7 @@ func TestManagerQuestionTargetResolvesQualifiedAndUnqualifiedIDs(t *testing.T) {
 	if stream, id, err := r.ManagerQuestionTarget(streamID, string(second)+":1"); err != nil || stream != second || id != "1" {
 		t.Fatalf("qualified id of a fellow member: %s %s %v", stream, id, err)
 	}
-	if _, _, err := r.ManagerQuestionTarget(streamID, string(outside)+":1"); err == nil || !strings.Contains(refusal(t, err), "does not share this chief of staff") {
+	if _, _, err := r.ManagerQuestionTarget(streamID, string(outside)+":1"); err == nil || !strings.Contains(refusal(t, err), "does not share this manager") {
 		t.Fatalf("qualified id of a workstream outside the workgroup: %v", err)
 	}
 }

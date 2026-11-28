@@ -14,16 +14,16 @@ type Section struct {
 }
 
 var attribution = map[string]string{
-	"project_notice":   "chief of staff information",
+	"project_notice":   "manager information",
 	"hearsay_context":  "external evidence from Hearsay",
 	"question":         "asker (copied by Osmia)",
-	"answer":           "chief of staff",
+	"answer":           "manager",
 	"service_response": "service",
 	"owner_response":   "owner (copied by Osmia)",
 	"jev_response":     "Jev, the decision maker (copied by Osmia)",
-	"returned_answer":  "chief of staff relay",
-	"citations":        "chief of staff",
-	"charter_rule":     "chief of staff proposal, ratified by the owner",
+	"returned_answer":  "manager relay",
+	"citations":        "manager",
+	"charter_rule":     "manager proposal, ratified by the owner",
 }
 
 // Render validates structural names and renders content with a data prefix on

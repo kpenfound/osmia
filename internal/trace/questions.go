@@ -215,7 +215,7 @@ func (r *Repository) AskCharterConflict(ctx context.Context, agent string, scope
 	var inbox int
 	if len(citations) > 0 {
 		if scope.Role == Manager {
-			return Question{}, fmt.Errorf("the chief of staff answers questions and cannot ask one")
+			return Question{}, fmt.Errorf("the manager answers questions and cannot ask one")
 		}
 		if !present(text) {
 			return Question{}, refused("question is required: say what you need decided and what it blocks")
@@ -254,7 +254,7 @@ func (r *Repository) AskCharterConflict(ctx context.Context, agent string, scope
 	}
 	defer r.mu.Unlock()
 	if scope.Role == Manager {
-		return Question{}, fmt.Errorf("the chief of staff answers questions and cannot ask one")
+		return Question{}, fmt.Errorf("the manager answers questions and cannot ask one")
 	}
 	turn, log, v, records, err := r.questionTurn(ctx, agent, scope, at)
 	if err != nil {
@@ -334,7 +334,7 @@ func openQuestion(existing []QuestionState, id string) (QuestionState, error) {
 
 func (r *Repository) managerTurn(ctx context.Context, agent string, scope coreadapter.Scope, at time.Time) (QueuedTurn, workflowLog, *workflowView, []Record, error) {
 	if scope.Role != Manager {
-		return QueuedTurn{}, workflowLog{}, nil, nil, fmt.Errorf("only a chief-of-staff turn may choose what happens to a question")
+		return QueuedTurn{}, workflowLog{}, nil, nil, fmt.Errorf("only a manager turn may choose what happens to a question")
 	}
 	return r.questionTurn(ctx, agent, scope, at)
 }
@@ -430,7 +430,7 @@ func (r *Repository) AnswerQuestionJudged(ctx context.Context, agent string, sco
 			return Ruling{}, fmt.Errorf("%w: ruling %s already exists", ErrConflict, localID)
 		}
 	}
-	tx := questionTransition(v, h, localID, QuestionOpen, QuestionAnswered, fmt.Sprintf("The chief of staff answered question %s citing %s", localID, strings.Join(citations, ", ")))
+	tx := questionTransition(v, h, localID, QuestionOpen, QuestionAnswered, fmt.Sprintf("The manager answered question %s citing %s", localID, strings.Join(citations, ", ")))
 	files, _, err := target.stage(ctx, stream, log, v, []Record{ruling}, tx)
 	if err != nil {
 		return Ruling{}, err
@@ -582,7 +582,7 @@ func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope 
 					return err
 				}
 				revisions = append(revisions, next)
-				txs = append(txs, questionTransition(v, next.Header, id, QuestionOpen, QuestionEscalated, fmt.Sprintf("The chief of staff escalated question %s to the owner in %s", id, batch)))
+				txs = append(txs, questionTransition(v, next.Header, id, QuestionOpen, QuestionEscalated, fmt.Sprintf("The manager escalated question %s to the owner in %s", id, batch)))
 			}
 			files, _, err := mr.stage(ctx, member, log, v, revisions, txs...)
 			if err != nil {

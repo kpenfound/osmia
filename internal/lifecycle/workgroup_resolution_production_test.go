@@ -302,7 +302,7 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 			if after != calls {
 				t.Fatalf("finished own PRs polled after restart: %d -> %d", calls, after)
 			}
-			journey.LifecycleAwait(t, f, "chief of staff archives of the merged members", func() bool {
+			journey.LifecycleAwait(t, f, "manager archives of the merged members", func() bool {
 				for _, m := range resolutionMembers(f) {
 					if a, ok := intakefixture.ArchiveRecord(t, f.S.Store, m.stream); !ok || a.CleanedAt.IsZero() {
 						return false

@@ -207,7 +207,7 @@ func (s *Service) concludeExit(repository *trace.Repository, stream config.Works
 	}
 	who := "the owner"
 	if authority == router.AuthorityManager {
-		who = "the chief of staff"
+		who = "the manager"
 	}
 	body := fmt.Sprintf("The climb was concluded now by %s. No attempt starts again; an attempt in flight is discarded, and the branch goes on to its rebase and delivery.", who)
 	if strings.TrimSpace(note) != "" {

@@ -27,7 +27,7 @@ func proposer(actor trace.Actor) string {
 	if actor == trace.JevActor {
 		return "Jev"
 	}
-	return "the chief of staff"
+	return "the manager"
 }
 
 // ShedProposalExit returns the exit of the proposal on the workstream whose id
@@ -96,7 +96,7 @@ func (s *Controller) ShedProposalExit(raw string, in ShedProposal) (router.Exit,
 		return router.Effect{Documents: []trace.Document{doc}, Events: []trace.Event{trace.Notice(p.TransitionID, "owner", reason)}, Reason: reason}, nil
 	}
 	stay := router.Target{Name: TargetWait, Stay: true, NoMove: true,
-		Description: "Leave the decision to the owner: the chief of staff does not ask for a redraft or another round by default, and the owner can ask for either."}
+		Description: "Leave the decision to the owner: the manager does not ask for a redraft or another round by default, and the owner can ask for either."}
 	asked := router.Target{Name: name, State: enters, Description: description, Bar: router.BarStrict, Works: true}
 	x := router.Exit{
 		Repo: repo, Project: o.Project, Workstream: stream, Machine: WorkstreamMachine,

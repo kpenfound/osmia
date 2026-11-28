@@ -48,7 +48,7 @@ func TestTheHandoutCarriesEveryRoleRequirement(t *testing.T) {
 		t.Fatalf("only the mason takes a Dagger requirement: %+v", roles)
 	}
 	if cos := roles[trace.Manager]; cos.EventsProfile != "slow" || cos.Sandbox != "none" || cos.Skills == nil {
-		t.Fatalf("chief of staff: %+v", cos)
+		t.Fatalf("manager: %+v", cos)
 	}
 	if got := len(h.Profiles); got != 3 || h.Profiles[0].Name != "fast" || h.Profiles[0].Backend != "claude" || h.Profiles[0].Model != "sonnet" || h.Profiles[0].Fallback != "slow" || h.Profiles[0].MaxTurns != 30 {
 		t.Fatalf("profiles: %+v", h.Profiles)

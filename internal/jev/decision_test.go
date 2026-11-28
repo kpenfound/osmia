@@ -86,12 +86,14 @@ func TestDecisionKindsHaveDistinctTasksVersionsAndRecordTheThresholdAsAcceptance
 	j := judge(&settings, p, "key")
 	tasks := map[string]bool{}
 	owner := map[string]bool{}
+	versions := map[string]int{}
 	for _, kind := range jev.Kinds() {
 		if kind.Version() < 1 {
 			t.Fatalf("%s has version %d", kind, kind.Version())
 		}
 		tasks[kind.Task()] = true
 		owner[kind.Task()] = kind.Owner()
+		versions[kind.Task()] = kind.Version()
 		res := j.Decide(context.Background(), f.repo, decisionRequest(kind, "subject:1", "state", "a", "b"))
 		if res.Status != jev.Binding {
 			t.Fatalf("%s: %+v", kind, res)
@@ -111,7 +113,7 @@ func TestDecisionKindsHaveDistinctTasksVersionsAndRecordTheThresholdAsAcceptance
 		if owner[r.Task] {
 			acceptance, threshold = "owner_threshold=0.95", 0.95
 		}
-		if r.Acceptance != acceptance || r.Occurrence == nil || r.Occurrence.Threshold != threshold || r.Occurrence.Key != "subject:1" || r.Version != 1 {
+		if r.Acceptance != acceptance || r.Occurrence == nil || r.Occurrence.Threshold != threshold || r.Occurrence.Key != "subject:1" || r.Version != versions[r.Task] {
 			t.Fatalf("record = %+v", r)
 		}
 	}

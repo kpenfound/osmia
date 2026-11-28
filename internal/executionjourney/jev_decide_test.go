@@ -195,7 +195,7 @@ func TestWithJevUnconfiguredTheManagerDecidesAndTheContestReachesTheOwner(t *tes
 	_, err := b.f.C.Send(ctx, b.stream, "escalate after decide")
 	fixturekit.Must(t, err)
 	got := intakefixture.AwaitCheck(t, done)
-	if !strings.Contains(got[0], `"decision":"chief"`) || strings.Contains(got[0], `"decision":"binding"`) {
+	if !strings.Contains(got[0], `"decision":"manager"`) || strings.Contains(got[0], `"decision":"binding"`) {
 		t.Fatalf("decide: %s", got[0])
 	}
 	if !strings.Contains(got[1], `"recorded":true`) {

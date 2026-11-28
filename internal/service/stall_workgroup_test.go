@@ -176,7 +176,7 @@ func TestACrossRepoWorkgroupChangeStallsOnItsLeader(t *testing.T) {
 		}
 	}
 	if told != 1 {
-		t.Fatalf("the chief of staff was told of the change %d times through the leader, want 1", told)
+		t.Fatalf("the manager was told of the change %d times through the leader, want 1", told)
 	}
 	other := f.watch()
 	other.repository = f.other

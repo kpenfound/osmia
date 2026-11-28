@@ -106,7 +106,7 @@ func TestAConfidentPlanAmendmentPickBindsDecideAmendment(t *testing.T) {
 		t.Fatalf("reject against the pick: %s", out)
 	}
 	if out := intakefixture.Handle(t, k.amend, `{"amendment":"1","packet":1,"decision":"approve"}`); !strings.Contains(out, `"recorded":false`) {
-		t.Fatalf("approve without the chief of staff's reasoning: %s", out)
+		t.Fatalf("approve without the manager's reasoning: %s", out)
 	}
 	if len(k.decisions(t)) != 0 {
 		t.Fatal("a refused call recorded a decision")
@@ -149,7 +149,7 @@ func TestDecideRefusesAnAmendmentThatChangesIntent(t *testing.T) {
 		t.Fatalf("decide_amendment: %s", out)
 	}
 	if len(k.decisions(t)) != 0 {
-		t.Fatal("the chief of staff decided an amendment that changes intent")
+		t.Fatal("the manager decided an amendment that changes intent")
 	}
 }
 
@@ -165,7 +165,7 @@ func TestAPlanAmendmentDecisionThatIsNotConfidentLeavesTheManagerFree(t *testing
 			if out := intakefixture.Handle(t, k.amend, rejectAmendment); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "call decide") {
 				t.Fatalf("decide_amendment before decide: %s", out)
 			}
-			if out := intakefixture.Handle(t, k.decide, decideAmendmentInput); !strings.Contains(out, `"decision":"chief"`) || strings.Contains(out, `"pick"`) {
+			if out := intakefixture.Handle(t, k.decide, decideAmendmentInput); !strings.Contains(out, `"decision":"manager"`) || strings.Contains(out, `"pick"`) {
 				t.Fatalf("decide: %s", out)
 			}
 			if out := intakefixture.Handle(t, k.amend, rejectAmendment); !strings.Contains(out, `"recorded":true`) {
@@ -184,7 +184,7 @@ func TestAPlanAmendmentPickTheServiceRefusedReachesTheOwner(t *testing.T) {
 	p := &gateJev{confidence: 0.95, pick: func(string, []string) string { return "approve" }}
 	k := newAmendmentKit(t, p, fixturekit.ValidSpec, intakefixture.RestartPlan)
 	if _, open, err := k.f.s.intake().AmendmentEntry(k.repo, k.stream, "1"); err != nil || open {
-		t.Fatalf("the chief of staff's amendment is listed for the owner: %v %v", open, err)
+		t.Fatalf("the manager's amendment is listed for the owner: %v %v", open, err)
 	}
 	if out := intakefixture.Handle(t, k.decide, decideAmendmentInput); !strings.Contains(out, `"pick":"approve"`) {
 		t.Fatalf("decide: %s", out)
@@ -274,7 +274,7 @@ func TestAConfidentDiscoveryPickBindsTheDisposition(t *testing.T) {
 		}
 	}
 	if out := k.disposition(t, `"disposition":"declined"`); !strings.Contains(out, `"recorded":false`) {
-		t.Fatalf("disposition without the chief of staff's reasoning: %s", out)
+		t.Fatalf("disposition without the manager's reasoning: %s", out)
 	}
 	if out := k.disposition(t, declineFields); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("decline: %s", out)
@@ -301,7 +301,7 @@ func TestAConfidentDiscoveryPickBindsTheDisposition(t *testing.T) {
 func TestADiscoveryCannotNameItsDecider(t *testing.T) {
 	t.Parallel()
 	k := newDiscoveryKit(t, "decide-discovery-decider", nil)
-	if out := intakefixture.Handle(t, k.decide, k.decideInput()); !strings.Contains(out, `"decision":"chief"`) {
+	if out := intakefixture.Handle(t, k.decide, k.decideInput()); !strings.Contains(out, `"decision":"manager"`) {
 		t.Fatalf("decide: %s", out)
 	}
 	if out := k.disposition(t, declineFields+`,"decided_by":"jev","judgment":"judgment_ab12","handed_to_owner":"x"`); !strings.Contains(out, `"recorded":true`) {
@@ -359,7 +359,7 @@ func TestADiscoveryDecisionThatIsNotConfidentLeavesTheManagerFree(t *testing.T) 
 			if out := k.disposition(t, declineFields); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "call decide") {
 				t.Fatalf("disposition before decide: %s", out)
 			}
-			if out := intakefixture.Handle(t, k.decide, k.decideInput()); !strings.Contains(out, `"decision":"chief"`) || strings.Contains(out, `"pick"`) {
+			if out := intakefixture.Handle(t, k.decide, k.decideInput()); !strings.Contains(out, `"decision":"manager"`) || strings.Contains(out, `"pick"`) {
 				t.Fatalf("decide: %s", out)
 			}
 			if out := k.disposition(t, `"disposition":"suggestion","reason":"Worth keeping, not necessary."`); !strings.Contains(out, `"recorded":true`) {

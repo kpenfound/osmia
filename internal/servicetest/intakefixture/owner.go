@@ -201,7 +201,7 @@ func Notice(t *testing.T, repository *trace.Repository, stream config.Workstream
 			return entry.Event.Body
 		}
 	}
-	t.Fatalf("transition %s of workstream %s told the chief of staff nothing", transition, stream)
+	t.Fatalf("transition %s of workstream %s told the manager nothing", transition, stream)
 	return ""
 }
 

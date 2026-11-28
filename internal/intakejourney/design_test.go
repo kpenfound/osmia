@@ -65,7 +65,7 @@ func TestOpenDesignCreatesAnInertWorkstreamInItsOwnWorkgroup(t *testing.T) {
 		t.Fatalf("design session feature state: %+v %v", state, err)
 	}
 	if _, err := repository.ManagerThread(stream); err != nil {
-		t.Fatalf("design session has no chief-of-staff thread: %v", err)
+		t.Fatalf("design session has no manager thread: %v", err)
 	}
 	groups, _, err := trace.Workgroups(repository)
 	fixturekit.Must(t, err)
@@ -76,7 +76,7 @@ func TestOpenDesignCreatesAnInertWorkstreamInItsOwnWorkgroup(t *testing.T) {
 	host, err := repository.ManagerHost(stream)
 	fixturekit.Must(t, err)
 	if host != stream {
-		t.Fatalf("a one-workstream workgroup's chief of staff should be its own thread, got host %s", host)
+		t.Fatalf("a one-workstream workgroup's manager should be its own thread, got host %s", host)
 	}
 
 	byID, err := c.Design(context.Background(), stream)
@@ -190,12 +190,12 @@ func TestStartDesignWorkgroupHandsOffBriefToTheManagersOwnThread(t *testing.T) {
 	after, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	if after.Identity.ID != before.Identity.ID || after.Identity.ThreadID != before.Identity.ThreadID {
-		t.Fatalf("starting the workgroup must give the chief of staff its own thread, not a design thread: before %+v after %+v", before.Identity, after.Identity)
+		t.Fatalf("starting the workgroup must give the manager its own thread, not a design thread: before %+v after %+v", before.Identity, after.Identity)
 	}
 	host, err := repository.ManagerHost(stream)
 	fixturekit.Must(t, err)
 	if host != stream {
-		t.Fatalf("the started workstream's chief of staff should still be its own thread, got host %s", host)
+		t.Fatalf("the started workstream's manager should still be its own thread, got host %s", host)
 	}
 
 	latest := map[string]trace.Document{}
@@ -695,7 +695,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 			return intakefixture.QuestionResult(req, "session-chief", "Titled."), nil
 		}
 		if !strings.Contains(prompt, "asked by the mason: "+question) {
-			problem("unexpected chief-of-staff turn: %s", req.Prompt)
+			problem("unexpected manager turn: %s", req.Prompt)
 			return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
 		}
 		names, err := intakefixture.ToolNames(ctx, tools)
@@ -759,13 +759,13 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	if !ranManager {
 		manager, err := repository.ManagerThread(stream)
 		fixturekit.Must(t, err)
-		fatalf("the chief-of-staff turn that answers the worker's question never ran; chief %s", turnSummary(manager))
+		fatalf("the manager turn that answers the worker's question never ran; chief %s", turnSummary(manager))
 	}
 
 	after, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	if after.Identity.ID != before.Identity.ID || after.Identity.ThreadID != before.Identity.ThreadID {
-		fatalf("the started workgroup's chief of staff is not the design session's own thread: before %+v after %+v", before.Identity, after.Identity)
+		fatalf("the started workgroup's manager is not the design session's own thread: before %+v after %+v", before.Identity, after.Identity)
 	}
 	if len(after.Turns) <= len(before.Turns) {
 		fatalf("no later turn landed on the continued thread: before %d turns, after %+v", len(before.Turns), after.Turns)

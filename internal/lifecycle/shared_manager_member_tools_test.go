@@ -104,7 +104,7 @@ func TestDesignProductionSharedManagerActsOnAMember(t *testing.T) {
 	if listed[plan.PlanPath] == 0 {
 		t.Fatalf("factory_context did not list the member's documents: %s", results[0])
 	}
-	if !strings.Contains(results[1], "does not share this chief of staff") {
+	if !strings.Contains(results[1], "does not share this manager") {
 		t.Fatalf("a workstream outside the workgroup was read: %s", results[1])
 	}
 	if !strings.Contains(results[2], `"recorded":true`) || discovered != 1 {

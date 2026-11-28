@@ -57,11 +57,11 @@ func IsManagerPath(path string) bool {
 func (c ManagerDecisions) check() error {
 	switch {
 	case c.Version != Version:
-		return fmt.Errorf("unsupported chief of staff decisions version %d", c.Version)
+		return fmt.Errorf("unsupported manager decisions version %d", c.Version)
 	case c.Round < 1:
-		return errors.New("chief of staff decisions require a positive round")
+		return errors.New("manager decisions require a positive round")
 	case c.Revision.Spec < 1 || c.Revision.Plan < 0:
-		return errors.New("chief of staff decisions require the revision they were made against")
+		return errors.New("manager decisions require the revision they were made against")
 	}
 	seen := map[string]bool{}
 	for _, one := range c.Decisions {
@@ -73,7 +73,7 @@ func (c ManagerDecisions) check() error {
 		case strings.TrimSpace(one.Note) == "":
 			return fmt.Errorf("the decision on objection %s requires a note", one.Objection)
 		case !trace.ValidDecider(one.DecidedBy, one.Judgment) || one.DecidedBy == trace.DecidedByOwner:
-			return fmt.Errorf("the decision on objection %s names the chief of staff or Jev with its judgment as its decider", one.Objection)
+			return fmt.Errorf("the decision on objection %s names the manager or Jev with its judgment as its decider", one.Objection)
 		case seen[one.Objection]:
 			return fmt.Errorf("objection %s is decided twice", one.Objection)
 		}
@@ -97,7 +97,7 @@ func EncodeManagerDecisions(c ManagerDecisions) ([]byte, error) {
 // fields and invalid decisions.
 func ParseManagerDecisions(data []byte) (ManagerDecisions, error) {
 	var c ManagerDecisions
-	if err := decodeFile(data, &c, "chief of staff decisions"); err != nil {
+	if err := decodeFile(data, &c, "manager decisions"); err != nil {
 		return ManagerDecisions{}, err
 	}
 	if len(c.Decisions) == 0 {

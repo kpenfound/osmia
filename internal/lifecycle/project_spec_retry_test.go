@@ -149,7 +149,7 @@ func TestProjectSpecDraftStopsRetryingAndTheManagerAsksAgain(t *testing.T) {
 		}
 		return ""
 	}
-	intakefixture.Eventually(t, "the chief of staff is told drafting stopped", func() bool { return reported() != "" })
+	intakefixture.Eventually(t, "the manager is told drafting stopped", func() bool { return reported() != "" })
 	haltGuardControllers(t, f)
 	for range 3 {
 		fixturekit.Must(t, f.S.Lifecycle().DraftProjectSpecIfReady(ctx, mustRepo(t, f.S, f.Project), id))

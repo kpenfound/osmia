@@ -203,7 +203,7 @@ func TestStallWatchdogRaisesOneStalledExitPerStall(t *testing.T) {
 		}
 	}
 	if notices != 2 {
-		t.Fatalf("the chief of staff got %d stall notices, want 2", notices)
+		t.Fatalf("the manager got %d stall notices, want 2", notices)
 	}
 	if state, err := f.repo.Workflow(fixturekit.Stream, trace.UnitSubject(stallUnit)); err != nil || state.Value != UnitImplementing || state.Version != 1 {
 		t.Fatalf("the unit is %+v: %v", state, err)
@@ -786,7 +786,7 @@ func TestAWorkgroupChangeSittingInItsDraftStallsAndEndsOnARecoveryCard(t *testin
 		}
 	}
 	if told != 1 {
-		t.Fatalf("the chief of staff was told of the change %d times, want 1", told)
+		t.Fatalf("the manager was told of the change %d times, want 1", told)
 	}
 
 	f.clock.QuietFor(46*time.Minute + 50*time.Minute)

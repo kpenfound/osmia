@@ -28,7 +28,7 @@ const (
 func (j *briefJourney) requireNoProblems(t *testing.T) {
 	t.Helper()
 	if problems := j.manager.problems(); len(problems) > 0 {
-		t.Fatalf("the service refused the chief of staff's brief: %q", problems)
+		t.Fatalf("the service refused the manager's brief: %q", problems)
 	}
 }
 
@@ -161,7 +161,7 @@ func TestReassembledWorkstreamNeedsANewBriefAndKeepsNoEarlierItems(t *testing.T)
 	j.manager.hold()
 	j.run(t)
 	j.awaitStarts(t, 2)
-	intakefixture.Eventually(t, "the chief of staff never repeated its call for review 1", func() bool { return len(j.manager.earlyResults(2)) == 1 })
+	intakefixture.Eventually(t, "the manager never repeated its call for review 1", func() bool { return len(j.manager.earlyResults(2)) == 1 })
 
 	if entries := j.entries(t, stream); len(entries) != 0 {
 		t.Fatalf("the entry of the new review is listed with no brief for it: %+v", entries)

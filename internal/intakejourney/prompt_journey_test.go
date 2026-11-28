@@ -158,7 +158,7 @@ func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheMa
 		t.Fatalf("the design thread: %+v with %d turns, want %d", designThread.Identity, len(designThread.Turns), len(steps))
 	}
 	if manager, err := repo.ManagerThread(stream); err != nil || len(manager.Turns) != 0 {
-		t.Fatalf("a design turn reached the chief of staff's thread: %+v %v", manager.Turns, err)
+		t.Fatalf("a design turn reached the manager's thread: %+v %v", manager.Turns, err)
 	}
 	var first fixturekit.LoggedTurn
 	for i, q := range designThread.Turns {
@@ -192,7 +192,7 @@ func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheMa
 	if _, err := c.DesignStart(ctx, stream); err != nil {
 		t.Fatal(err)
 	}
-	s.Until(t, "the chief of staff to settle the hand-off turn", func() bool {
+	s.Until(t, "the manager to settle the hand-off turn", func() bool {
 		th, err := repo.ManagerThread(stream)
 		fixturekit.Must(t, err)
 		return slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool {

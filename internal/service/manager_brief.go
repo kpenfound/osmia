@@ -20,7 +20,7 @@ const briefToolName = delivery.BriefToolName
 
 func (c *runtimeControls) deliveryBrief(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: briefToolName, Effect: coreadapter.ToolMemory,
-		Description: fmt.Sprintf("Record the delivery brief the owner reads before deciding delivery of a workstream's final review. Name the review with review and review_revision exactly as the final review notice gives them; a call naming any other review, a review the owner already approved, or a workstream with no reviewed final review awaiting approval is refused. Set workstream to the member (required for a shared chief). text: how the approved intent shows up in the product, then at most one line on how it was implemented, then any departure from the intent, at most %d characters; never list tests, files or commits. before_you_ship: optional lines, one per item, at most %d characters in total, only for what must be done to deploy the change. screenshots: at most %d image_id values returned by preview for this member at the reviewed commit. A refused call records nothing and says why; nothing is ever truncated. A later accepted call for the same review replaces the earlier brief.", delivery.MaxBriefText, delivery.MaxBriefItems, delivery.MaxBriefScreenshots),
+		Description: fmt.Sprintf("Record the delivery brief the owner reads before deciding delivery of a workstream's final review. Name the review with review and review_revision exactly as the final review notice gives them; a call naming any other review, a review the owner already approved, or a workstream with no reviewed final review awaiting approval is refused. Set workstream to the member (required for a shared manager). text: how the approved intent shows up in the product, then at most one line on how it was implemented, then any departure from the intent, at most %d characters; never list tests, files or commits. before_you_ship: optional lines, one per item, at most %d characters in total, only for what must be done to deploy the change. screenshots: at most %d image_id values returned by preview for this member at the reviewed commit. A refused call records nothing and says why; nothing is ever truncated. A later accepted call for the same review replaces the earlier brief.", delivery.MaxBriefText, delivery.MaxBriefItems, delivery.MaxBriefScreenshots),
 		InputSchema: memberSchema(scope, `"review":{"type":"integer","minimum":1},"review_revision":{"type":"integer","minimum":1},"text":{"type":"string"},"before_you_ship":{"type":"array","items":{"type":"string"}},"screenshots":{"type":"array","items":{"type":"string"}}`)}
 	var schema map[string]any
 	_ = json.Unmarshal(tool.InputSchema, &schema)
@@ -53,7 +53,7 @@ func (c *runtimeControls) deliveryBrief(repo *trace.Repository, scope coreadapte
 			return nil, errors.New("tool input must be one object")
 		}
 		if scope.Role != trace.Manager {
-			return refuse("%s is only available to the chief of staff", briefToolName)
+			return refuse("%s is only available to the manager", briefToolName)
 		}
 		own := config.WorkstreamID(scope.Workstream)
 		members, err := repo.WorkgroupMembers(own)
@@ -61,7 +61,7 @@ func (c *runtimeControls) deliveryBrief(repo *trace.Repository, scope coreadapte
 			return nil, err
 		}
 		if len(members) > 1 && in.Workstream == "" {
-			return refuse("a shared chief must name the member workstream the brief is for")
+			return refuse("a shared manager must name the member workstream the brief is for")
 		}
 		target, stream, refusal, err := managerMember(repo, scope, in.Workstream)
 		if err != nil {

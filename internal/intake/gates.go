@@ -225,7 +225,7 @@ func dissentText(entries []shed.Entry) string {
 		case e.Disposition != "":
 			who := "the owner"
 			if e.By != "" {
-				who = "the chief of staff"
+				who = "the manager"
 			}
 			fmt.Fprintf(&b, " %s by %s", e.Disposition, who)
 		case e.Escalated:
@@ -236,7 +236,7 @@ func dissentText(entries []shed.Entry) string {
 			fmt.Fprintf(&b, " Note: %s", limitText(e.Note, maxGateText))
 		}
 		if e.Escalation != "" {
-			fmt.Fprintf(&b, " Chief of staff's escalation: %s", limitText(e.Escalation, maxGateText))
+			fmt.Fprintf(&b, " Manager's escalation: %s", limitText(e.Escalation, maxGateText))
 		}
 		b.WriteString("\n")
 	}
@@ -288,7 +288,7 @@ func (s *Controller) ratificationGate(repository *trace.Repository, stream confi
 		var b strings.Builder
 		GateSection(&b, "Decision", fmt.Sprintf("The ratification gate of workstream %s. The only decision offered is to ratify %s, which seals the spec and the plan and builds the workstream. Anything else about the draft is the owner's.", stream, packet.Revision), 0)
 		GateSection(&b, "Card", e.Question+"\nBlocked: "+e.Blocked, 0)
-		GateSection(&b, "Chief of staff's recommendation", packet.Recommendation, 0)
+		GateSection(&b, "Manager's recommendation", packet.Recommendation, 0)
 		entries, err := Dissent(repository, stream)
 		if err != nil {
 			return "", nil, err
@@ -376,7 +376,7 @@ func (s *Controller) objectionGates(repository *trace.Repository, stream config.
 				}
 			}
 		}
-		why := "the chief of staff escalated it to the owner"
+		why := "the manager escalated it to the owner"
 		switch kind {
 		case jev.KindCharterConflict:
 			why = "it reports a conflict between the charters of the projects the feature touches, which only the owner settles"
@@ -394,14 +394,14 @@ func (s *Controller) objectionGates(repository *trace.Repository, stream config.
 			GateSection(&b, "The objection", dissentText([]shed.Entry{entry}), 0)
 			GateSection(&b, "Dissent that stands", dissentText(entries), 0)
 			if packet, doc, found, err := shed.LatestPacket(repository, stream); err == nil && found {
-				GateSection(&b, "Ratification packet", fmt.Sprintf("Round %d, %s. %s\nChief of staff's recommendation: %s", packet.Round, packet.Revision, packet.Conclusion, packet.Recommendation), 0)
+				GateSection(&b, "Ratification packet", fmt.Sprintf("Round %d, %s. %s\nManager's recommendation: %s", packet.Round, packet.Revision, packet.Conclusion, packet.Recommendation), 0)
 				if spec, ok := documentAt(repository, stream, plan.SpecDocument, packet.Revision.Spec); ok {
 					GateSection(&b, fmt.Sprintf("Spec (revision %d)", packet.Revision.Spec), spec, maxGateSpec)
 				}
 				GateSection(&b, "Charter", s.charterText(ctx, project), maxGateCharter)
-				return b.String(), []jev.Source{{Kind: "packet", ID: shed.PacketDocumentID(packet.Round), Revision: doc.Revision}, {Kind: "chief-decisions", ID: shed.ManagerDocumentID(round)}}, nil
+				return b.String(), []jev.Source{{Kind: "packet", ID: shed.PacketDocumentID(packet.Round), Revision: doc.Revision}, {Kind: "manager-decisions", ID: shed.ManagerDocumentID(round)}}, nil
 			}
-			return b.String(), []jev.Source{{Kind: "chief-decisions", ID: shed.ManagerDocumentID(round)}}, nil
+			return b.String(), []jev.Source{{Kind: "manager-decisions", ID: shed.ManagerDocumentID(round)}}, nil
 		}
 		g.Apply = func(ctx context.Context, res jev.Result) *APIError {
 			disposition := shed.Disposition(res.Pick)
@@ -480,7 +480,7 @@ func (s *Controller) ratificationEntry(repository *trace.Repository, stream conf
 				continue
 			}
 			if res, carried := s.CarriedJudgment(repository, stream, jev.KindObjection, jev.ObjectionKey(entry.ID)); carried {
-				recs = append(recs, fmt.Sprintf("Objection %s: Jev decided %s for the chief of staff's decision on it with confidence %.2f, but the service could not carry it out. The decision is yours.", entry.ID, res.Pick, res.Confidence))
+				recs = append(recs, fmt.Sprintf("Objection %s: Jev decided %s for the manager's decision on it with confidence %.2f, but the service could not carry it out. The decision is yours.", entry.ID, res.Pick, res.Confidence))
 				if first == nil {
 					first = &api.InboxJev{Pick: res.Pick, Confidence: res.Confidence, Threshold: res.Threshold, Binding: true, Refused: "the service could not carry the decision out", Judgment: res.Judgment}
 				}
@@ -521,7 +521,7 @@ func (s *Controller) amendmentGate(repository *trace.Repository, stream config.W
 		GateSection(&b, "Decision", fmt.Sprintf("Amendment %s of workstream %s changes the approved intent, so it is the owner's to approve or decline. Rounds of further debate and overruling objections are the owner's, not offered here.", id, stream), 0)
 		GateSection(&b, "Card", e.Question+"\nBlocked: "+e.Blocked, 0)
 		GateSection(&b, "Request", fmt.Sprintf("Requested by %s (%s). Citations: %s\nChange: %s\nReason: %s", c.Request.Requester.ID, c.Request.Role, strings.Join(c.Request.Citations, ", "), c.Request.Change, c.Request.Reason), 0)
-		GateSection(&b, "Chief of staff's recommendation", e.Recommendation, 0)
+		GateSection(&b, "Manager's recommendation", e.Recommendation, 0)
 		if len(entries) == 0 {
 			GateSection(&b, "Dissent", "No objection stands.", 0)
 		} else {
@@ -651,7 +651,7 @@ func (s *Controller) escalationGate(repository *trace.Repository, e trace.InboxE
 		Label: fmt.Sprintf("inbox entry %d of workstream %s", number, first.Workstream), Cause: fmt.Sprintf("escalation-%d", number), Reached: e.EscalatedAt, Options: options}
 	g.State = func(ctx context.Context) (string, []jev.Source, error) {
 		var b strings.Builder
-		GateSection(&b, "Decision", fmt.Sprintf("The chief of staff escalated inbox entry %d to the owner. Choose the option the owner would choose; the option is the owner's ruling.", number), 0)
+		GateSection(&b, "Decision", fmt.Sprintf("The manager escalated inbox entry %d to the owner. Choose the option the owner would choose; the option is the owner's ruling.", number), 0)
 		switch kind {
 		case jev.KindCharterConflict:
 			GateSection(&b, "Charter conflict", "The question reports a conflict between the charters of the projects it touches: "+strings.Join(charterConflicts(e), "; "), 0)
@@ -673,7 +673,7 @@ func (s *Controller) escalationGate(repository *trace.Repository, e trace.InboxE
 			sources = append(sources, jev.Source{Kind: "question", ID: q.Asked.ID, Revision: q.Latest.Revision})
 		}
 		GateSection(&b, "Questions as the askers put them", asked.String(), 0)
-		GateSection(&b, "Chief of staff's recommendation", e.Recommendation, 0)
+		GateSection(&b, "Manager's recommendation", e.Recommendation, 0)
 		GateSection(&b, "Charter", s.charterText(ctx, project), maxGateCharter)
 		return b.String(), sources, nil
 	}
@@ -685,7 +685,7 @@ func (s *Controller) escalationGate(repository *trace.Repository, e trace.InboxE
 			}
 		}
 		if text == "" {
-			return &APIError{Code: Conflict, Message: fmt.Sprintf("%q is not one of the options the chief of staff wrote", res.Pick)}
+			return &APIError{Code: Conflict, Message: fmt.Sprintf("%q is not one of the options the manager wrote", res.Pick)}
 		}
 		_, api := s.RuleInboxBy(ctx, repository, number, text, nil, Deciding{Judgment: res.Judgment})
 		return api
@@ -727,7 +727,7 @@ func (s *Controller) EscalationCard(repository *trace.Repository, e trace.InboxE
 		return InboxEntry{}, false, err
 	}
 	if carried != nil {
-		CarriedCard(&view, *carried, "the chief of staff's decision on this question")
+		CarriedCard(&view, *carried, "the manager's decision on this question")
 		return view, true, nil
 	}
 	if !s.guardedCard(repository, &view, g) {
@@ -886,7 +886,7 @@ func (s *Controller) ContestedCard(repository *trace.Repository, stream config.W
 		return InboxEntry{}, false, err
 	}
 	if carried != nil {
-		CarriedCard(&e, *carried, "the chief of staff's ruling on this unit")
+		CarriedCard(&e, *carried, "the manager's ruling on this unit")
 		return e, true, nil
 	}
 	if !s.guardedCard(repository, &e, g) {

@@ -108,7 +108,7 @@ func doneThrough(t *testing.T, args map[string]any) (map[string]any, UnitReport,
 			return result, report, entry.Event
 		}
 	}
-	t.Fatal("the move to checking told the chief of staff nothing")
+	t.Fatal("the move to checking told the manager nothing")
 	return nil, UnitReport{}, trace.Event{}
 }
 

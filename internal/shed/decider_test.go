@@ -28,7 +28,7 @@ func TestGateRecordsDecidedByJevRoundTripWithTheirJudgment(t *testing.T) {
 	for name, broken := range map[string]func(*shed.Ratification){
 		"Jev without a judgment": func(r *shed.Ratification) { r.Judgment = "" },
 		"a judgment without Jev": func(r *shed.Ratification) { r.DecidedBy = "" },
-		"the chief of staff":     func(r *shed.Ratification) { r.DecidedBy, r.Judgment = trace.DecidedByManager, "" },
+		"the manager":     func(r *shed.Ratification) { r.DecidedBy, r.Judgment = trace.DecidedByManager, "" },
 	} {
 		next := ratification
 		broken(&next)
@@ -47,7 +47,7 @@ func TestGateRecordsDecidedByJevRoundTripWithTheirJudgment(t *testing.T) {
 	}
 	ruled.Rulings[0].DecidedBy = trace.DecidedByManager
 	if _, err := shed.EncodeRulings(ruled); err == nil {
-		t.Fatal("an owner ruling decided by the chief of staff was encoded")
+		t.Fatal("an owner ruling decided by the manager was encoded")
 	}
 
 	decisions := manager(1, one, shed.ManagerDecision{Objection: "a-r1-1", Decision: shed.Dismiss, Note: "Answered.", DecidedBy: trace.DecidedByJev, Judgment: "judgment_ab12"})

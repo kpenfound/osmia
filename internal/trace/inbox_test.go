@@ -207,7 +207,7 @@ func TestRefusedRelayChangesNothing(t *testing.T) {
 	ctx := context.Background()
 	i := newEscalatedInbox(t).ruled(t)
 	mason := coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Unit: "unit1", Thread: "mason1_thread", Turn: "build_mason1", Role: "mason"}
-	failure(t, second(i.r.RelayRuling(ctx, "mason1", mason, "1", "Resume.", ScopeLocal, i.relayedAt())), "only a chief-of-staff turn may choose what happens to a question")
+	failure(t, second(i.r.RelayRuling(ctx, "mason1", mason, "1", "Resume.", ScopeLocal, i.relayedAt())), "only a manager turn may choose what happens to a question")
 	for reason, call := range map[string]func() error{
 		"text is required: the owner's ruling as the askers should read it": func() error {
 			return second(i.r.RelayRuling(ctx, "chief", i.manager, "1", " ", ScopeLocal, i.relayedAt()))

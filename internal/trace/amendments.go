@@ -156,19 +156,19 @@ func touchedCitations(spec ProjectSpec, workgroup config.WorkgroupID, stream con
 func (r *Repository) FileAmendment(ctx context.Context, agent string, scope coreadapter.Scope, req AmendmentRequest, at time.Time) (AmendmentOutcome, error) {
 	project := r
 	if scope.Role != "mason" && scope.Role != "reviewer" && scope.Role != Manager {
-		return AmendmentOutcome{}, fmt.Errorf("only masons, reviewers and the chief of staff may file amendments")
+		return AmendmentOutcome{}, fmt.Errorf("only masons, reviewers and the manager may file amendments")
 	}
 	host := config.WorkstreamID(scope.Workstream)
 	if scope.Role != Manager {
 		if req.QuestionID != "" {
-			return AmendmentOutcome{}, refused("only the chief of staff may route a question")
+			return AmendmentOutcome{}, refused("only the manager may route a question")
 		}
 		_, _, touched, err := contractTouch(project, host, req.Citations)
 		if err != nil {
 			return AmendmentOutcome{}, err
 		}
 		if len(touched) > 0 {
-			return AmendmentOutcome{}, refused("%s names a contract section, read-only inside a workstream; ask the chief of staff to raise it as a project-level amendment", strings.Join(touched, ", "))
+			return AmendmentOutcome{}, refused("%s names a contract section, read-only inside a workstream; ask the manager to raise it as a project-level amendment", strings.Join(touched, ", "))
 		}
 	}
 
@@ -205,7 +205,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 			return AmendmentOutcome{}, err
 		}
 		if !slices.Contains(members, req.Workstream) {
-			return AmendmentOutcome{}, refused("workstream %s does not share this chief of staff", req.Workstream)
+			return AmendmentOutcome{}, refused("workstream %s does not share this manager", req.Workstream)
 		}
 		target, turn, err = r.managerTurnOn(ctx, agent, scope, req.Workstream, at)
 		if err != nil {
@@ -322,7 +322,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 		var txs []Transaction
 		if req.QuestionID != "" {
 			h := Header{Version: Version, Project: target.project, Workstream: member, At: at, Actor: Actor{Kind: "agent", ID: agent}, Cause: turn.Request.ID, Depth: turn.Request.Depth + 1}
-			txs = append(txs, questionTransition(v, h, req.QuestionID, QuestionOpen, QuestionRouted, fmt.Sprintf("The chief of staff routed question %s to project-level amendment %s of workgroup %s", req.QuestionID, filed.ID, workgroup)))
+			txs = append(txs, questionTransition(v, h, req.QuestionID, QuestionOpen, QuestionRouted, fmt.Sprintf("The manager routed question %s to project-level amendment %s of workgroup %s", req.QuestionID, filed.ID, workgroup)))
 		}
 		if from != "" {
 			subject := UnitSubject(unit)
@@ -360,7 +360,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 	}
 	var txs []Transaction
 	if req.QuestionID != "" {
-		q := questionTransition(v, h, req.QuestionID, QuestionOpen, QuestionRouted, fmt.Sprintf("The chief of staff routed question %s to amendment %s", req.QuestionID, id))
+		q := questionTransition(v, h, req.QuestionID, QuestionOpen, QuestionRouted, fmt.Sprintf("The manager routed question %s to amendment %s", req.QuestionID, id))
 		txs = append(txs, q)
 	}
 	transitionID := "amendment_" + id + "_filed"
@@ -400,7 +400,7 @@ func (r *Repository) OwnerTurn(agent string, scope coreadapter.Scope) (TurnReque
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if scope.Role != Manager {
-		return TurnRequest{}, false, fmt.Errorf("only a chief-of-staff turn answers the owner")
+		return TurnRequest{}, false, fmt.Errorf("only a manager turn answers the owner")
 	}
 	_, q, err := r.turnScope(agent, scope, true)
 	if err != nil {

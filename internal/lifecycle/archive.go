@@ -62,7 +62,7 @@ func (s *Controller) archive(raw string, req archiveRequest) (ArchiveResponse, *
 		if session, err := isSession(repository, stream); err != nil {
 			return ArchiveResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		} else if session {
-			return ArchiveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is a session; the chief of staff does not archive sessions", stream)}
+			return ArchiveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is a session; the manager does not archive sessions", stream)}
 		}
 		evidence, err := ReadMemberEvidence(repository, stream)
 		if err != nil {

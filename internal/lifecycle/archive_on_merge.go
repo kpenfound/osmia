@@ -77,5 +77,5 @@ func (m *MergeArchiver) logRefusal(stream config.WorkstreamID, reason string) {
 		return
 	}
 	m.refused[stream] = reason
-	m.S.Log().Info(fmt.Sprintf("the chief of staff did not archive workstream %s of project %s yet: %s", stream, m.Repository.Project(), reason), "component", "archive_on_merge", "project", string(m.Repository.Project()), "workstream", string(stream), "reason", reason)
+	m.S.Log().Info(fmt.Sprintf("the manager did not archive workstream %s of project %s yet: %s", stream, m.Repository.Project(), reason), "component", "archive_on_merge", "project", string(m.Repository.Project()), "workstream", string(stream), "reason", reason)
 }

@@ -474,7 +474,7 @@ func TestTheManagerConcludesAClimbAndItsProgressIsInTheManagersStatus(t *testing
 	}
 	notices := outboxBodies(t, repo, trace.NoticeKind)
 	if !slices.ContainsFunc(notices, func(b string) bool {
-		return strings.Contains(b, "concluded now by the chief of staff") && strings.Contains(b, "the log shows no more ideas")
+		return strings.Contains(b, "concluded now by the manager") && strings.Contains(b, "the log shows no more ideas")
 	}) {
 		t.Fatalf("notices %v", notices)
 	}

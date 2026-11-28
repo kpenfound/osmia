@@ -109,7 +109,7 @@ func TestManagerGrantNamesEveryManagerTool(t *testing.T) {
 	for _, tool := range tools {
 		names = append(names, tool.Name)
 		if !slices.Contains(managerGrant.Tools, tool.Name) {
-			t.Errorf("chief-of-staff tool %s is not in the chief's grant", tool.Name)
+			t.Errorf("manager tool %s is not in the chief's grant", tool.Name)
 		}
 		if tool.Name == ProjectContextTool && tool.Effect != coreadapter.ToolRead {
 			t.Errorf("project context effect %v, want read", tool.Effect)
@@ -153,7 +153,7 @@ func TestManagerGrantNamesEveryManagerTool(t *testing.T) {
 	}
 	for _, name := range []string{moveUnitTool, handBackDriftTool, resolveContestedTool, ProjectContextTool} {
 		if !slices.Contains(names, name) {
-			t.Errorf("a chief-of-staff turn is not given %s: %v", name, names)
+			t.Errorf("a manager turn is not given %s: %v", name, names)
 		}
 	}
 }

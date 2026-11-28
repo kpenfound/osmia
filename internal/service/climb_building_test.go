@@ -581,7 +581,7 @@ func TestACalibrationThatFindsTheMetricBrokenOrNoisyHoldsTheClimb(t *testing.T) 
 				}
 			}
 			if held == "" {
-				t.Fatalf("the chief of staff was not told %q: %v", tc.notice, notices)
+				t.Fatalf("the manager was not told %q: %v", tc.notice, notices)
 			}
 			if _, open := c.card(t); open {
 				t.Fatal("a held climb opened the approval card")

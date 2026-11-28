@@ -199,14 +199,14 @@ func (f *TurnScenario) ManagerRecordsAnswer(t *testing.T, repository *trace.Repo
 	tools = jevfixture.AutoDecide(repository, stream, tools)
 	i := slices.IndexFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == questions.AnswerTool })
 	if i < 0 {
-		t.Fatal("the chief of staff has no answer tool")
+		t.Fatal("the manager has no answer tool")
 	}
 	input, err := json.Marshal(map[string]any{"question": id, "text": text, "citations": []string{cite}})
 	fixturekit.Must(t, err)
 	out, err := tools[i].Handle(ctx, input)
 	fixturekit.Must(t, err)
 	if !strings.Contains(string(out), `"recorded":true`) {
-		t.Fatalf("the chief of staff's answer to question %s: %s", id, out)
+		t.Fatalf("the manager's answer to question %s: %s", id, out)
 	}
 	f.CompleteClaimedTurn(t, repository, stream, trace.Manager, q, &coreadapter.Outcome{Status: "done", Report: "Answered question " + id})
 }

@@ -38,7 +38,7 @@ func (r *Repository) NotifyTool(scope coreadapter.Scope, now func() time.Time) c
 			return nil, errors.New("notice requires UTF-8 text of at most 16384 bytes")
 		}
 		if scope.Role != Manager {
-			return nil, errors.New("only the chief of staff can publish notices")
+			return nil, errors.New("only the manager can publish notices")
 		}
 		workstream, err := r.scoped(config.WorkstreamID(scope.Workstream))
 		if err != nil {

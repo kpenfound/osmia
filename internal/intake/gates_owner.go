@@ -17,7 +17,7 @@ func (s *Controller) charterGate(repository *trace.Repository, stream config.Wor
 	}
 	var options []jev.DecisionOption
 	if rule := strings.TrimSpace(p.Proposal.Rule); rule != "" {
-		options = append(options, jev.DecisionOption{Name: trace.CharterRatify, Description: "Ratify the rule as the chief of staff wrote it: it is appended to the project's charter. Rule: " + limitText(rule, maxGateText)})
+		options = append(options, jev.DecisionOption{Name: trace.CharterRatify, Description: "Ratify the rule as the manager wrote it: it is appended to the project's charter. Rule: " + limitText(rule, maxGateText)})
 	}
 	options = append(options, jev.DecisionOption{Name: trace.CharterDecline, Description: "Decline the rule: the charter is unchanged and the ruling stays a one-off answer."})
 	project := repository.Project()
@@ -25,7 +25,7 @@ func (s *Controller) charterGate(repository *trace.Repository, stream config.Wor
 		Label: fmt.Sprintf("the charter proposal of question %s of workstream %s", question, stream), Cause: p.Proposed.ID, Reached: p.Proposed.At, Options: options}
 	g.State = func(ctx context.Context) (string, []jev.Source, error) {
 		var b strings.Builder
-		GateSection(&b, "Decision", fmt.Sprintf("The chief of staff proposed a standing charter rule from the owner's ruling on question %s of workstream %s. Choose whether the owner ratifies it as written or declines it. Changing the rule's words is the owner's and is not offered here.", question, stream), 0)
+		GateSection(&b, "Decision", fmt.Sprintf("The manager proposed a standing charter rule from the owner's ruling on question %s of workstream %s. Choose whether the owner ratifies it as written or declines it. Changing the rule's words is the owner's and is not offered here.", question, stream), 0)
 		GateSection(&b, "Proposed rule", p.Proposal.Rule, 0)
 		if p.Proposal.Amends != "" {
 			GateSection(&b, "Amends", p.Proposal.Amends, 0)

@@ -55,7 +55,7 @@ func TestAutoArchiveSoloWorkstreamAndItsConversationUntilCleanup(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("the chief of staff did not archive the merged workstream")
+			t.Fatal("the manager did not archive the merged workstream")
 		}
 		changes()
 	}

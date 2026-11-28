@@ -180,7 +180,7 @@ func TestFinalChecksWaitForTheLoadStatusAndTheCloudRunBeforeSettling(t *testing.
 		t.Fatalf("the check result %+v", run)
 	}
 	if got := j.manager.heardOf("posted no `load` status"); got != 1 {
-		t.Fatalf("the chief of staff heard that load never ran %d times", got)
+		t.Fatalf("the manager heard that load never ran %d times", got)
 	}
 }
 
@@ -269,7 +269,7 @@ func TestManagerTriagesAFinalReviewFindingWithoutTheOwner(t *testing.T) {
 		t.Fatalf("report %+v", report)
 	}
 
-	intakefixture.Eventually(t, "the chief of staff never triaged the finding", func() bool {
+	intakefixture.Eventually(t, "the manager never triaged the finding", func() bool {
 		all, _, err := followup.ReadTriage(j.live(), stream)
 		fixturekit.Must(t, err)
 		return len(all) == 1
@@ -280,7 +280,7 @@ func TestManagerTriagesAFinalReviewFindingWithoutTheOwner(t *testing.T) {
 		t.Fatalf("triage %+v (calls %q)", all, j.manager.calls(1))
 	}
 	if calls := j.manager.calls(1); len(calls) != 2 || !strings.Contains(calls[1], `"recorded":true`) {
-		t.Fatalf("the chief of staff's triage calls %q", calls)
+		t.Fatalf("the manager's triage calls %q", calls)
 	}
 	j.requireNoProblems(t)
 }
@@ -299,7 +299,7 @@ func TestMovedFeatureBranchIsPushedToTheSameDraftAsANewReview(t *testing.T) {
 	pr := j.requireDraftPublished(t, first)
 	j.settlePassed(t, first)
 	j.awaitReport(t, 1)
-	intakefixture.Eventually(t, "the chief of staff never triaged the finding", func() bool {
+	intakefixture.Eventually(t, "the manager never triaged the finding", func() bool {
 		all, _, err := followup.ReadTriage(j.live(), stream)
 		fixturekit.Must(t, err)
 		return len(all) == 1

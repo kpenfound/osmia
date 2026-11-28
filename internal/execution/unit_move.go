@@ -175,7 +175,7 @@ func (s *Controller) moveUnit(ctx context.Context, repo *trace.Repository, strea
 	case err != nil:
 		return UnitMoveResponse{}, &APIError{Code: Internal, Message: "cannot record the move"}
 	case res.Committed && res.Target == TargetWait:
-		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s stays %s and was not moved to %s: by default the chief of staff does not move a unit out of a contest it raised or ruled on itself, and Jev judged that the evidence does not support leaving it. The proposal, the earlier moves and rulings, and Jev's judgment are in the trace", unit, state.Value, req.To)}
+		return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s stays %s and was not moved to %s: by default the manager does not move a unit out of a contest it raised or ruled on itself, and Jev judged that the evidence does not support leaving it. The proposal, the earlier moves and rulings, and Jev's judgment are in the trace", unit, state.Value, req.To)}
 	case res.Committed:
 		move := records.move
 		if res.Target != req.To {

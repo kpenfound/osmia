@@ -586,7 +586,7 @@ func (s *Controller) EdgeUpdatePass(ctx context.Context, repo *trace.Repository,
 			return fmt.Errorf("merged upstream %s has no recorded merge commit", edge.Reference)
 		}
 	}
-	unit := followup.Unit{Criterion: criteria[0], Gap: "Update dependency references to the merged upstream commits: " + resolved, Unit: plan.Unit{ID: id, Title: "Update merged dependencies", Task: "Update dependency references to the merged upstream commits: " + resolved + ". Repair within the ratified slice; ask the chief of staff only if the repair contradicts or extends the design.", Criteria: criteria, Footprint: footprint, DependsOn: []string{}, Acceptance: []string{"Dependency references use the merged upstream commits", "Checks and the ratified slice still hold"}}}
+	unit := followup.Unit{Criterion: criteria[0], Gap: "Update dependency references to the merged upstream commits: " + resolved, Unit: plan.Unit{ID: id, Title: "Update merged dependencies", Task: "Update dependency references to the merged upstream commits: " + resolved + ". Repair within the ratified slice; ask the manager only if the repair contradicts or extends the design.", Criteria: criteria, Footprint: footprint, DependsOn: []string{}, Acceptance: []string{"Dependency references use the merged upstream commits", "Checks and the ratified slice still hold"}}}
 	content, err := json.Marshal([]followup.Unit{unit})
 	if err != nil {
 		return err

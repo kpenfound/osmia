@@ -145,7 +145,7 @@ func TestCrossRepoWorkgroupSharesOneManagerThreadAcrossMembersAndARestart(t *tes
 		}
 	}
 	if _, err := Get[Agent](wg, host, Manager, 1); err != nil {
-		t.Fatalf("shared chief-of-staff identity: %v", err)
+		t.Fatalf("shared manager identity: %v", err)
 	}
 
 	workerScope1 := claimCrossRepoTurn(t, r1, crossProject1, crossMember1, "mason1", "mason", "", "build1")

@@ -610,10 +610,10 @@ func TestEnsureManagersSkipsASessionAlongsideAnOrdinaryWorkstream(t *testing.T) 
 	before := captureSessionSnapshot(t, repo, session)
 	fixturekit.Must(t, service.EnsureManagers(ctx, repo, fixturekit.DemoStart.Add(time.Hour)))
 	if _, err := repo.ManagerThread(fixturekit.Stream); err != nil {
-		t.Fatalf("the ordinary workstream's chief-of-staff thread: %v", err)
+		t.Fatalf("the ordinary workstream's manager thread: %v", err)
 	}
 	if _, err := repo.ManagerThread(session); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the session got a chief-of-staff thread: %v", err)
+		t.Fatalf("the session got a manager thread: %v", err)
 	}
 	assertSessionUnchanged(t, repo, session, before)
 }

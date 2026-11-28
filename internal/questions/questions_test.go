@@ -347,6 +347,31 @@ func TestResolveCitations(t *testing.T) {
 	}
 }
 
+func TestToolDescriptionsAndGuidanceSayManagerNotChief(t *testing.T) {
+	f := setup(t)
+	var texts []string
+	for _, role := range []string{trace.Manager, "mason", "reviewer", "architect", "committee"} {
+		list, err := questions.Tools(f.repo, role+"1", f.turn(t, role+"1", role, "turn_"+role), time.Now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tool := range list {
+			texts = append(texts, tool.Name+": "+tool.Description)
+		}
+	}
+	texts = append(texts, questions.Guidance)
+	var asked bool
+	for _, text := range texts {
+		if strings.Contains(strings.ToLower(text), "chief") {
+			t.Errorf("tool text names the role chief: %.300s", text)
+		}
+		asked = asked || strings.HasPrefix(text, "ask: Ask the manager a question")
+	}
+	if !asked {
+		t.Fatal("the ask tool does not tell its caller to ask the manager")
+	}
+}
+
 func TestToolsFollowTheRole(t *testing.T) {
 	f := setup(t)
 	names := func(scope coreadapter.Scope, agent string) []string {
@@ -361,7 +386,7 @@ func TestToolsFollowTheRole(t *testing.T) {
 		return out
 	}
 	if got := names(f.turn(t, "chief", trace.Manager, "chief1"), "chief"); !reflect.DeepEqual(got, questions.ManagerTools) || strings.Contains(strings.Join(got, " "), "ask") {
-		t.Fatalf("chief of staff tools: %v", got)
+		t.Fatalf("manager tools: %v", got)
 	}
 	for _, role := range []string{"mason", "reviewer", "architect", "committee", "foreman"} {
 		want := []string{"ask"}
@@ -517,7 +542,7 @@ func TestDelivererQueuesTheAnswerAsTheAskersNextTurn(t *testing.T) {
 		t.Fatalf("answer turns: %+v %v", th.Turns, err)
 	}
 	req := th.Turns[1].Request
-	wantPrompt := "Answer to your question 1.\n\n<<< osmia:question | asker (copied by Osmia) | bytes=22 >>>\n| Where does state live?\n<<< /osmia:question >>>\n<<< osmia:answer | chief of staff | bytes=24 >>>\n| In files under the root.\n<<< /osmia:answer >>>\n<<< osmia:citations | chief of staff | bytes=16 >>>\n| charter#2\n| spec#1\n<<< /osmia:citations >>>\n"
+	wantPrompt := "Answer to your question 1.\n\n<<< osmia:question | asker (copied by Osmia) | bytes=22 >>>\n| Where does state live?\n<<< /osmia:question >>>\n<<< osmia:answer | manager | bytes=24 >>>\n| In files under the root.\n<<< /osmia:answer >>>\n<<< osmia:citations | manager | bytes=16 >>>\n| charter#2\n| spec#1\n<<< /osmia:citations >>>\n"
 	if req.TurnID != "answer_1" || req.TurnID != questions.TurnID("1") || req.ID != "request_answer_1" || req.AgentID != "mason1" || req.ThreadID != "mason1_thread" || req.Unit != "resume" ||
 		req.Prompt != wantPrompt || req.SystemPrompt != "You are the mason." || req.Actor != questions.Actor || req.Cause != "question_1_answered" ||
 		req.Profile != (coreadapter.Profile{Name: "strong", Backend: "fake", Model: "for-mason"}) || !req.At.Equal(start.Add(2*time.Hour)) {
@@ -739,7 +764,7 @@ func TestRelayRulingDeliversToEachAsker(t *testing.T) {
 	for agent, question := range map[string]string{"mason1": "Where does state live?", "reviewer1": "Is the log format fixed?"} {
 		got := turns(agent)
 		id := ids[agent]
-		want := "The owner ruled on your question " + id + ". The chief of staff relays the ruling.\n\n<<< osmia:question | asker (copied by Osmia) | bytes=" + fmt.Sprint(len(question)) + " >>>\n| " + question + "\n<<< /osmia:question >>>\n<<< osmia:owner_response | owner (copied by Osmia) | bytes=30 >>>\n| Both are part of the contract.\n<<< /osmia:owner_response >>>\n<<< osmia:returned_answer | chief of staff relay | bytes=40 >>>\n| State and the log format are both fixed.\n<<< /osmia:returned_answer >>>\n"
+		want := "The owner ruled on your question " + id + ". The manager relays the ruling.\n\n<<< osmia:question | asker (copied by Osmia) | bytes=" + fmt.Sprint(len(question)) + " >>>\n| " + question + "\n<<< /osmia:question >>>\n<<< osmia:owner_response | owner (copied by Osmia) | bytes=30 >>>\n| Both are part of the contract.\n<<< /osmia:owner_response >>>\n<<< osmia:returned_answer | manager relay | bytes=40 >>>\n| State and the log format are both fixed.\n<<< /osmia:returned_answer >>>\n"
 		if len(got) != 2 || got[1].Request.TurnID != "answer_"+id || got[1].Request.ThreadID != agent+"_thread" || got[1].Request.Prompt != want || got[1].Request.Cause != "question_"+id+"_answered" {
 			t.Fatalf("%s turns: %+v", agent, got)
 		}
@@ -999,7 +1024,7 @@ func TestOnlyADriftMasonGetsDriftTools(t *testing.T) {
 	}{
 		"a unit reviewer":    {"reviewer1", f.turn(t, "reviewer1", "reviewer", "review1")},
 		"a unit mason":       {"mason1", f.turn(t, "mason1", "mason", "build1")},
-		"the chief of staff": {"chief", f.turn(t, "chief", trace.Manager, "chief1")},
+		"the manager": {"chief", f.turn(t, "chief", trace.Manager, "chief1")},
 	} {
 		if _, err := questions.DriftTools(f.repo, scope.agent, scope.scope, time.Now, driftMove); err == nil {
 			t.Fatalf("%s got drift tools", name)

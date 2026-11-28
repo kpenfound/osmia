@@ -33,7 +33,7 @@ func TestBrowserDeliveryCardIsHeldUntilTheBriefThenShowsIt(t *testing.T) {
 	if entries := j.entries(t, stream); len(entries) != 0 {
 		t.Fatalf("the delivery entry is listed while the brief is pending: %+v", entries)
 	}
-	p.Await("no delivery card while the chief of staff writes the brief", `document.querySelector(`+browsertest.Quote(cardSelector)+`) === null`)
+	p.Await("no delivery card while the manager writes the brief", `document.querySelector(`+browsertest.Quote(cardSelector)+`) === null`)
 
 	j.manager.release()
 	p.Await("the delivery card", `document.querySelector(`+browsertest.Quote(cardSelector)+`) !== null`)

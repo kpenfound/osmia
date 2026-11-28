@@ -182,7 +182,7 @@ func TestPublicationGivenUpOnAnUnreadableRemoteSaysItsOutcomeCouldNotBeDetermine
 		t.Fatalf("notices of the unknown outcome: %q", got)
 	}
 	if got := b.notices(t, "not marked ready"); len(got) != 0 {
-		t.Fatalf("the chief of staff was told the pull request was not marked ready: %q", got)
+		t.Fatalf("the manager was told the pull request was not marked ready: %q", got)
 	}
 	if b.d.pushCount(t) != pushes || b.d.pulls.Readies != readies || b.d.pulls.Updates != updates || b.d.pulls.Creates != creates {
 		t.Fatalf("the give-up changed the remote: %d pushes (was %d), %d ready calls (was %d), %d updates (was %d), %d creates (was %d)", b.d.pushCount(t), pushes, b.d.pulls.Readies, readies, b.d.pulls.Updates, updates, b.d.pulls.Creates, creates)

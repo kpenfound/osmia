@@ -184,7 +184,7 @@ func ask(name, instructions string) router.Question {
 var triggerSpecs = map[string]wsTrigger{
 	TriggerDraftExhausted: {
 		describe: map[string]string{
-			TargetExhausted: "Stop drafting: none of the architect's drafts was accepted, so the workstream stays handed in and the chief of staff is told.",
+			TargetExhausted: "Stop drafting: none of the architect's drafts was accepted, so the workstream stays handed in and the manager is told.",
 		},
 	},
 	TriggerShedConcluded: {
@@ -208,7 +208,7 @@ var triggerSpecs = map[string]wsTrigger{
 		corroborate: map[string][]router.Condition{TargetAssembled: {{Question: "work_lost", AtLeast: router.LevelModest}, {Question: "stage_repeatable", AtLeast: router.LevelModest}}},
 	},
 	TriggerSealFailed: {
-		describe:  map[string]string{TargetFailed: "Record the failed sealing and tell the chief of staff; the owner ratifies again once it is put right."},
+		describe:  map[string]string{TargetFailed: "Record the failed sealing and tell the manager; the owner ratifies again once it is put right."},
 		questions: []router.Question{ask("transient", "The sealing failure looks like a one-off of infrastructure.")},
 	},
 	TriggerFinalClean: {
@@ -228,7 +228,7 @@ var triggerSpecs = map[string]wsTrigger{
 	},
 	TriggerFinalFailed: {
 		describe: map[string]string{
-			TargetFailed:         "Record the failed final review and tell the chief of staff; a new review runs once the branch or its governing documents change.",
+			TargetFailed:         "Record the failed final review and tell the manager; a new review runs once the branch or its governing documents change.",
 			TargetFreshReview:    "Ask for a fresh final review of the branch: the failure looks transient.",
 			TargetReopenBuilding: "Reopen the workstream for repair units: the failure comes from the branch.",
 		},

@@ -71,7 +71,7 @@ func TestMemberQuestionParksTheRoundUntilTheAnswerArrives(t *testing.T) {
 	})
 	other := f.Member(1, 2, 1, intakefixture.Silent)
 	answering := f.Answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-		for _, want := range []string{"The owner ruled on your question 1. The chief of staff relays the ruling.", "| " + intakefixture.AskedQuestion, "<<< osmia:owner_response", "| " + intakefixture.RelayedRuling} {
+		for _, want := range []string{"The owner ruled on your question 1. The manager relays the ruling.", "| " + intakefixture.AskedQuestion, "<<< osmia:owner_response", "| " + intakefixture.RelayedRuling} {
 			if !strings.Contains(req.Prompt, want) {
 				p.Report("answer prompt lacks %q:\n%s", want, req.Prompt)
 			}
@@ -385,7 +385,7 @@ func TestAnswerQueuedBehindAReservedTurnRuns(t *testing.T) {
 		t.Fatal("the member never asked")
 	}
 
-	intakefixture.Eventually(t, "the chief of staff's turns were never claimed", func() bool {
+	intakefixture.Eventually(t, "the manager's turns were never claimed", func() bool {
 		th, err := f.Repository().Thread(stream, trace.Manager)
 		fixturekit.Must(t, err)
 		return !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Claim == nil && q.CompletedAt.IsZero() })
