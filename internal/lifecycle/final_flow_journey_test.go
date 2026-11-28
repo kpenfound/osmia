@@ -274,6 +274,9 @@ func TestManagerTriagesAFinalReviewFindingWithoutTheOwner(t *testing.T) {
 		fixturekit.Must(t, err)
 		return len(all) == 1
 	})
+	intakefixture.Eventually(t, "the manager never received the result of its triage call", func() bool {
+		return len(j.manager.calls(1)) >= 2
+	})
 	all, _, err := followup.ReadTriage(j.live(), stream)
 	fixturekit.Must(t, err)
 	if all[0].Finding != "finding-1" || all[0].Outcome != followup.TriageCode || all[0].ByJev() {
