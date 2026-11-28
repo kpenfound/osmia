@@ -101,7 +101,7 @@ func TestScheduledTurnHoldsOneSlotSpanFromDispatchToWhereThePoolStopsCounting(t 
 	f, repo := setup(t, "mason1")
 	defer repo.Close()
 	f.thread(t, repo, stream, "reviewer1", "reviewer")
-	f.thread(t, repo, stream, "chief", trace.ChiefOfStaff)
+	f.thread(t, repo, stream, "chief", trace.Manager)
 	f.queue(t, repo, "mason1", "one")
 	f.queue(t, repo, "reviewer1", "one")
 	f.queue(t, repo, "chief", "one")

@@ -280,7 +280,7 @@ func (s *Controller) briefWaiting(ctx context.Context, repository *trace.Reposit
 		return false, nil
 	}
 	transition, _ := FinalReviewIDs(k)
-	id := trace.EventID(transition+"-"+FinalReviewed, "chief")
+	id := trace.EventID(transition+"-"+FinalReviewed, trace.ManagerKey)
 	entries, err := repository.Outbox(stream)
 	if err != nil {
 		return false, err

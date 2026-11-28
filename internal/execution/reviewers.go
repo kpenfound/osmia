@@ -908,7 +908,7 @@ func (r *reviewers) RefreshReview(ctx context.Context, stream config.WorkstreamI
 		why = fmt.Sprintf("the service refused %d reviews of unit %s in a row, so the unit is contested instead of reviewed again; the latest was refused for this reason: %s", refreshes+1, unit, reason)
 		notice = trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, why))
 	} else {
-		notice = trace.Notice(id, "chief", "Unit "+unit+" stays reviewing: "+reason)
+		notice = trace.Notice(id, trace.ManagerKey, "Unit "+unit+" stays reviewing: "+reason)
 	}
 	_, err = r.s.raise(ctx, true, UnitExitInput{
 		Repo: r.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerReviewRefused, Cause: id,

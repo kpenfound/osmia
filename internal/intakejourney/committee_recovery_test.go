@@ -66,16 +66,16 @@ func plantEndedPlanRoundAnswer(t *testing.T, f *journey.ShedFixture, stream conf
 	fixturekit.Must(t, err)
 	completeClaimed(t, repo, stream, member, claimed, at)
 
-	_, err = repo.EnsureChiefOfStaff(ctx, stream, at, intake.ServiceActor)
+	_, err = repo.EnsureManager(ctx, stream, at, intake.ServiceActor)
 	fixturekit.Must(t, err)
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_events_answer", Revision: 1, Project: f.Project, Workstream: stream, At: at, Actor: intake.ServiceActor, Cause: "fixture"},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events_answer", Profile: committeeProfile, SystemPrompt: "chief", Prompt: "Answer question " + question.ID})
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "events_answer", Profile: committeeProfile, SystemPrompt: "manager", Prompt: "Answer question " + question.ID})
 	fixturekit.Must(t, err)
-	chief, err := repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token-events-answer", filepath.Join(t.TempDir(), "chief"), at)
+	manager, err := repo.ClaimTurn(ctx, stream, trace.Manager, "token-events-answer", filepath.Join(t.TempDir(), "manager"), at)
 	fixturekit.Must(t, err)
-	_, err = repo.AnswerQuestion(ctx, trace.ChiefOfStaff, coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: chief.Request.TurnID}, question.ID, "Load it on the evaluator steps.", []string{"spec#1"}, at)
+	_, err = repo.AnswerQuestion(ctx, trace.Manager, coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: manager.Request.TurnID}, question.ID, "Load it on the evaluator steps.", []string{"spec#1"}, at)
 	fixturekit.Must(t, err)
-	completeClaimed(t, repo, stream, trace.ChiefOfStaff, chief, at)
+	completeClaimed(t, repo, stream, trace.Manager, manager, at)
 	asked, err := repo.Questions(stream)
 	fixturekit.Must(t, err)
 	i := slices.IndexFunc(asked, func(q trace.QuestionState) bool { return q.Asked.ID == question.ID })
@@ -178,7 +178,7 @@ func TestTheOwnerWithdrawsAnAmendmentWhoseDebateCannotFinish(t *testing.T) {
 	}
 }
 
-func TestTheChiefOfStaffWithdrawsAnAmendmentWhoseDebateCannotFinish(t *testing.T) {
+func TestTheManagerWithdrawsAnAmendmentWhoseDebateCannotFinish(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, stream, _ := askingAmendmentRound(t)
@@ -187,16 +187,16 @@ func TestTheChiefOfStaffWithdrawsAnAmendmentWhoseDebateCannotFinish(t *testing.T
 	fixturekit.Must(t, err)
 	defer func() { _ = repo.Close() }()
 	f.S.SetSole(&journey.ActiveProject{Repository: repo})
-	_, err = repo.EnsureChiefOfStaff(ctx, stream, fixturekit.DemoStart, intake.ServiceActor)
+	_, err = repo.EnsureManager(ctx, stream, fixturekit.DemoStart, intake.ServiceActor)
 	fixturekit.Must(t, err)
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_events_withdraw", Revision: 1, Project: f.Project, Workstream: stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "fixture"},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events_withdraw", Profile: committeeProfile, SystemPrompt: "chief", Prompt: "Amendment 1 is stalled in debate."})
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "events_withdraw", Profile: committeeProfile, SystemPrompt: "manager", Prompt: "Amendment 1 is stalled in debate."})
 	fixturekit.Must(t, err)
-	claimed, err := repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token-withdraw", filepath.Join(t.TempDir(), "withdraw"), fixturekit.DemoStart)
+	claimed, err := repo.ClaimTurn(ctx, stream, trace.Manager, "token-withdraw", filepath.Join(t.TempDir(), "withdraw"), fixturekit.DemoStart)
 	fixturekit.Must(t, err)
 	controls := &journey.RuntimeControls{}
 	controls.Service.Store(f.S)
-	scope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: claimed.Request.TurnID}
+	scope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: claimed.Request.TurnID}
 	tool := controls.DecideAmendment(repo, scope)
 	if out, err := tool.Handle(ctx, json.RawMessage(`{"amendment":"1","decision":"withdraw"}`)); err != nil || !strings.Contains(string(out), `"recorded":false`) || !strings.Contains(string(out), "needs a note") {
 		t.Fatalf("withdrawal without a reason: %s %v", out, err)
@@ -215,7 +215,7 @@ func TestTheChiefOfStaffWithdrawsAnAmendmentWhoseDebateCannotFinish(t *testing.T
 	docs, err := trace.Read[trace.Document](repo, stream)
 	fixturekit.Must(t, err)
 	i := slices.IndexFunc(docs, func(d trace.Document) bool { return d.ID == intake.AmendmentDecisionID("1") && d.Revision == 2 })
-	if i < 0 || docs[i].Actor.ID != trace.ChiefOfStaff || !strings.Contains(docs[i].Content, `"decision": "withdraw"`) {
+	if i < 0 || docs[i].Actor.ID != trace.Manager || !strings.Contains(docs[i].Content, `"decision": "withdraw"`) {
 		t.Fatalf("decision record %+v", docs)
 	}
 }

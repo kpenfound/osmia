@@ -60,7 +60,7 @@ func TestChiefOfStaffKicksAReadyUnit(t *testing.T) {
 		t.Fatalf("the kick: %s", out)
 	}
 	moved := latestOf(t, m.Repo, m.Stream, trace.UnitSubject("dedupe"))
-	if moved.From != intake.UnitReady || moved.To != intake.UnitReady || moved.Actor != intake.ChiefActor || moved.DecidedBy != trace.DecidedByChief || moved.DefaultTo != intake.UnitReady || moved.Departed() {
+	if moved.From != intake.UnitReady || moved.To != intake.UnitReady || moved.Actor != intake.ChiefActor || moved.DecidedBy != trace.DecidedByManager || moved.DefaultTo != intake.UnitReady || moved.Departed() {
 		t.Fatalf("the kick's transition %+v", moved)
 	}
 	recs := proposalRecords(t, m)
@@ -93,7 +93,7 @@ func TestChiefOfStaffMovesAUnitOutOfAContestItRaisedOrRuled(t *testing.T) {
 			t.Fatalf("the move: %s", out)
 		}
 		moved := latestOf(t, m.Repo, m.Stream, trace.UnitSubject("resume"))
-		if moved.To != intake.UnitReviewing || moved.DecidedBy != trace.DecidedByChief || moved.Departed() || moved.Judgment != "" {
+		if moved.To != intake.UnitReviewing || moved.DecidedBy != trace.DecidedByManager || moved.Departed() || moved.Judgment != "" {
 			t.Fatalf("the move's transition %+v", moved)
 		}
 		if n := len(p.TransitionRequests()); n != 0 {
@@ -199,7 +199,7 @@ func TestChiefOfStaffMovesAPlannedUnitOnlyWhenItsDependenciesMerged(t *testing.T
 		t.Fatalf("holding a planned unit: %s", out)
 	}
 	moved := latestOf(t, repo, stream, trace.UnitSubject("dedupe"))
-	if moved.From != intake.UnitPlanned || moved.To != intake.UnitPlanned || moved.Actor != intake.ChiefActor || moved.DecidedBy != trace.DecidedByChief {
+	if moved.From != intake.UnitPlanned || moved.To != intake.UnitPlanned || moved.Actor != intake.ChiefActor || moved.DecidedBy != trace.DecidedByManager {
 		t.Fatalf("the transition %+v", moved)
 	}
 }

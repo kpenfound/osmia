@@ -127,7 +127,7 @@ func TestPrepareDesignWorkgroupFailureAndRetry(t *testing.T) {
 			if err != nil || revision != 1 || len(groups) != 1 || !reflect.DeepEqual(groups[0], g) || !reflect.DeepEqual(again, g) {
 				t.Fatalf("retry duplicated membership: %+v revision=%d err=%v", groups, revision, err)
 			}
-			if _, err := r.Thread(host, ChiefOfStaff); err != nil {
+			if _, err := r.Thread(host, Manager); err != nil {
 				t.Fatalf("retry did not reconcile the host: %v", err)
 			}
 		})

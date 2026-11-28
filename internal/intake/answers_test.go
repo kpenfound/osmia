@@ -36,7 +36,7 @@ func TestAnswersAreNotDeliveredToAbandonedWorkstreams(t *testing.T) {
 		fixturekit.Must(t, repo.CreateThread(ctx, identity))
 		_, err := repo.Ask(ctx, fixturekit.DemoAgent, fixturekit.ClaimTurn(t, repo, home, ws, fixturekit.DemoAgent, fixturekit.DemoThread, "build", clock.Now()), "Where does state live?", clock.Now())
 		fixturekit.Must(t, err)
-		_, err = repo.AnswerQuestion(ctx, trace.ChiefOfStaff, fixturekit.ClaimTurn(t, repo, home, ws, trace.ChiefOfStaff, trace.ChiefOfStaff, "events", clock.Now()), "1", "In files.", []string{"charter#1"}, clock.Now())
+		_, err = repo.AnswerQuestion(ctx, trace.Manager, fixturekit.ClaimTurn(t, repo, home, ws, trace.Manager, trace.Manager, "events", clock.Now()), "1", "In files.", []string{"charter#1"}, clock.Now())
 		fixturekit.Must(t, err)
 	}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: AbandonTransition, Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: AbandonTransition}
@@ -95,7 +95,7 @@ func TestAnswersAreNotDeliveredToMergedUnits(t *testing.T) {
 		scope := coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(ws), Unit: "resume", Thread: fixturekit.DemoThread, Turn: "build", Role: fixturekit.DemoRole}
 		_, err = repo.Ask(ctx, fixturekit.DemoAgent, scope, "Where does state live?", clock.Now())
 		fixturekit.Must(t, err)
-		_, err = repo.AnswerQuestion(ctx, trace.ChiefOfStaff, fixturekit.ClaimTurn(t, repo, home, ws, trace.ChiefOfStaff, trace.ChiefOfStaff, "events", clock.Now()), "1", "In files.", []string{"charter#1"}, clock.Now())
+		_, err = repo.AnswerQuestion(ctx, trace.Manager, fixturekit.ClaimTurn(t, repo, home, ws, trace.Manager, trace.Manager, "events", clock.Now()), "1", "In files.", []string{"charter#1"}, clock.Now())
 		fixturekit.Must(t, err)
 	}
 	recordQuestionUnitMerged(t, repo, fixturekit.Stream, "resume")

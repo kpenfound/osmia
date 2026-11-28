@@ -69,7 +69,7 @@ type ArchivePublication struct {
 
 // ArchiveActorChief is the Actor of an archive the chief of staff made when
 // the workstream's own pull request merged. An empty Actor is an owner archive.
-const ArchiveActorChief = "chief_of_staff"
+const ArchiveActorChief = trace.Manager
 
 // Archive records a delivered or abandoned workstream that was archived, by
 // the owner or by the chief of staff once its pull request merged.

@@ -92,7 +92,7 @@ var designNarrow = coreadapter.Capabilities{Tools: designOnlyTools, Web: true}
 var designerGrant = coreadapter.Capabilities{Tools: slices.Clone(designOnlyTools), Web: true}
 
 func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeControls, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
-	set, err := status.ToolHolding(r, trace.ChiefOfStaff, scope, now, controls.heldGates(r, config.WorkstreamID(scope.Workstream)))
+	set, err := status.ToolHolding(r, trace.Manager, scope, now, controls.heldGates(r, config.WorkstreamID(scope.Workstream)))
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeContro
 	if kindErr != nil {
 		return nil, kindErr
 	}
-	chief, err := questions.Tools(r, trace.ChiefOfStaff, scope, now)
+	chief, err := questions.Tools(r, trace.Manager, scope, now)
 	for i, t := range chief {
 		if t.Name == questions.RouteAmendmentTool {
 			chief[i] = controls.lifecycle().ReopenForRevision(r, scope, t)
@@ -180,7 +180,7 @@ func Enforce(opts Options, e Enforcement) Options {
 			Workspaces:         threadWorkspaces{units: units, drifts: drifts, sessions: sessionWorkspaces{cfg: cfg}},
 			Views:              isolation.Views{Directory: views},
 			PreserveMasonViews: true,
-			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, trace.Designer: designerGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, sessionRole: {WriteFiles: true, Execute: true, Web: true, Tools: []string{"show_image"}}},
+			Grants:             map[string]coreadapter.Capabilities{trace.Manager: chiefGrant, trace.Designer: designerGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, sessionRole: {WriteFiles: true, Execute: true, Web: true, Tools: []string{"show_image"}}},
 			Offered: func(_ context.Context, scope coreadapter.Scope) []string {
 				if verifyOffered(controls.currentConfig(r, cfg), scope) {
 					return []string{verifytool.ToolName}
@@ -227,7 +227,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					}
 					return designSelection(ctx, controls, r, root, project, stream, scope, settings)
 				}
-				if scope.Role == trace.ChiefOfStaff {
+				if scope.Role == trace.Manager {
 					stream, err := config.ParseWorkstreamID(scope.Workstream)
 					if err != nil {
 						return isolation.Selection{}, err
@@ -239,7 +239,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					if design {
 						return designSelection(ctx, controls, r, root, project, stream, scope, settings)
 					}
-					workspace := filepath.Join(root, "chief_of_staff", project, scope.Workstream)
+					workspace := filepath.Join(root, trace.Manager, project, scope.Workstream)
 					paths, err := StageChiefDocuments(r, stream, workspace)
 					if err != nil {
 						return isolation.Selection{}, err
@@ -292,7 +292,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				if scope.Role == trace.Designer {
 					return []coreadapter.Tool{controls.intake().Load().DraftBriefTool(r, scope, now), intake.DesignReadRepoTool(cfg, r, controls.intake(), scope), intake.DesignTitleTool(r, scope, now)}, nil
 				}
-				if scope.Role != trace.ChiefOfStaff {
+				if scope.Role != trace.Manager {
 					return nil, nil
 				}
 				tools, err := chiefTools(cfg, r, controls, scope, now)
@@ -305,7 +305,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				if scope.Role == sessionRole && scope.Project == project {
 					return []coreadapter.Tool{showImageTool(r, scope, view, now)}, nil
 				}
-				if scope.Role == trace.ChiefOfStaff {
+				if scope.Role == trace.Manager {
 					tools := []coreadapter.Tool{controls.preview(cfg, r, scope, view, now)}
 					if verifyOffered(controls.currentConfig(r, cfg), scope) {
 						tools = append(tools, controls.verify(cfg, r, scope, view, now))
@@ -318,7 +318,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				return nil, nil
 			},
 			Seed: func(ctx context.Context, scope coreadapter.Scope, view isolation.View) error {
-				if scope.Role == trace.ChiefOfStaff {
+				if scope.Role == trace.Manager {
 					if err := restorePreviewImages(ctx, cfg, controls, r, scope, view, now); err != nil {
 						return err
 					}

@@ -279,7 +279,7 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 	if err != nil {
 		return err
 	}
-	if err := r.BeginFreshChiefOfStaff(ctx, stream); err != nil {
+	if err := r.BeginFreshManager(ctx, stream); err != nil {
 		return err
 	}
 	if hasIntent {
@@ -329,7 +329,7 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 	}
 	fromDesign := handed.Source == "design:"+string(stream)
 	if len(selected.Members) == 1 && selected.Members[0].Workstream == stream {
-		if _, err := r.EnsureChiefOfStaff(ctx, stream, handed.At, OwnerActor); err != nil {
+		if _, err := r.EnsureManager(ctx, stream, handed.At, OwnerActor); err != nil {
 			return err
 		}
 		if fromDesign {
@@ -438,7 +438,7 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 		if err := m.Project.RecordCrossRepoWorkgroup(ctx, m.Workstream, g.ID, handed.At, OwnerActor, DesignStartTransition); err != nil {
 			return err
 		}
-		if err := m.Project.RetractChiefOfStaff(ctx, m.Workstream); err != nil {
+		if err := m.Project.RetractManager(ctx, m.Workstream); err != nil {
 			return err
 		}
 		if err := m.Project.RetractWorkgroup(ctx, m.Workstream, handed.At, OwnerActor, DesignStartTransition); err != nil {
@@ -448,10 +448,10 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 			return err
 		}
 	}
-	if _, err := wt.EnsureChiefOfStaff(ctx, stream, handed.At, OwnerActor); err != nil {
+	if _, err := wt.EnsureManager(ctx, stream, handed.At, OwnerActor); err != nil {
 		return err
 	}
-	if err := wt.BeginFreshChiefOfStaff(ctx, stream); err != nil {
+	if err := wt.BeginFreshManager(ctx, stream); err != nil {
 		return err
 	}
 	if err := s.Step("design-conversation-imported"); err != nil {

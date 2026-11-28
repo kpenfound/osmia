@@ -95,7 +95,7 @@ func (k *followUpKit) pending(t *testing.T) []followUp {
 
 func (k *followUpKit) followUpTurns(t *testing.T) []trace.QueuedTurn {
 	t.Helper()
-	th, err := k.repo.Thread(k.stream, trace.ChiefOfStaff)
+	th, err := k.repo.Thread(k.stream, trace.Manager)
 	fixturekit.Must(t, err)
 	var out []trace.QueuedTurn
 	for _, q := range th.Turns {
@@ -296,7 +296,7 @@ func followUpProfile() (coreadapter.Profile, error) {
 func (k *followUpKit) endFollowUpTurn(t *testing.T, turn string, cancelled bool) {
 	t.Helper()
 	ctx := context.Background()
-	q, err := k.repo.ClaimTurn(ctx, k.stream, trace.ChiefOfStaff, "token-"+turn, filepath.Join(t.TempDir(), "session"), k.at)
+	q, err := k.repo.ClaimTurn(ctx, k.stream, trace.Manager, "token-"+turn, filepath.Join(t.TempDir(), "session"), k.at)
 	fixturekit.Must(t, err)
 	if q.Request.TurnID != turn {
 		t.Fatalf("claimed turn %s, want %s", q.Request.TurnID, turn)
@@ -304,8 +304,8 @@ func (k *followUpKit) endFollowUpTurn(t *testing.T, turn string, cancelled bool)
 	h := q.Request.Header
 	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), k.at
 	result := coreadapter.SessionResult{SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, IsError: true, Cancelled: cancelled}
-	fixturekit.Must(t, k.repo.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: q.Request.ThreadID, TurnID: turn, RequestID: q.Request.ID, RequestRevision: q.Request.Revision, Result: result, Failure: "the backend failed"}))
-	fixturekit.Must(t, k.repo.CompleteTurn(ctx, k.stream, trace.ChiefOfStaff, turn, q.Claim.Token, k.at))
+	fixturekit.Must(t, k.repo.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.Manager, ThreadID: q.Request.ThreadID, TurnID: turn, RequestID: q.Request.ID, RequestRevision: q.Request.Revision, Result: result, Failure: "the backend failed"}))
+	fixturekit.Must(t, k.repo.CompleteTurn(ctx, k.stream, trace.Manager, turn, q.Claim.Token, k.at))
 }
 
 func TestAWholeWorkgroupFollowUpFiresPastAnArchivedMember(t *testing.T) {
@@ -326,7 +326,7 @@ func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
 		t.Fatalf("the archived member %s hosts the chief", gone)
 	}
 	member := s.projects[len(s.projects)-1].repository
-	f := followUp{ID: followUpID(trace.ChiefOfStaff, ""), Reason: stallFollowUpReason, ScheduledAt: fixturekit.DemoStart, Due: fixturekit.DemoStart.Add(time.Minute), By: "service", Turn: "events_1", State: followUpPending}
+	f := followUp{ID: followUpID(trace.Manager, ""), Reason: stallFollowUpReason, ScheduledAt: fixturekit.DemoStart, Due: fixturekit.DemoStart.Add(time.Minute), By: "service", Turn: "events_1", State: followUpPending}
 	fixturekit.Must(t, recordFollowUp(ctx, chief, host, 1, f, followUpActor, "test", fixturekit.DemoStart))
 	fixturekit.Must(t, s.store.SetArchived(runtime.Archive{Workgroup: g.ID, Project: member.Project(), Workstream: gone, State: AbandonedState, Title: "Archived member", Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: fixturekit.DemoStart, CleanupStartedAt: fixturekit.DemoStart, CleanedAt: fixturekit.DemoStart}))
 	_, err := member.MarkWorkstreamTraceForDeletion(gone)
@@ -341,7 +341,7 @@ func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
 	}
 	prompts := func() []string {
 		t.Helper()
-		th, err := chief.Thread(host, trace.ChiefOfStaff)
+		th, err := chief.Thread(host, trace.Manager)
 		fixturekit.Must(t, err)
 		var out []string
 		for _, q := range th.Turns {
@@ -365,7 +365,7 @@ func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
 		return
 	}
 
-	named := followUp{ID: followUpID(trace.ChiefOfStaff, gone), Workstream: gone, Reason: "Check the archived member.", ScheduledAt: now, Due: now.Add(time.Minute), By: "chief", Turn: "message_1", State: followUpPending}
+	named := followUp{ID: followUpID(trace.Manager, gone), Workstream: gone, Reason: "Check the archived member.", ScheduledAt: now, Due: now.Add(time.Minute), By: "chief", Turn: "message_1", State: followUpPending}
 	fixturekit.Must(t, recordFollowUp(ctx, chief, host, 1, named, followUpActor, "test", now))
 	now = now.Add(time.Hour)
 	pass(nil)

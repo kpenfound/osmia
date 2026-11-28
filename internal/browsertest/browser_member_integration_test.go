@@ -26,7 +26,7 @@ import (
 func (f *workgroupPageFixture) awaitOwnerTurn(t *testing.T, text string, member config.WorkstreamID) {
 	t.Helper()
 	awaitCondition(t, "owner turn "+text+" completing", func() bool {
-		thread, err := f.repo.ChiefOfStaffThread(stream)
+		thread, err := f.repo.ManagerThread(stream)
 		must(t, err)
 		for _, q := range thread.Turns {
 			if q.Request.Prompt != text || q.CompletedAt.IsZero() {
@@ -125,7 +125,7 @@ func TestBrowserMemberConversationRoutingAcrossRestart(t *testing.T) {
 		err := f.c.Do(context.Background(), "GET", "/v1/feed/"+string(id), nil, &feed)
 		must(t, err)
 		for _, e := range feed.Entries {
-			if e.Kind == "message" || e.Kind == "response" || e.Kind == "action" || e.Kind == "status" || (e.Session != nil && e.Session.Role == trace.ChiefOfStaff) {
+			if e.Kind == "message" || e.Kind == "response" || e.Kind == "action" || e.Kind == "status" || (e.Session != nil && e.Session.Role == trace.Manager) {
 				t.Fatalf("shared entry leaked into %s: %+v", id, e)
 			}
 		}

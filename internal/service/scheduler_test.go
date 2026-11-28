@@ -250,7 +250,7 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "owner"})
 	queueTurn(t, repo, "held", clock.Now())
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_chief", Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "message_chief", Depth: 1},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "chief", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message: chief"}
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "chief", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message: chief"}
 	_, err = repo.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
 	await("paused", []string{"chief"})

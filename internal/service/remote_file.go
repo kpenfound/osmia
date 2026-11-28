@@ -124,7 +124,7 @@ func remoteFileTool(r *trace.Repository, scope coreadapter.Scope, now func() tim
 		if err := r.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
-		if scope.Role != trace.ChiefOfStaff && scope.Role != architectRole {
+		if scope.Role != trace.Manager && scope.Role != architectRole {
 			return nil, errors.New("read_remote_file is not granted to this role")
 		}
 		var f remoteFile

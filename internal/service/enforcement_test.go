@@ -54,7 +54,7 @@ func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
 		t.Fatalf("thread clock %v is not UTC", now)
 	}
 	turns := dispatcher.Runner.Turns.(*questions.Turns).Turns.(*verdictTurns).Turns.(*reportingTurns).Turns.(*retriedTurns).Turns.(*isolation.Turns)
-	scope := coreadapter.Scope{Project: string(cfg.Project.ID), Workstream: string(fixturekit.Stream), Role: trace.ChiefOfStaff}
+	scope := coreadapter.Scope{Project: string(cfg.Project.ID), Workstream: string(fixturekit.Stream), Role: trace.Manager}
 	selection, err := turns.Select(context.Background(), scope)
 	fixturekit.Must(t, err)
 	if selection.Execution.Mode != "container" || selection.Execution.Image != "loaded-image" || selection.Execution.Dagger != nil || !slices.Equal(selection.Execution.Skills, chief.Skills) {
@@ -101,7 +101,7 @@ func TestSkillCacheFollowsLoadedRefreshPolicy(t *testing.T) {
 func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
 	t.Parallel()
 	f, stream, repository := newReviewFixture(t, "chief-grant")
-	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "turn"}
+	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: "turn"}
 	tools, err := chiefTools(f.s.cfg, repository, &runtimeControls{}, scope, time.Now)
 	fixturekit.Must(t, err)
 	tools = append(tools, (&runtimeControls{}).preview(f.s.cfg, repository, scope, previewView(t), time.Now))
@@ -143,7 +143,7 @@ func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
 		t.Errorf("production chief registry %v, want %v", wrappedNames, all)
 	}
 	count := 0
-	for _, name := range turns.Grants[trace.ChiefOfStaff].Tools {
+	for _, name := range turns.Grants[trace.Manager].Tools {
 		if name == ProjectContextTool {
 			count++
 		}

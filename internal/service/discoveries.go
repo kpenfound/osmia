@@ -98,7 +98,7 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		"Do not take another unit's work without coordination: the chief of staff assigns discoveries. " +
 		"Only the chief of staff changes a discovery: pass its id and revision, as factory_context reads them, with a disposition (assigned with unit, declined, suggestion for optional work, or open) and a reason against the approved intent. Call decide for the discovery first (kind discovery-disposition, subject its id). When Jev's decision is binding, only the disposition Jev picked is recorded, with your reasoning."
 	properties := `"key":{"type":"string"},"id":{"type":"string"},"revision":{"type":"integer"},"description":{"type":"string"},"criterion":{"type":"string"},"disposition":{"type":"string","enum":["open","assigned","declined","suggestion"]},"unit":{"type":"string"},"reason":{"type":"string"}`
-	if scope.Role == trace.ChiefOfStaff {
+	if scope.Role == trace.Manager {
 		description += " workstream: the member workstream ID of your workgroup the discovery belongs to, as factory_context read it. Omit it for this conversation's own workstream. owner_decided: true only to record a disposition the owner gave in the message this turn answers; that needs no decide result."
 		properties += `,"owner_decided":{"type":"boolean"}`
 	}
@@ -117,7 +117,7 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 			return nil, err
 		}
 		in.DecidedBy, in.Judgment, in.HandedToOwner = "", "", ""
-		if scope.Role != trace.ChiefOfStaff && scope.Role != masonRole && scope.Role != reviewerRole {
+		if scope.Role != trace.Manager && scope.Role != masonRole && scope.Role != reviewerRole {
 			return nil, errors.New("discovery recording is not granted to this role")
 		}
 		target, stream, refusal, err := chiefMember(r, scope, in.Workstream)
@@ -179,13 +179,13 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		if in.Revision != prior.Revision {
 			return priorityRefusal("discovery changed since you read it; read its latest revision with factory_context and pass that revision")
 		}
-		if prior.Revision > 0 && scope.Role != trace.ChiefOfStaff {
+		if prior.Revision > 0 && scope.Role != trace.Manager {
 			return priorityRefusal("only the chief of staff changes a discovery or gives it a disposition other than open; a discovery you record stays open until the chief decides it")
 		}
 		if in.Disposition == "" {
 			in.Disposition = "open"
 		}
-		if in.Disposition != "open" && scope.Role != trace.ChiefOfStaff {
+		if in.Disposition != "open" && scope.Role != trace.Manager {
 			return priorityRefusal("only the chief of staff changes a discovery or gives it a disposition other than open; a discovery you record stays open until the chief decides it")
 		}
 		var old workDiscovery
@@ -203,10 +203,10 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 			return priorityRefusal("a disposition other than open needs a reason; say why it follows from the approved intent")
 		}
 		if in.OwnerDecided {
-			if prior.Revision == 0 || scope.Role != trace.ChiefOfStaff {
+			if prior.Revision == 0 || scope.Role != trace.Manager {
 				return priorityRefusal("owner_decided names an existing discovery, and only the chief of staff relays the owner's disposition")
 			}
-			if _, owner, err := r.OwnerTurn(trace.ChiefOfStaff, scope); err != nil {
+			if _, owner, err := r.OwnerTurn(trace.Manager, scope); err != nil {
 				return nil, err
 			} else if !owner {
 				return priorityRefusal("owner_decided is only for a disposition the owner gave in the message this turn answers")

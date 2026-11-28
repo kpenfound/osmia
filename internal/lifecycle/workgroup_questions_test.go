@@ -138,7 +138,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 		}
 		describe("first workstream", fixturekit.Stream)
 		describe("second workstream", second)
-		describeThread("shared chief of staff", fixturekit.Stream, trace.ChiefOfStaff)
+		describeThread("shared chief of staff", fixturekit.Stream, trace.Manager)
 		describeThread("first asker", fixturekit.Stream, fixturekit.DemoAgent)
 		describeThread("second asker", second, "agent_second")
 		a1, e2, r := flags()
@@ -176,7 +176,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 	repo := <-lives
 	current = repo
 	chiefSettled := func(repository *trace.Repository) bool {
-		chief, err := repository.ChiefOfStaffThread(fixturekit.Stream)
+		chief, err := repository.ManagerThread(fixturekit.Stream)
 		return err == nil && len(chief.Turns) > 0 && !slices.ContainsFunc(chief.Turns, func(q trace.QueuedTurn) bool {
 			return q.CompletedAt.IsZero()
 		})
@@ -197,27 +197,27 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 	}
 	pump(s, escalatedAndAnswered)
 
-	host1, err := repo.ChiefOfStaffHost(fixturekit.Stream)
+	host1, err := repo.ManagerHost(fixturekit.Stream)
 	fixturekit.Must(t, err)
-	host2, err := repo.ChiefOfStaffHost(second)
+	host2, err := repo.ManagerHost(second)
 	fixturekit.Must(t, err)
 	if host1 != fixturekit.Stream || host2 != fixturekit.Stream {
 		t.Fatalf("hosts: %s, %s, want %s for both", host1, host2, fixturekit.Stream)
 	}
-	if own, err := repo.Thread(second, trace.ChiefOfStaff); err == nil && len(own.Turns) != 0 {
+	if own, err := repo.Thread(second, trace.Manager); err == nil && len(own.Turns) != 0 {
 		t.Fatalf("workstream %s's own chief-of-staff identity gained a turn: %+v", second, own)
 	}
-	chief1, err := repo.ChiefOfStaffThread(fixturekit.Stream)
+	chief1, err := repo.ManagerThread(fixturekit.Stream)
 	fixturekit.Must(t, err)
-	chief2, err := repo.ChiefOfStaffThread(second)
+	chief2, err := repo.ManagerThread(second)
 	fixturekit.Must(t, err)
-	if chief1.Identity.ID != trace.ChiefOfStaff || chief2.Identity.ID != trace.ChiefOfStaff || len(chief1.Turns) != len(chief2.Turns) {
+	if chief1.Identity.ID != trace.Manager || chief2.Identity.ID != trace.Manager || len(chief1.Turns) != len(chief2.Turns) {
 		t.Fatalf("workstreams do not share one chief-of-staff thread: %+v vs %+v", chief1, chief2)
 	}
 
 	ruling1, err := repo.Questions(fixturekit.Stream)
 	fixturekit.Must(t, err)
-	if ruling1[0].Ruling == nil || ruling1[0].Ruling.Actor != (trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}) {
+	if ruling1[0].Ruling == nil || ruling1[0].Ruling.Actor != (trace.Actor{Kind: "agent", ID: trace.Manager}) {
 		t.Fatalf("question 1 of %s should be answered by the chief of staff: %+v", fixturekit.Stream, ruling1[0])
 	}
 

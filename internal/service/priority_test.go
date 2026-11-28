@@ -67,11 +67,11 @@ func newPriorityRig(t *testing.T) *priorityRig {
 		_, err := repo.SetFeatureState(ctx, h, state, "ended")
 		fixturekit.Must(t, err)
 	}
-	_, err = repo.EnsureChiefOfStaff(ctx, fixturekit.Stream, fixturekit.DemoStart, serviceActor)
+	_, err = repo.EnsureManager(ctx, fixturekit.Stream, fixturekit.DemoStart, serviceActor)
 	fixturekit.Must(t, err)
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{
 		Header:  trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_events_seed", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "events"},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events_seed", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "events_seed", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
 		SystemPrompt: fmt.Sprintf(followUpPrompt, fixturekit.Stream) + "\n\n" + chiefGuidance(), Prompt: "A service event."})
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.Close())
@@ -214,7 +214,7 @@ func (r *priorityRig) requireRecordedFor(sent ConversationEntry, want []config.W
 		r.t.Fatalf("priority records: %+v", got)
 	}
 	p := got[0]
-	if p.ID != trace.PriorityID || p.Revision != 1 || p.Actor != ownerActor || p.Cause != request || p.Agent != trace.ChiefOfStaff || p.Turn != sent.Turn || !slices.Equal(p.Order, want) {
+	if p.ID != trace.PriorityID || p.Revision != 1 || p.Actor != ownerActor || p.Cause != request || p.Agent != trace.Manager || p.Turn != sent.Turn || !slices.Equal(p.Order, want) {
 		r.t.Fatalf("priority record %+v", p)
 	}
 }

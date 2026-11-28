@@ -88,7 +88,7 @@ func TestConversationPathBypassesSchedulingAndOwnWorkflow(t *testing.T) {
 	for _, test := range []struct {
 		stream      config.WorkstreamID
 		agent, turn string
-	}{{fixturekit.Stream, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.Designer, designed.Turn}, {session, service.SessionAgentID, sessionMessage.Turn}} {
+	}{{fixturekit.Stream, trace.Manager, chief.Turn}, {design.Design.Workstream, trace.Designer, designed.Turn}, {session, service.SessionAgentID, sessionMessage.Turn}} {
 		fixturekit.ConversationAwait(t, func() bool {
 			th, err := repo.Thread(test.stream, test.agent)
 			if err != nil {
@@ -144,7 +144,7 @@ func TestConversationPathOwnerWaitsForBackgroundTurnAndShowsReason(t *testing.T)
 	repo := s.Sole().Repository
 	profile, err := cfg.NamedProfile("default")
 	fixturekit.Must(t, err)
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_background", Project: cfg.Project.ID, Workstream: fixturekit.Stream, At: s.Now(), Actor: intake.ServiceActor, Cause: "event"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events_background", Profile: profile, Prompt: "Background"})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_background", Project: cfg.Project.ID, Workstream: fixturekit.Stream, At: s.Now(), Actor: intake.ServiceActor, Cause: "event"}, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "events_background", Profile: profile, Prompt: "Background"})
 	fixturekit.Must(t, err)
 	select {
 	case <-turns.Entered:
@@ -322,7 +322,7 @@ func TestConversationPathShutdownJoinsBeforeTraceClose(t *testing.T) {
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
-	th, err := repo.ChiefOfStaffThread(fixturekit.Stream)
+	th, err := repo.ManagerThread(fixturekit.Stream)
 	fixturekit.Must(t, err)
 	if len(th.Turns) != 1 || th.Turns[0].Response == nil || th.Turns[0].CompletedAt.IsZero() {
 		t.Fatalf("shutdown lost reply: %+v", th)
@@ -363,10 +363,10 @@ func TestConversationPathChiefPauseAndProviderHolds(t *testing.T) {
 	holds := func(repo *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation) bool {
 		return journey.InspectForTest(s).ConversationHolds(repo.Project(), repo, stream, op)
 	}
-	th, err := repo.ChiefOfStaffThread(fixturekit.Stream)
+	th, err := repo.ManagerThread(fixturekit.Stream)
 	fixturekit.Must(t, err)
 	turn := th.Turns[len(th.Turns)-1]
-	op, err := thread.TurnOperation(cfg.Project.ID, "provider-test", thread.TurnInput{Workstream: fixturekit.Stream, Agent: trace.ChiefOfStaff, Turn: next.Turn})
+	op, err := thread.TurnOperation(cfg.Project.ID, "provider-test", thread.TurnInput{Workstream: fixturekit.Stream, Agent: trace.Manager, Turn: next.Turn})
 	fixturekit.Must(t, err)
 	if !holds(repo, fixturekit.Stream, op) || turn.Claim != nil || len(turns.Calls()) != 1 {
 		t.Fatal("provider hold did not keep chief queued")
@@ -391,9 +391,9 @@ func TestConversationPathRestartReconcilesCapturedReplyAndSettledHook(t *testing
 			profile, err := cfg.NamedProfile("default")
 			fixturekit.Must(t, err)
 			at := fixturekit.DemoStart.Add(time.Second)
-			q, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_captured", Project: cfg.Project.ID, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: "owner-message"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "captured", Profile: profile, Prompt: "Captured message"})
+			q, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_captured", Project: cfg.Project.ID, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: "owner-message"}, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "captured", Profile: profile, Prompt: "Captured message"})
 			fixturekit.Must(t, err)
-			th, err := repo.ChiefOfStaffThread(fixturekit.Stream)
+			th, err := repo.ManagerThread(fixturekit.Stream)
 			fixturekit.Must(t, err)
 			fixturekit.Must(t, scheduler.Dispatch(ctx, repo, scheduler.Candidate{Project: cfg.Project.ID, Workstream: fixturekit.Stream, Thread: th, Turn: q}, at))
 			records, err := repo.Operations(fixturekit.Stream)
@@ -403,23 +403,23 @@ func TestConversationPathRestartReconcilesCapturedReplyAndSettledHook(t *testing
 			if attempt == nil {
 				t.Fatal("operation not claimed")
 			}
-			q, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "captured-token", "/owned", at)
+			q, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.Manager, "captured-token", "/owned", at)
 			fixturekit.Must(t, err)
 			result := coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: profile.Backend, ID: "session"}, FinalResponse: "Already captured", SessionDirectory: "/owned", StartedAt: at}
 			a := trace.TurnAttempt{Number: 1, At: at, Profile: profile, Path: "replay", Reason: "fresh"}
-			fixturekit.Must(t, repo.RecordAttempt(ctx, fixturekit.Stream, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, a))
+			fixturekit.Must(t, repo.RecordAttempt(ctx, fixturekit.Stream, trace.Manager, q.Request.TurnID, q.Claim.Token, a))
 			a.Result = &result
-			fixturekit.Must(t, repo.RecordAttempt(ctx, fixturekit.Stream, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, a))
+			fixturekit.Must(t, repo.RecordAttempt(ctx, fixturekit.Stream, trace.Manager, q.Request.TurnID, q.Claim.Token, a))
 			h := q.Request.Header
 			h.Schema, h.ID, h.At, h.Actor = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), at, intake.ServiceActor
-			fixturekit.Must(t, repo.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: 1, Result: result}))
+			fixturekit.Must(t, repo.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: 1, Result: result}))
 			var relays atomic.Int32
 			relay := func(ctx context.Context, r *trace.Repository) error {
 				relays.Add(1)
 				return service.RecordSessionEntry(ctx, r, cfg.Project.ID, fixturekit.Stream, "hook-effect", fixturekit.DemoStart, "Hook settled")
 			}
 			if completed {
-				fixturekit.Must(t, repo.CompleteTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, at))
+				fixturekit.Must(t, repo.CompleteTurn(ctx, fixturekit.Stream, trace.Manager, q.Request.TurnID, q.Claim.Token, at))
 				fixturekit.Must(t, relay(ctx, repo))
 			}
 			attempt.Close()
@@ -436,7 +436,7 @@ func TestConversationPathRestartReconcilesCapturedReplyAndSettledHook(t *testing
 				records, _ := repo.Operations(fixturekit.Stream)
 				return len(records) == 1 && records[0].Acknowledged
 			})
-			th, err = repo.ChiefOfStaffThread(fixturekit.Stream)
+			th, err = repo.ManagerThread(fixturekit.Stream)
 			fixturekit.Must(t, err)
 			if len(th.Turns) != 1 || th.Turns[0].CompletedAt.IsZero() || th.Turns[0].Response.Result.FinalResponse != result.FinalResponse || len(th.Turns[0].Attempts) != 1 {
 				t.Fatalf("recovered turn: %+v", th)

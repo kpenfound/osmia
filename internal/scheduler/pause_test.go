@@ -16,7 +16,7 @@ func TestHeldCoversPausedScopes(t *testing.T) {
 	const other config.ProjectID = "p_00000000000000000000000000000002"
 	const sibling config.WorkstreamID = "w_00000000000000000000000000000002"
 	worker := Candidate{Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: "mason"}}}
-	chief := Candidate{Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: trace.ChiefOfStaff}}}
+	chief := Candidate{Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: trace.Manager}}}
 	pause := func(scope string, p config.ProjectID, w config.WorkstreamID) runtime.Pause {
 		return runtime.Pause{Target: runtime.Target{Scope: scope, Project: p, Workstream: w}, Mode: "soft", Source: "owner"}
 	}
@@ -90,12 +90,12 @@ func TestPauseHoldsWorkerTurnsWhileChiefOfStaffRuns(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t, "alpha")
 	defer repo.Close()
-	_, err := repo.EnsureChiefOfStaff(ctx, stream, f.clock.Now(), owner)
+	_, err := repo.EnsureManager(ctx, stream, f.clock.Now(), owner)
 	must(t, err)
 	queueChief := func(turn string) {
 		t.Helper()
 		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_chief_" + turn, Project: project, Workstream: stream, At: f.clock.Now(), Actor: owner, Cause: "message_" + turn, Depth: 1},
-			AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Message " + turn}
+			AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Message " + turn}
 		_, err := repo.EnqueueTurn(ctx, req)
 		must(t, err)
 	}

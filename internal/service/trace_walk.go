@@ -1002,7 +1002,7 @@ func contestDecider(by string) string {
 	case "", "owner":
 		return trace.DecidedByOwner
 	case "chief of staff":
-		return trace.DecidedByChief
+		return trace.DecidedByManager
 	}
 	return by
 }
@@ -1011,5 +1011,5 @@ func questionDecider(v trace.Ruling) string {
 	if v.Decision == trace.DecisionRuling {
 		return trace.DecidedByOwner
 	}
-	return trace.DecidedByChief
+	return trace.DecidedByManager
 }

@@ -79,7 +79,7 @@ func TestWorkgroupsEmptyWhenNoneRecorded(t *testing.T) {
 	}
 }
 
-func TestChiefOfStaffHostAndMembersOfATwoWorkstreamWorkgroup(t *testing.T) {
+func TestManagerHostAndMembersOfATwoWorkstreamWorkgroup(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
 	second := config.WorkstreamID("w_00000000000000000000000000000002")
@@ -87,7 +87,7 @@ func TestChiefOfStaffHostAndMembersOfATwoWorkstreamWorkgroup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	host, err := r.ChiefOfStaffHost(streamID)
+	host, err := r.ManagerHost(streamID)
 	if err != nil || host != streamID {
 		t.Fatalf("unrecorded workstream's host: %s %v", host, err)
 	}
@@ -100,7 +100,7 @@ func TestChiefOfStaffHostAndMembersOfATwoWorkstreamWorkgroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, stream := range []config.WorkstreamID{streamID, second} {
-		host, err := r.ChiefOfStaffHost(stream)
+		host, err := r.ManagerHost(stream)
 		if err != nil || host != streamID {
 			t.Fatalf("host of %s: %s %v, want %s", stream, host, err, streamID)
 		}
@@ -110,18 +110,18 @@ func TestChiefOfStaffHostAndMembersOfATwoWorkstreamWorkgroup(t *testing.T) {
 		}
 	}
 
-	if _, err := r.EnsureChiefOfStaff(ctx, streamID, at, owner); err != nil {
+	if _, err := r.EnsureManager(ctx, streamID, at, owner); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Get[Agent](r, streamID, ChiefOfStaff, 1); err != nil {
+	if _, err := Get[Agent](r, streamID, Manager, 1); err != nil {
 		t.Fatalf("the host's own chief-of-staff identity: %v", err)
 	}
-	if _, err := Get[Agent](r, second, ChiefOfStaff, 1); err == nil {
+	if _, err := Get[Agent](r, second, Manager, 1); err == nil {
 		t.Fatal("the second member should have no chief-of-staff identity of its own")
 	}
 }
 
-func TestChiefQuestionTargetResolvesQualifiedAndUnqualifiedIDs(t *testing.T) {
+func TestManagerQuestionTargetResolvesQualifiedAndUnqualifiedIDs(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
 	second := config.WorkstreamID("w_00000000000000000000000000000002")
@@ -136,13 +136,13 @@ func TestChiefQuestionTargetResolvesQualifiedAndUnqualifiedIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if stream, id, err := r.ChiefQuestionTarget(streamID, "1"); err != nil || stream != streamID || id != "1" {
+	if stream, id, err := r.ManagerQuestionTarget(streamID, "1"); err != nil || stream != streamID || id != "1" {
 		t.Fatalf("unqualified id: %s %s %v", stream, id, err)
 	}
-	if stream, id, err := r.ChiefQuestionTarget(streamID, string(second)+":1"); err != nil || stream != second || id != "1" {
+	if stream, id, err := r.ManagerQuestionTarget(streamID, string(second)+":1"); err != nil || stream != second || id != "1" {
 		t.Fatalf("qualified id of a fellow member: %s %s %v", stream, id, err)
 	}
-	if _, _, err := r.ChiefQuestionTarget(streamID, string(outside)+":1"); err == nil || !strings.Contains(refusal(t, err), "does not share this chief of staff") {
+	if _, _, err := r.ManagerQuestionTarget(streamID, string(outside)+":1"); err == nil || !strings.Contains(refusal(t, err), "does not share this chief of staff") {
 		t.Fatalf("qualified id of a workstream outside the workgroup: %v", err)
 	}
 }

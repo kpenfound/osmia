@@ -142,7 +142,7 @@ func (s *Controller) DraftWorkgroup(ctx context.Context, members []config.Workst
 		if group, ok := trace.WorkgroupOf(groups, m.Workstream); ok && len(group.Members) != 1 {
 			return "", &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s already belongs to a multi-member local workgroup", m.Workstream)}
 		}
-		th, err := m.Project.ChiefOfStaffThread(m.Workstream)
+		th, err := m.Project.ManagerThread(m.Workstream)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the chief-of-staff thread of workstream %s: %v", m.Workstream, err)}
 		}
@@ -530,7 +530,7 @@ func (s *Controller) NoticeChief(ctx context.Context, repo *trace.Repository, st
 	}
 	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: s.Now(), Actor: by, Cause: cause}, Subject: subject, From: state.Value, To: id, Reason: reason},
-		Events:     []trace.Event{trace.Notice(id, "chief", body)}})
+		Events:     []trace.Event{trace.Notice(id, trace.ManagerKey, body)}})
 	if errors.Is(err, trace.ErrConflict) {
 		return nil
 	}

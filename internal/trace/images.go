@@ -92,7 +92,7 @@ func (r *Repository) ImageByKey(stream config.WorkstreamID, key string) (Image, 
 }
 
 // PublishImageReference is idempotent for a member and image ID. h names the
-// shared chief's host; the caller retains responsibility for reconciling effects.
+// shared manager's host; the caller retains responsibility for reconciling effects.
 func (r *Repository) PublishImageReference(ctx context.Context, h Header, member config.WorkstreamID, imageID, turn string) (ImageReference, error) {
 	target, err := r.scoped(h.Workstream)
 	if err != nil {

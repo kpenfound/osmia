@@ -105,7 +105,7 @@ func RecordTriage(ctx context.Context, repo *trace.Repository, stream config.Wor
 	if slices.ContainsFunc(all, func(x Triage) bool { return x.Review == t.Review && x.Finding == t.Finding }) {
 		return fmt.Errorf("finding %s of final review %d is already triaged", t.Finding, t.Review)
 	}
-	actor := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	actor := trace.Actor{Kind: "agent", ID: trace.Manager}
 	if t.ByJev() {
 		actor = trace.JevActor
 	}
@@ -159,5 +159,5 @@ func Carry(ctx context.Context, repo *trace.Repository, stream config.Workstream
 			next[i].Amendment = amendment
 		}
 	}
-	return write(ctx, repo, stream, next, revision+1, trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}, "amendment-"+amendment, at)
+	return write(ctx, repo, stream, next, revision+1, trace.Actor{Kind: "agent", ID: trace.Manager}, "amendment-"+amendment, at)
 }

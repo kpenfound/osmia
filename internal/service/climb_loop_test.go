@@ -466,7 +466,7 @@ func TestTheChiefConcludesAClimbAndItsProgressIsInTheChiefsStatus(t *testing.T) 
 			t.Errorf("the climb's progress lacks %q:\n%s", want, text)
 		}
 	}
-	chief := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
 	res, err := s.RouteExit(ctx, s.concludeExit(repo, fixturekit.Stream, state, chief, "the log shows no more ideas"))
 	fixturekit.Must(t, err)
 	if inner, _ := climb.ReadInner(repo, fixturekit.Stream); !res.Committed || inner.Value != climb.InnerConcluding {

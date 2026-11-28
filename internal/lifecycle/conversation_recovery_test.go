@@ -19,7 +19,7 @@ func TestConversationPathSharedChiefRestartReconcilesHostOperation(t *testing.T)
 	for _, completed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "captured", true: "completed"}[completed], func(t *testing.T) {
 			ctx := context.Background()
-			f := newCrossRepoWiringFixture(t, map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff})
+			f := newCrossRepoWiringFixture(t, map[string]string{trace.Manager: trace.Manager})
 			s, err := journey.Start(ctx, f.opts)
 			fixturekit.Must(t, err)
 			t.Cleanup(func() { fixturekit.Must(t, s.Close()) })
@@ -36,7 +36,7 @@ func TestConversationPathSharedChiefRestartReconcilesHostOperation(t *testing.T)
 			fixturekit.Must(t, err)
 			wt, host, _, closeTarget, err := s.Lifecycle().ChiefRepository(ctx, repo, f.stream1)
 			fixturekit.Must(t, err)
-			th, err := wt.Thread(host, trace.ChiefOfStaff)
+			th, err := wt.Thread(host, trace.Manager)
 			fixturekit.Must(t, err)
 			if len(th.Turns) != 1 {
 				closeTarget()
@@ -53,18 +53,18 @@ func TestConversationPathSharedChiefRestartReconcilesHostOperation(t *testing.T)
 				closeTarget()
 				t.Fatal("host operation not claimed")
 			}
-			q, err = wt.ClaimTurn(ctx, host, trace.ChiefOfStaff, "shared-token", "/owned-shared", at)
+			q, err = wt.ClaimTurn(ctx, host, trace.Manager, "shared-token", "/owned-shared", at)
 			fixturekit.Must(t, err)
 			result := coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: "shared-session"}, FinalResponse: "Shared captured reply", SessionDirectory: "/owned-shared", StartedAt: at}
 			a := trace.TurnAttempt{Number: 1, At: at, Profile: q.Request.Profile, Path: "replay", Reason: "fresh"}
-			fixturekit.Must(t, wt.RecordAttempt(ctx, host, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, a))
+			fixturekit.Must(t, wt.RecordAttempt(ctx, host, trace.Manager, q.Request.TurnID, q.Claim.Token, a))
 			a.Result = &result
-			fixturekit.Must(t, wt.RecordAttempt(ctx, host, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, a))
+			fixturekit.Must(t, wt.RecordAttempt(ctx, host, trace.Manager, q.Request.TurnID, q.Claim.Token, a))
 			h := q.Request.Header
 			h.Schema, h.ID, h.Actor = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), intake.ServiceActor
-			fixturekit.Must(t, wt.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: 1, Result: result}))
+			fixturekit.Must(t, wt.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: 1, Result: result}))
 			if completed {
-				fixturekit.Must(t, wt.CompleteTurn(ctx, host, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, at))
+				fixturekit.Must(t, wt.CompleteTurn(ctx, host, trace.Manager, q.Request.TurnID, q.Claim.Token, at))
 			}
 			attempt.Close()
 			closeTarget()
@@ -77,7 +77,7 @@ func TestConversationPathSharedChiefRestartReconcilesHostOperation(t *testing.T)
 			fixturekit.Must(t, err)
 			t.Cleanup(closeTarget)
 			fixturekit.ConversationAwait(t, func() bool { records, _ := wt.Operations(host); return len(records) == 1 && records[0].Acknowledged })
-			th, err = wt.Thread(host, trace.ChiefOfStaff)
+			th, err = wt.Thread(host, trace.Manager)
 			fixturekit.Must(t, err)
 			if len(th.Turns) != 1 || th.Turns[0].Request.TurnID != sent.Turn || th.Turns[0].CompletedAt.IsZero() || th.Turns[0].Response.Result.FinalResponse != result.FinalResponse || len(th.Turns[0].Attempts) != 1 {
 				t.Fatalf("shared recovery: %+v", th)

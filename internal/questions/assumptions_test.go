@@ -20,8 +20,8 @@ func TestSharedChiefAssumptionToolValidatesAffectedWorkstreams(t *testing.T) {
 	}
 	defer wg.Close()
 	host := g.Members[0]
-	scope := claimCrossRepoTurn(t, wg, wg.Project(), host, trace.ChiefOfStaff, trace.ChiefOfStaff, "", "assumptions")
-	tools, err := questions.Tools(wg, trace.ChiefOfStaff, scope, func() time.Time { return start })
+	scope := claimCrossRepoTurn(t, wg, wg.Project(), host, trace.Manager, trace.Manager, "", "assumptions")
+	tools, err := questions.Tools(wg, trace.Manager, scope, func() time.Time { return start })
 	if err != nil {
 		t.Fatal(err)
 	}

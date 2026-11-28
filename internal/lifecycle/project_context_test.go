@@ -20,14 +20,14 @@ func TestProjectContextPagesNoticesWithoutExposingPrivateRecordsOrProse(t *testi
 	t.Parallel()
 	f, stream, repo, _ := journey.NewFinalFixtureWith(t, "project-context", "")
 	ctx := context.Background()
-	_, err := repo.EnsureChiefOfStaff(ctx, stream, f.S.Now(), intake.OwnerActor)
+	_, err := repo.EnsureManager(ctx, stream, f.S.Now(), intake.OwnerActor)
 	fixturekit.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, ID: "request_context", Revision: 1, Project: repo.Project(), Workstream: stream, At: f.S.Now(), Actor: intake.OwnerActor, Cause: "owner"}
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "context", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Read context"})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "context", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Read context"})
 	fixturekit.Must(t, err)
-	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "context-claim", "/owned/context", f.S.Now())
+	_, err = repo.ClaimTurn(ctx, stream, trace.Manager, "context-claim", "/owned/context", f.S.Now())
 	fixturekit.Must(t, err)
-	scope := coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: trace.ChiefOfStaff, Turn: "context", Role: trace.ChiefOfStaff}
+	scope := coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: trace.Manager, Turn: "context", Role: trace.Manager}
 	notice := func(text string) string {
 		data, err := json.Marshal(trace.ProjectNotice{Text: text})
 		fixturekit.Must(t, err)

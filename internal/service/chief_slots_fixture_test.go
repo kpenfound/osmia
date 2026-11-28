@@ -171,7 +171,7 @@ func newChiefFleet(t *testing.T, projects int, topConfig, projectConfig string) 
 		repo, err := trace.Create(ctx, f.cfg.Root, p, chiefBase, ownerActor)
 		fixturekit.Must(t, err)
 		fixturekit.Must(t, repo.CreateWorkstream(ctx, f.streams[i], chiefBase, ownerActor))
-		_, err = repo.EnsureChiefOfStaff(ctx, f.streams[i], chiefBase, serviceActor)
+		_, err = repo.EnsureManager(ctx, f.streams[i], chiefBase, serviceActor)
 		fixturekit.Must(t, err)
 		fixturekit.Must(t, repo.Close())
 	}
@@ -203,7 +203,7 @@ func (f *chiefFleet) request(i int, turn string, at time.Time, actor trace.Actor
 		panic(err)
 	}
 	return trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, Revision: 1, ID: "request_" + turn, Project: f.ids[i], Workstream: f.streams[i], At: at, Actor: actor, Cause: cause},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: turn, Profile: p, Prompt: prompt}
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: turn, Profile: p, Prompt: prompt}
 }
 
 func (f *chiefFleet) background(t *testing.T, s *Service, i int, turn string, at int) {
@@ -219,7 +219,7 @@ func (f *chiefFleet) backgroundWith(t *testing.T, s *Service, i int, turn string
 
 func (f *chiefFleet) thread(t *testing.T, s *Service, i int) trace.Thread {
 	t.Helper()
-	th, err := f.repo(t, s, i).ChiefOfStaffThread(f.streams[i])
+	th, err := f.repo(t, s, i).ManagerThread(f.streams[i])
 	fixturekit.Must(t, err)
 	return th
 }

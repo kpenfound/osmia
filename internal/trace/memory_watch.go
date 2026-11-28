@@ -55,7 +55,7 @@ func ValidateMemoryWatch(cursor string, events []MemoryEvent) error {
 }
 
 // RecordMemoryWatch commits the next cursor and seen identities as project
-// knowledge, and the chief notice of every target workstream as its own
+// knowledge, and the manager notice of every target workstream as its own
 // trace's commit. Retries neither skip a notification nor deliver it twice:
 // each workstream's notice transition is idempotent, deterministically
 // identified from key and the unseen events, and every one of them lands,

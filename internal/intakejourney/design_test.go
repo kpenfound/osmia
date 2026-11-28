@@ -64,7 +64,7 @@ func TestOpenDesignCreatesAnInertWorkstreamInItsOwnWorkgroup(t *testing.T) {
 	if state, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || state.Value != "" {
 		t.Fatalf("design session feature state: %+v %v", state, err)
 	}
-	if _, err := repository.ChiefOfStaffThread(stream); err != nil {
+	if _, err := repository.ManagerThread(stream); err != nil {
 		t.Fatalf("design session has no chief-of-staff thread: %v", err)
 	}
 	groups, _, err := trace.Workgroups(repository)
@@ -73,7 +73,7 @@ func TestOpenDesignCreatesAnInertWorkstreamInItsOwnWorkgroup(t *testing.T) {
 	if !ok || len(g.Members) != 1 || g.Members[0] != stream {
 		t.Fatalf("workgroup of design session %s: %+v ok=%v", stream, g, ok)
 	}
-	host, err := repository.ChiefOfStaffHost(stream)
+	host, err := repository.ManagerHost(stream)
 	fixturekit.Must(t, err)
 	if host != stream {
 		t.Fatalf("a one-workstream workgroup's chief of staff should be its own thread, got host %s", host)
@@ -156,7 +156,7 @@ func TestStartDesignWorkgroupHandsOffBriefToTheChiefOfStaffsOwnThread(t *testing
 		t.Fatal("starting a workgroup before any brief is drafted must be refused")
 	}
 
-	before, err := repository.ChiefOfStaffThread(stream)
+	before, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 
 	fixturekit.Must(t, intakefixture.RecordDesignDraft(t, repository, stream, "Decisions: ship the upload feature.\nIntent and tradeoffs: keep the API stable.\nRejected options: a new endpoint was rejected.\n"))
@@ -187,12 +187,12 @@ func TestStartDesignWorkgroupHandsOffBriefToTheChiefOfStaffsOwnThread(t *testing
 		t.Fatalf("handed content has no transcript: %q", handed.Content)
 	}
 
-	after, err := repository.ChiefOfStaffThread(stream)
+	after, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	if after.Identity.ID != before.Identity.ID || after.Identity.ThreadID != before.Identity.ThreadID {
 		t.Fatalf("starting the workgroup must give the chief of staff its own thread, not a design thread: before %+v after %+v", before.Identity, after.Identity)
 	}
-	host, err := repository.ChiefOfStaffHost(stream)
+	host, err := repository.ManagerHost(stream)
 	fixturekit.Must(t, err)
 	if host != stream {
 		t.Fatalf("the started workstream's chief of staff should still be its own thread, got host %s", host)
@@ -222,7 +222,7 @@ func TestDesignWorkgroupStartRecoversAfterRestartWithoutRewritingBrief(t *testin
 	stream := opened.Design.Workstream
 	repository := s.Sole().Repository
 	fixturekit.Must(t, intakefixture.RecordDesignDraft(t, repository, stream, "Decisions: preserve the API.\nIntent and tradeoffs: compatibility over flexibility.\nRejected options: breaking changes."))
-	before, err := repository.ChiefOfStaffThread(stream)
+	before, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	s.Boundary = func(name string) error {
 		if name == "design-brief-handed" {
@@ -252,7 +252,7 @@ func TestDesignWorkgroupStartRecoversAfterRestartWithoutRewritingBrief(t *testin
 		fixturekit.Must(t, err)
 		return state.Value != ""
 	})
-	after, err := repository.ChiefOfStaffThread(stream)
+	after, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	if before.Identity != after.Identity {
 		t.Fatal("handoff recovery replaced the chief thread")
@@ -516,7 +516,7 @@ func newDesignWorkgroupContinuationFixture(t *testing.T) (*journey.Service, *jou
 		turns.Workspaces, turns.Capture = intake.StagedWorkspaces{}, nil
 		selectChief := turns.Select
 		turns.Select = func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
-			if scope.Role == trace.ChiefOfStaff || scope.Role == trace.Designer {
+			if scope.Role == trace.Manager || scope.Role == trace.Designer {
 				return selectChief(ctx, scope)
 			}
 			workspace := filepath.Join(cfg.Root.String(), "workers", scope.Thread)
@@ -525,7 +525,7 @@ func newDesignWorkgroupContinuationFixture(t *testing.T) (*journey.Service, *jou
 		}
 		chiefScoped := turns.Scoped
 		turns.Scoped = func(ctx context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-			if scope.Role == trace.ChiefOfStaff || scope.Role == trace.Designer {
+			if scope.Role == trace.Manager || scope.Role == trace.Designer {
 				return chiefScoped(ctx, scope)
 			}
 			return questions.Tools(r, designWorkerAgent, scope, clock.Now)
@@ -592,7 +592,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		t.Helper()
 		deadline := time.Now().Add(fixturekit.DemoTimeout)
 		for {
-			chief, err := repository.ChiefOfStaffThread(stream)
+			chief, err := repository.ManagerThread(stream)
 			fixturekit.Must(t, err)
 			complete := func(th trace.Thread) bool {
 				return th.Active == "" && !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool {
@@ -659,7 +659,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	if designConversation.Entries[0].Text != designMessage || designConversation.Entries[1].Text != designReply || designConversation.Entries[1].State != api.TurnDone {
 		t.Fatalf("design conversation: %+v", designConversation.Entries)
 	}
-	before, err := repository.ChiefOfStaffThread(stream)
+	before, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	design, err := repository.DesignerThread(stream)
 	fixturekit.Must(t, err)
@@ -726,7 +726,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 
 	clock.Advance(time.Minute)
 	waitCompleted("hand-off title", 1, 0, "")
-	titled, err := repository.ChiefOfStaffThread(stream)
+	titled, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	if len(titled.Turns) != 1 || !strings.Contains(titled.Turns[0].Request.Prompt, intake.HandoffTitleOpening) {
 		t.Fatalf("the start's hand-off turn is not the first chief turn: %s", turnSummary(titled))
@@ -757,12 +757,12 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	ranChief := acted
 	mu.Unlock()
 	if !ranChief {
-		chief, err := repository.ChiefOfStaffThread(stream)
+		chief, err := repository.ManagerThread(stream)
 		fixturekit.Must(t, err)
 		fatalf("the chief-of-staff turn that answers the worker's question never ran; chief %s", turnSummary(chief))
 	}
 
-	after, err := repository.ChiefOfStaffThread(stream)
+	after, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	if after.Identity.ID != before.Identity.ID || after.Identity.ThreadID != before.Identity.ThreadID {
 		fatalf("the started workgroup's chief of staff is not the design session's own thread: before %+v after %+v", before.Identity, after.Identity)
@@ -824,7 +824,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		waitCompleted("before restart", 2, len(worker.Turns), worker.Status)
 		previous, err := c.Conversation(ctx, stream)
 		fixturekit.Must(t, err)
-		chief, err := repository.ChiefOfStaffThread(stream)
+		chief, err := repository.ManagerThread(stream)
 		fixturekit.Must(t, err)
 		options := s.Options
 		c.Close()
@@ -842,7 +842,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		if string(previousJSON) != string(continuedJSON) {
 			fatalf("restart changed conversation: want %s; actual %s", previousJSON, continuedJSON)
 		}
-		recoveredChief, err := repository.ChiefOfStaffThread(stream)
+		recoveredChief, err := repository.ManagerThread(stream)
 		fixturekit.Must(t, err)
 		chiefJSON, err := json.Marshal(chief)
 		fixturekit.Must(t, err)
@@ -920,7 +920,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	}
 	ruledConversation, err := c.Conversation(ctx, stream)
 	fixturekit.Must(t, err)
-	ruledChief, err := repository.ChiefOfStaffThread(stream)
+	ruledChief, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	ruling, err := trace.Get[trace.Ruling](repository, stream, "1", 2)
 	fixturekit.Must(t, err)

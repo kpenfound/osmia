@@ -32,14 +32,14 @@ import (
 func previewScope(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, now func() time.Time) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
-	_, err := repo.EnsureChiefOfStaff(ctx, stream, now(), ownerActor)
+	_, err := repo.EnsureManager(ctx, stream, now(), ownerActor)
 	fixturekit.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request-preview", Revision: 1, Project: repo.Project(), Workstream: stream, At: now(), Actor: ownerActor, Cause: "preview"}
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "preview", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Show the page"})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "preview", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Show the page"})
 	fixturekit.Must(t, err)
-	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "preview-claim", t.TempDir(), now())
+	_, err = repo.ClaimTurn(ctx, stream, trace.Manager, "preview-claim", t.TempDir(), now())
 	fixturekit.Must(t, err)
-	return coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: trace.ChiefOfStaff, Turn: "preview", Role: trace.ChiefOfStaff}
+	return coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: trace.Manager, Turn: "preview", Role: trace.Manager}
 }
 
 func previewView(t *testing.T) *isolation.FileView {
@@ -326,13 +326,13 @@ func TestChiefPreviewLimitationsCompleteTurn(t *testing.T) {
 			t.Fatal("invalid request pinned a capture")
 		}
 	}
-	chief, err := repo.Thread(stream, trace.ChiefOfStaff)
+	chief, err := repo.Thread(stream, trace.Manager)
 	fixturekit.Must(t, err)
 	q := chief.Turns[len(chief.Turns)-1]
 	h := q.Request.Header
 	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), f.s.now()
-	fixturekit.Must(t, repo.CaptureTurn(context.Background(), q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: scope.Turn, RequestID: q.Request.ID, RequestRevision: 1, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "preview-session"}, FinalResponse: "Preview is unavailable", StartedAt: q.Claim.At, SessionDirectory: q.Claim.SessionDirectory}}))
-	fixturekit.Must(t, repo.CompleteTurn(context.Background(), stream, trace.ChiefOfStaff, scope.Turn, q.Claim.Token, f.s.now()))
+	fixturekit.Must(t, repo.CaptureTurn(context.Background(), q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: scope.Turn, RequestID: q.Request.ID, RequestRevision: 1, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "preview-session"}, FinalResponse: "Preview is unavailable", StartedAt: q.Claim.At, SessionDirectory: q.Claim.SessionDirectory}}))
+	fixturekit.Must(t, repo.CompleteTurn(context.Background(), stream, trace.Manager, scope.Turn, q.Claim.Token, f.s.now()))
 }
 
 func seedPreviewOperation(t *testing.T, repo *trace.Repository, scope coreadapter.Scope, raw json.RawMessage, stream config.WorkstreamID, commit string, settings *previewService) previewOperation {
@@ -411,7 +411,7 @@ func resumeSharedPreview(t *testing.T, cross bool) *sharedPreview {
 	}
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { chief.Close() })
-	fixturekit.Must(t, chief.AbandonTurn(context.Background(), host, trace.ChiefOfStaff, scope.Turn, fixturekit.DemoStart))
+	fixturekit.Must(t, chief.AbandonTurn(context.Background(), host, trace.Manager, scope.Turn, fixturekit.DemoStart))
 	target, _, _, err = chiefMember(chief, scope, member)
 	fixturekit.Must(t, err)
 	resumed := scope
@@ -525,7 +525,7 @@ func TestChiefPreviewRestartsCaptureWithoutReceipt(t *testing.T) {
 	seedPreviewOperation(t, repo, scope, raw, stream, commit, previewServiceFixture())
 	moveFeature(t, f, stream, map[string]string{"preview-source.txt": "later branch movement\n"})
 	repo = fixturekit.ReopenTrace(t, f.s.cfg, repo)
-	fixturekit.Must(t, repo.AbandonTurn(context.Background(), stream, trace.ChiefOfStaff, scope.Turn, f.s.now()))
+	fixturekit.Must(t, repo.AbandonTurn(context.Background(), stream, trace.Manager, scope.Turn, f.s.now()))
 	controls := &runtimeControls{}
 	controls.service.Store(f.s)
 	view := previewView(t)
@@ -857,7 +857,7 @@ func TestChiefPreviewResumedCaptureRunsTheCallItPinned(t *testing.T) {
 		raw := json.RawMessage(`{"path":"/pinned"}`)
 		seedPreviewOperation(t, p.repo, p.scope, raw, p.stream, p.commit, settings)
 		repo := fixturekit.ReopenTrace(t, p.f.s.cfg, p.repo)
-		fixturekit.Must(t, repo.AbandonTurn(context.Background(), p.stream, trace.ChiefOfStaff, p.scope.Turn, p.f.s.now()))
+		fixturekit.Must(t, repo.AbandonTurn(context.Background(), p.stream, trace.Manager, p.scope.Turn, p.f.s.now()))
 		resumed := p.scope
 		resumed.Turn = "preview-continuation"
 		view := previewView(t)
@@ -926,7 +926,7 @@ func TestChiefPreviewVerifiesServiceID(t *testing.T) {
 }
 
 func TestChiefPreviewToolContract(t *testing.T) {
-	tool := (&runtimeControls{}).preview(nil, nil, coreadapter.Scope{Role: trace.ChiefOfStaff}, nil, time.Now)
+	tool := (&runtimeControls{}).preview(nil, nil, coreadapter.Scope{Role: trace.Manager}, nil, time.Now)
 	for _, instruction := range []string{"inspect_code", "committed", "call", "port", "Dagger"} {
 		if !strings.Contains(tool.Description, instruction) {
 			t.Fatalf("missing guidance %s", instruction)

@@ -87,14 +87,14 @@ func operationUnit(op coreadapter.Operation) (string, error) {
 }
 
 // MoveUnit moves a unit that has not merged to another state, as actor: the
-// owner, or the chief of staff in turn. The move and its document are recorded
+// owner, or the manager in turn. The move and its document are recorded
 // together. A move to implementing gives the unit's mason a turn with the note
 // and a fresh clean-turn allowance; to checking, a fresh check run of the
 // recorded candidate; to reviewing, a fresh review of it; to approved, an
 // approval of it that the foreman lands; to contested, raises the unit to the
 // owner; and a unit that has not started moves to ready, which its mason starts
 // when its turn comes, or back to planned. A move re-entering the unit's state
-// restarts that stage. The owner's move is a pinned move; the chief of staff's
+// restarts that stage. The owner's move is a pinned move; the manager's
 // is a proposal that the router decides.
 func (s *Controller) MoveUnit(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, req UnitMoveRequest, actor trace.Actor, turn string) (UnitMoveResponse, *APIError) {
 	return s.moveUnit(ctx, repo, stream, unit, req, actor, turn, "")
@@ -314,16 +314,16 @@ func (s *Controller) OwnerMove(ctx context.Context, raw, unit string, req UnitMo
 	return s.MoveUnit(ctx, repo, stream, unit, req, ownerActor, "")
 }
 
-// MoveUnit returns the move_unit tool of one claimed chief-of-staff turn. The
-// chief of staff proposes a move of a unit of its workstream: the transition
+// MoveUnit returns the move_unit tool of one claimed manager turn. The
+// manager proposes a move of a unit of its workstream: the transition
 // router commits it, keeps the unit where it is, or leaves the move as a pending
-// owner decision, and the result says which. A contest the chief of staff raised
+// owner decision, and the result says which. A contest the manager raised
 // or ruled on itself keeps the unit there by default, and Jev may depart from
 // that; a proposal to approve a candidate, and a move out of a contest the
 // owner holds, are the owner's to decide and are left pending on the recovery
 // card. In a turn answering the owner, it records the owner's own move. A move
 // that is not made is an ordinary result, {"recorded":false,"reason":...},
-// which says what became of it. A shared chief of staff names the member whose
+// which says what became of it. A shared manager names the member whose
 // unit moves.
 func (c *Controls) MoveUnit(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: MoveUnitTool, Effect: coreadapter.ToolMemory,
@@ -355,7 +355,7 @@ func (c *Controls) MoveUnit(repository *trace.Repository, scope coreadapter.Scop
 		if err := repository.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
-		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		target, stream, refusal, err := repository.ManagerMember(config.WorkstreamID(scope.Workstream), input.Workstream)
 		if err != nil {
 			return nil, err
 		}
@@ -369,7 +369,7 @@ func (c *Controls) MoveUnit(repository *trace.Repository, scope coreadapter.Scop
 			return priorityRefusal("an abandoned workstream's units do not move")
 		}
 		if input.OwnerDecided {
-			turn, owner, err := repository.OwnerTurn(trace.ChiefOfStaff, scope)
+			turn, owner, err := repository.OwnerTurn(trace.Manager, scope)
 			if err != nil {
 				return nil, err
 			}
@@ -378,7 +378,7 @@ func (c *Controls) MoveUnit(repository *trace.Repository, scope coreadapter.Scop
 			}
 			return moveResult(s.MoveUnit(ctx, target, stream, input.Unit, request, turn.Actor, scope.Turn))
 		}
-		return moveResult(s.MoveUnit(ctx, target, stream, input.Unit, request, chiefActor, scope.Turn))
+		return moveResult(s.MoveUnit(ctx, target, stream, input.Unit, request, managerActor, scope.Turn))
 	}
 	return tool
 }

@@ -41,9 +41,9 @@ func NewPageFixture(t *testing.T) *PageFixture {
 	s, c := Start(t, opts)
 	f := &PageFixture{S: s, C: c}
 	live := service.InspectForTest(s).SoleRepository()
-	_, err = live.EnsureChiefOfStaff(ctx, fixturekit.Stream, at, trace.Actor{Kind: "service", ID: "osmia"})
+	_, err = live.EnsureManager(ctx, fixturekit.Stream, at, trace.Actor{Kind: "service", ID: "osmia"})
 	fixturekit.Must(t, err)
-	f.Chief = fixturekit.ClaimTurn(t, live, t.TempDir(), fixturekit.Stream, trace.ChiefOfStaff, trace.ChiefOfStaff, "status", at)
+	f.Chief = fixturekit.ClaimTurn(t, live, t.TempDir(), fixturekit.Stream, trace.Manager, trace.Manager, "status", at)
 	fixturekit.QueueRoleTurn(t, live, fixturekit.Stream, "agent_mason_upload", "mason", "upload", at)
 	_, err = live.ClaimTurn(ctx, fixturekit.Stream, "agent_mason_upload", "token_upload", t.TempDir(), at)
 	fixturekit.Must(t, err)
@@ -57,6 +57,6 @@ func NewPageFixture(t *testing.T) *PageFixture {
 // Status writes the next status revision through the chief of staff's turn.
 func (f *PageFixture) Status(t *testing.T, content trace.StatusContent) {
 	t.Helper()
-	_, err := service.InspectForTest(f.S).SoleRepository().SetStatus(context.Background(), trace.ChiefOfStaff, f.Chief, content, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	_, err := service.InspectForTest(f.S).SoleRepository().SetStatus(context.Background(), trace.Manager, f.Chief, content, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	fixturekit.Must(t, err)
 }

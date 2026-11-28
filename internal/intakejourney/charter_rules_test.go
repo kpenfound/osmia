@@ -54,18 +54,18 @@ func newCharterFixture(t *testing.T) *charterFixture {
 	}
 	h := trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: "agent_mason", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: f.clock.Now(), Actor: intake.ServiceActor, Cause: "fixture"}
 	fixturekit.Must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: intake.MasonRole, ThreadID: "thread_mason"}))
-	_, err = repo.EnsureChiefOfStaff(ctx, fixturekit.Stream, f.clock.Now(), intake.ServiceActor)
+	_, err = repo.EnsureManager(ctx, fixturekit.Stream, f.clock.Now(), intake.ServiceActor)
 	fixturekit.Must(t, err)
 	mason := f.claim(t, repo, "agent_mason", "thread_mason", intake.MasonRole, "build", intake.ServiceActor)
 	_, err = repo.Ask(ctx, "agent_mason", mason, "May an upload restart from zero?", f.clock.Now())
 	fixturekit.Must(t, err)
-	chief := f.claim(t, repo, trace.ChiefOfStaff, trace.ChiefOfStaff, trace.ChiefOfStaff, "events_1", intake.ServiceActor)
-	_, err = repo.EscalateQuestions(ctx, trace.ChiefOfStaff, chief, trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "May an upload restart from zero?",
+	chief := f.claim(t, repo, trace.Manager, trace.Manager, trace.Manager, "events_1", intake.ServiceActor)
+	_, err = repo.EscalateQuestions(ctx, trace.Manager, chief, trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "May an upload restart from zero?",
 		Blocked: "The upload unit.", Options: []string{"Resume", "Restart"}, Recommendation: "Resume."}, f.clock.Now())
 	fixturekit.Must(t, err)
 	_, err = repo.Rule(ctx, 1, intakefixture.CharterRuling, intake.OwnerActor, f.clock.Now())
 	fixturekit.Must(t, err)
-	tools, err := questions.Tools(repo, trace.ChiefOfStaff, chief, f.clock.Now)
+	tools, err := questions.Tools(repo, trace.Manager, chief, f.clock.Now)
 	fixturekit.Must(t, err)
 	for _, tool := range tools {
 		if tool.Name != questions.ProposeCharterTool {
@@ -82,7 +82,7 @@ func newCharterFixture(t *testing.T) *charterFixture {
 	repo, err = trace.Open(f.cfg.Root, f.cfg.Project)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.AbandonTurn(ctx, fixturekit.Stream, "agent_mason", "build", f.clock.Now()))
-	fixturekit.Must(t, repo.AbandonTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "events_1", f.clock.Now()))
+	fixturekit.Must(t, repo.AbandonTurn(ctx, fixturekit.Stream, trace.Manager, "events_1", f.clock.Now()))
 	fixturekit.Must(t, repo.Close())
 	return f
 }
@@ -214,13 +214,13 @@ func TestDeclinedCharterProposalChangesNothing(t *testing.T) {
 	defer func() { _ = repo.Close() }()
 	before := intakefixture.CharterRevisions(t, repo)
 	_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_message_1", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: "fixture"},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "message_1", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "chief", Prompt: "Decline the charter rule."})
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "message_1", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "chief", Prompt: "Decline the charter rule."})
 	fixturekit.Must(t, err)
-	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "token-message", filepath.Join(t.TempDir(), "message"), fixturekit.DemoStart)
+	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.Manager, "token-message", filepath.Join(t.TempDir(), "message"), fixturekit.DemoStart)
 	fixturekit.Must(t, err)
 	controls := &journey.RuntimeControls{}
 	controls.Service.Store(f.s)
-	scope := coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(fixturekit.Stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "message_1"}
+	scope := coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(fixturekit.Stream), Role: trace.Manager, Thread: trace.Manager, Turn: "message_1"}
 	out, err := controls.DecideCharter(repo, scope).Handle(ctx, json.RawMessage(`{"question":"1","decision":"decline","note":"It is this feature's call."}`))
 	fixturekit.Must(t, err)
 	if want := `{"recorded":true,"question":"1","state":"declined","detail":"the owner declined the charter proposal of question 1; the charter is unchanged: It is this feature's call."}`; string(out) != want {

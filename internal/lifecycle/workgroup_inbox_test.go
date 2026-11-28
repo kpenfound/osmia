@@ -102,14 +102,14 @@ clone = "`+home2+`"
 	}
 	views := filepath.Join(cfg.Root.String(), "views")
 	fixturekit.Must(t, os.Mkdir(views, 0700))
-	agents := map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff, "thread_mason": fixturekit.DemoAgent, "thread_mason2": "agent_mason2", "thread_u1": "agent_u1", "thread_u2": "agent_u2"}
+	agents := map[string]string{trace.Manager: trace.Manager, "thread_mason": fixturekit.DemoAgent, "thread_mason2": "agent_mason2", "thread_u1": "agent_u1", "thread_u2": "agent_u2"}
 	every := append([]string{"file_read", questions.AskTool}, questions.ChiefTools...)
 	f.cfg.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		f.mu.Lock()
 		f.live[r.Project()] = r
 		f.mu.Unlock()
 		turns := &isolation.Turns{Workspaces: &fixturekit.DemoWorkspaces{}, Views: isolation.Views{Directory: views}, Engine: f.engine,
-			Grants: map[string]coreadapter.Capabilities{"mason": {Tools: every}, "reviewer": {Tools: every}, trace.ChiefOfStaff: {Tools: every}, trace.Designer: {Tools: every}},
+			Grants: map[string]coreadapter.Capabilities{"mason": {Tools: every}, "reviewer": {Tools: every}, trace.Manager: {Tools: every}, trace.Designer: {Tools: every}},
 			Select: func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			},
@@ -118,7 +118,7 @@ clone = "`+home2+`"
 				if err != nil {
 					return nil, err
 				}
-				if scope.Role == trace.ChiefOfStaff {
+				if scope.Role == trace.Manager {
 					list = jevfixture.AutoDecide(r, config.WorkstreamID(scope.Workstream), list)
 				}
 				return list, nil
@@ -600,7 +600,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		}{
 			{repo1, f.stream1, fixturekit.DemoAgent}, {repo2, f.stream2, "agent_mason2"},
 			{repo1, unrelatedStream1, "agent_u1"}, {repo2, unrelatedStream2, "agent_u2"},
-			{repo1, unrelatedStream1, trace.ChiefOfStaff}, {repo2, unrelatedStream2, trace.ChiefOfStaff},
+			{repo1, unrelatedStream1, trace.Manager}, {repo2, unrelatedStream2, trace.Manager},
 		} {
 			th, err := m.repo.Thread(m.stream, m.agent)
 			fixturekit.Must(t, err)
@@ -609,7 +609,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		target, host, _, close, err := s.Lifecycle().ChiefRepository(ctx, repo1, f.stream1)
 		fixturekit.Must(t, err)
 		defer close()
-		th, err := target.ChiefOfStaffThread(host)
+		th, err := target.ManagerThread(host)
 		fixturekit.Must(t, err)
 		threads = append(threads, th)
 		data, err := json.Marshal(threads)

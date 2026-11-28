@@ -45,7 +45,7 @@ func queuedWork(s *Service, r *trace.Repository, stream config.WorkstreamID) (qu
 			turns[t.Identity.ID+"\n"+q.Request.TurnID] = true
 		}
 		roles[t.Identity.ID] = t.Identity.Role
-		if trace.ChiefLike(t.Identity.Role) || t.Identity.Role == sessionRole {
+		if trace.ManagerLike(t.Identity.Role) || t.Identity.Role == sessionRole {
 			continue
 		}
 		for _, q := range t.Turns {

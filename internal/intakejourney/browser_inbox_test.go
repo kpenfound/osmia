@@ -56,10 +56,10 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	}
 	first := ask(fixturekit.DemoAgent, fixturekit.DemoThread, "Where does upload state live?")
 	second := ask("agent_mason_history", "thread_mason_history", "May I rewrite the branch history?")
-	_, err := live.EscalateQuestions(ctx, trace.ChiefOfStaff, f.Chief, trace.EscalationRequest{Questions: []string{first.ID}, Rephrasing: "Where should upload state live?",
+	_, err := live.EscalateQuestions(ctx, trace.Manager, f.Chief, trace.EscalationRequest{Questions: []string{first.ID}, Rephrasing: "Where should upload state live?",
 		Blocked: "The upload unit.", Options: []string{"Files", "A database"}, Recommendation: "Keep it in files."}, at)
 	fixturekit.Must(t, err)
-	_, err = live.EscalateQuestions(ctx, trace.ChiefOfStaff, f.Chief, trace.EscalationRequest{Questions: []string{second.ID}, Rephrasing: "May the mason rewrite the branch history?",
+	_, err = live.EscalateQuestions(ctx, trace.Manager, f.Chief, trace.EscalationRequest{Questions: []string{second.ID}, Rephrasing: "May the mason rewrite the branch history?",
 		Blocked: "The upload unit.", Recommendation: "Force-push the cleaned branch."}, at)
 	fixturekit.Must(t, err)
 	plantReport(t, live, fixturekit.Stream, "index", at)

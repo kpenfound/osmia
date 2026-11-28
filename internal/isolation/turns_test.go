@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 	a "github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 type leaseFunc func(context.Context) error
@@ -668,13 +669,13 @@ func TestPreviewIsChiefServiceTool(t *testing.T) {
 	}
 }
 
-func TestVerifyIsOnlyForTheChiefAndTheReviewingRoles(t *testing.T) {
-	for _, role := range []string{"chief_of_staff", "architect", "mason", "reviewer", "committee", "foreman", "session"} {
+func TestVerifyIsOnlyForTheManagerAndTheReviewingRoles(t *testing.T) {
+	for _, role := range []string{trace.Manager, "architect", "mason", "reviewer", "committee", "foreman", "session"} {
 		grant, err := roleGrant(role, a.Capabilities{Tools: []string{"verify"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := role == "chief_of_staff" || role == "reviewer" || role == "committee"
+		want := role == trace.Manager || role == "reviewer" || role == "committee"
 		if slices.Contains(grant.Tools, "verify") != want {
 			t.Fatalf("verify grant for %s: %+v", role, grant)
 		}

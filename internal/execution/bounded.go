@@ -14,7 +14,7 @@ import (
 )
 
 // FailureNotice is the number of consecutive failed attempts of a landing or a
-// rebase at which the chief of staff is told. It matches the failures at
+// rebase at which the manager is told. It matches the failures at
 // which a publication opens its inbox entry.
 const FailureNotice = 3
 

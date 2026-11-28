@@ -455,11 +455,11 @@ func (c *Controls) DecideAmendment(repository *trace.Repository, scope coreadapt
 		if s == nil {
 			return nil, errors.New("amendment decisions are unavailable")
 		}
-		request, owner, err := repository.OwnerTurn(trace.ChiefOfStaff, scope)
+		request, owner, err := repository.OwnerTurn(trace.Manager, scope)
 		if err != nil {
 			return nil, err
 		}
-		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		target, stream, refusal, err := repository.ManagerMember(config.WorkstreamID(scope.Workstream), input.Workstream)
 		if err != nil {
 			return nil, err
 		}
@@ -469,7 +469,7 @@ func (c *Controls) DecideAmendment(repository *trace.Repository, scope coreadapt
 		if input.OwnerDecided && !owner {
 			return PriorityRefusal("this turn does not answer an owner message")
 		}
-		actor := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+		actor := trace.Actor{Kind: "agent", ID: trace.Manager}
 		decision := AmendmentDecisionRequest{Decision: input.Decision, Note: input.Note, Packet: input.Packet}
 		var bound *jev.Result
 		var out AmendmentResponse
@@ -884,7 +884,7 @@ func AmendmentRulingPrompt(req trace.Amendment, d AmendmentDecision, role, outco
 	sections := []envelope.Section{{Name: "question", Text: request}}
 	if d.Note != "" {
 		section := "owner_response"
-		if d.Actor == trace.ChiefOfStaff {
+		if d.Actor == trace.Manager {
 			section = "answer"
 		} else if d.Actor == AmendmentActor.ID {
 			section = "service_response"
@@ -933,7 +933,7 @@ func (a AmendmentDebate) ResumeUnit(ctx context.Context, stream config.Workstrea
 		return nil
 	}
 	reason := fmt.Sprintf("unit %s resumes %s: the owner %s amendment %s, and the ruling is the %s's next turn", req.Unit, stage, verb, req.ID, wait.Actor.ID)
-	if actor == trace.ChiefOfStaff {
+	if actor == trace.Manager {
 		reason = strings.ReplaceAll(reason, "the owner", "the chief of staff")
 	} else if actor == AmendmentActor.ID {
 		reason = strings.ReplaceAll(reason, "the owner", "the service")
@@ -995,7 +995,7 @@ func (a AmendmentDebate) resealClimb(ctx context.Context, stream config.Workstre
 		From:     amendment.Pin{Seal: current.Seal, SealRevision: sealDoc.Revision, Spec: current.Revision.Spec},
 		To:       amendment.Pin{Seal: next.Seal, SealRevision: sealDoc.Revision + 1, Spec: next.Revision.Spec},
 		Criteria: []string{}, Rework: []string{}, Notify: []string{}, Added: []string{}, Removed: []string{}}
-	if d.Actor == trace.ChiefOfStaff {
+	if d.Actor == trace.Manager {
 		application.Actor = d.Actor
 	}
 	applied, err := json.MarshalIndent(application, "", "  ")

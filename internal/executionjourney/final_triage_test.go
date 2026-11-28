@@ -62,7 +62,7 @@ func newTriageKit(t *testing.T, key string, provider *jevtest.Provider) *triageK
 		Turn: "events_1", Prompt: "The final review is recorded.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-events", Directory: "events",
 	})
 	decide, triage := inspect.DecideTool(repository, scope), inspect.TriageTool(repository, scope)
-	list, err := questions.Tools(repository, trace.ChiefOfStaff, scope, f.S.Now)
+	list, err := questions.Tools(repository, trace.Manager, scope, f.S.Now)
 	fixturekit.Must(t, err)
 	i := slices.IndexFunc(list, func(tool coreadapter.Tool) bool { return tool.Name == questions.RouteAmendmentTool })
 	if i < 0 {

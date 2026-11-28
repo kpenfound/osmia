@@ -570,11 +570,11 @@ func chiefChecksTarget(load func() *Controller, repository *trace.Repository, sc
 	if err := repository.ActiveTurn(scope); err != nil {
 		return nil, nil, "", nil, err
 	}
-	if scope.Role != trace.ChiefOfStaff {
+	if scope.Role != trace.Manager {
 		out, err := refusal(name + " is only available to the chief of staff")
 		return nil, nil, "", out, err
 	}
-	target, stream, why, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), workstream())
+	target, stream, why, err := repository.ManagerMember(config.WorkstreamID(scope.Workstream), workstream())
 	if err != nil {
 		return nil, nil, "", nil, err
 	}

@@ -91,7 +91,7 @@ func (f *fixture) notify(t *testing.T, repo *trace.Repository, id string) {
 
 func eventTurns(t *testing.T, repo *trace.Repository) []trace.QueuedTurn {
 	t.Helper()
-	th, err := repo.ChiefOfStaffThread(stream)
+	th, err := repo.ManagerThread(stream)
 	must(t, err)
 	var out []trace.QueuedTurn
 	for _, q := range th.Turns {
@@ -106,7 +106,7 @@ func (f *fixture) claimNext(t *testing.T, repo *trace.Repository) trace.QueuedTu
 	t.Helper()
 	f.claims++
 	token := fmt.Sprintf("run_%d", f.claims)
-	q, err := repo.ClaimTurn(context.Background(), stream, trace.ChiefOfStaff, token, "/sessions/"+token, f.clock.Now())
+	q, err := repo.ClaimTurn(context.Background(), stream, trace.Manager, token, "/sessions/"+token, f.clock.Now())
 	must(t, err)
 	return q
 }
@@ -116,18 +116,18 @@ func (f *fixture) finish(t *testing.T, repo *trace.Repository, q trace.QueuedTur
 	ctx := context.Background()
 	h := q.Request.Header
 	h.Schema, h.ID, h.At = "osmia.trace.turn-response", "response_"+q.Request.TurnID, f.clock.Now()
-	response := trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: 1,
+	response := trace.TurnResponse{Header: h, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: 1,
 		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, FinalResponse: "Noted"}}
 	if !ok {
 		response.Result.IsError, response.Failure = true, "the turn failed"
 	}
 	must(t, repo.CaptureTurn(ctx, q.Claim.Token, response))
-	must(t, repo.CompleteTurn(ctx, stream, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, f.clock.Now()))
+	must(t, repo.CompleteTurn(ctx, stream, trace.Manager, q.Request.TurnID, q.Claim.Token, f.clock.Now()))
 }
 
 func (f *fixture) runAll(t *testing.T, repo *trace.Repository) {
 	t.Helper()
-	th, err := repo.ChiefOfStaffThread(stream)
+	th, err := repo.ManagerThread(stream)
 	must(t, err)
 	for _, q := range th.Turns {
 		if q.Claim == nil {
@@ -188,7 +188,7 @@ func TestEventsInsideTheWindowMakeOneTurn(t *testing.T) {
 	if req.Prompt != want {
 		t.Fatalf("prompt %q", req.Prompt)
 	}
-	if req.AgentID != trace.ChiefOfStaff || req.ThreadID != trace.ChiefOfStaff || req.Profile != profile || req.Cause != "first" || !req.At.Equal(f.clock.Now()) || req.SystemPrompt != "" {
+	if req.AgentID != trace.Manager || req.ThreadID != trace.Manager || req.Profile != profile || req.Cause != "first" || !req.At.Equal(f.clock.Now()) || req.SystemPrompt != "" {
 		t.Fatalf("request %+v", req)
 	}
 	if n := unacknowledged(t, repo); n != 3 {
@@ -219,7 +219,7 @@ func TestOperationEventsAreNotDelivered(t *testing.T) {
 	f, repo := setup(t)
 	defer repo.Close()
 	event := trace.EventID("dispatch", "turn")
-	op, err := thread.TurnOperation(project, event, thread.TurnInput{Workstream: stream, Agent: trace.ChiefOfStaff, Turn: "turn"})
+	op, err := thread.TurnOperation(project, event, thread.TurnInput{Workstream: stream, Agent: trace.Manager, Turn: "turn"})
 	must(t, err)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "dispatch", Project: project, Workstream: stream, At: start, Actor: owner, Cause: "test"}
 	_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: "dispatch", To: "turn", Reason: "Dispatch"},
@@ -247,7 +247,7 @@ func TestOnlyTheChiefOfStaffReceivesEvents(t *testing.T) {
 	must(t, err)
 	for _, th := range threads {
 		want := 0
-		if th.Identity.ID == trace.ChiefOfStaff {
+		if th.Identity.ID == trace.Manager {
 			want = 1
 		}
 		if len(th.Turns) != want {
@@ -261,20 +261,20 @@ func TestEventTurnQueuesBehindTheTurnInFlight(t *testing.T) {
 	f, repo := setup(t)
 	defer repo.Close()
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_owner", Project: project, Workstream: stream, At: start, Actor: owner, Cause: "message"},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "owner", Profile: profile, Prompt: "Owner message"}
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "owner", Profile: profile, Prompt: "Owner message"}
 	_, err := repo.EnqueueTurn(ctx, req)
 	must(t, err)
 	s, err := scheduler.New(repo, scheduler.Options{Now: f.clock.Now})
 	must(t, err)
 	must(t, s.Pass(ctx))
-	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "claim", filepath.Join(t.TempDir(), "session"), start)
+	_, err = repo.ClaimTurn(ctx, stream, trace.Manager, "claim", filepath.Join(t.TempDir(), "session"), start)
 	must(t, err)
 
 	f.notify(t, repo, "first")
 	f.clock.Advance(time.Minute)
 	must(t, f.deliverer(t, repo, time.Second).Pass(ctx))
 	must(t, s.Pass(ctx))
-	th, err := repo.ChiefOfStaffThread(stream)
+	th, err := repo.ManagerThread(stream)
 	must(t, err)
 	if th.Active != "owner" || len(th.Turns) != 2 || th.Turns[1].Request.Actor != Actor || th.Turns[1].Claim != nil {
 		t.Fatalf("thread %+v", th)
@@ -490,7 +490,7 @@ func TestEventOfAFailedTurnIsDeliveredInOneNewTurn(t *testing.T) {
 			if c.cancelled {
 				n, err := repo.CancelTurns(ctx, stream, f.clock.Now(), owner, "The owner cancelled the turn")
 				must(t, err)
-				if th, err := repo.ChiefOfStaffThread(stream); err != nil || n != 1 || th.Turns[0].Status() != "interrupted" {
+				if th, err := repo.ManagerThread(stream); err != nil || n != 1 || th.Turns[0].Status() != "interrupted" {
 					t.Fatalf("cancelled %d: %+v, %v", n, th, err)
 				}
 			} else {
@@ -727,7 +727,7 @@ func TestRepeatedlyFailedEventIsHeldUntilTheChiefAnswersTheOwner(t *testing.T) {
 	}
 	entries, err := repo.Outbox(stream)
 	must(t, err)
-	th, err := repo.ChiefOfStaffThread(stream)
+	th, err := repo.ManagerThread(stream)
 	must(t, err)
 	i := slices.IndexFunc(entries, func(e trace.OutboxEntry) bool { return strings.Contains(e.Event.Body, "first") })
 	if last, held := Held(entries[i], th); !held || last.Response == nil || last.Response.Failure != "the turn failed" {
@@ -743,7 +743,7 @@ func TestRepeatedlyFailedEventIsHeldUntilTheChiefAnswersTheOwner(t *testing.T) {
 	f.finish(t, repo, f.claimNext(t, repo), true)
 
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_owner", Project: project, Workstream: stream, At: f.clock.Now(), Actor: owner, Cause: "message"},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "owner", Profile: profile, Prompt: "The provider is back."}
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "owner", Profile: profile, Prompt: "The provider is back."}
 	_, err = repo.EnqueueTurn(ctx, req)
 	must(t, err)
 	f.finish(t, repo, f.claimNext(t, repo), true)
@@ -838,7 +838,7 @@ func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelive
 	must(t, wt.Close())
 
 	snapshotThread := func(repo *trace.Repository, stream config.WorkstreamID) []trace.QueuedTurn {
-		th, err := repo.ChiefOfStaffThread(stream)
+		th, err := repo.ManagerThread(stream)
 		must(t, err)
 		return slices.Clone(th.Turns)
 	}
@@ -879,7 +879,7 @@ func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelive
 
 	assertNoEventTurnAdded := func(repo *trace.Repository, stream config.WorkstreamID, snapshot []trace.QueuedTurn) {
 		t.Helper()
-		th, err := repo.ChiefOfStaffThread(stream)
+		th, err := repo.ManagerThread(stream)
 		must(t, err)
 		bad := len(th.Turns) != len(snapshot)
 		for _, q := range th.Turns {
@@ -897,7 +897,7 @@ func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelive
 	wt2, err := trace.OpenWorkgroupTrace(f.root, g.ID, members())
 	must(t, err)
 	defer func() { wt2.Close() }()
-	th, err := wt2.ChiefOfStaffThread(stream)
+	th, err := wt2.ManagerThread(stream)
 	must(t, err)
 	var queued []trace.QueuedTurn
 	for _, q := range th.Turns {
@@ -913,14 +913,14 @@ func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelive
 	}
 
 	host := g.Members[0]
-	q, err := wt2.ClaimTurn(ctx, host, trace.ChiefOfStaff, "run_1", "/sessions/run_1", f.clock.Now())
+	q, err := wt2.ClaimTurn(ctx, host, trace.Manager, "run_1", "/sessions/run_1", f.clock.Now())
 	must(t, err)
 	h := q.Request.Header
 	h.Schema, h.ID, h.At = "osmia.trace.turn-response", "response_"+q.Request.TurnID, f.clock.Now()
-	response := trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: 1,
+	response := trace.TurnResponse{Header: h, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: 1,
 		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, FinalResponse: "Noted"}}
 	must(t, wt2.CaptureTurn(ctx, q.Claim.Token, response))
-	must(t, wt2.CompleteTurn(ctx, host, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, f.clock.Now()))
+	must(t, wt2.CompleteTurn(ctx, host, trace.Manager, q.Request.TurnID, q.Claim.Token, f.clock.Now()))
 
 	must(t, d.Pass(ctx))
 
@@ -939,7 +939,7 @@ func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelive
 		t.Fatalf("event acknowledged %d times, want 1: %+v", acked, entries)
 	}
 
-	th, err = wt2.ChiefOfStaffThread(stream)
+	th, err = wt2.ManagerThread(stream)
 	must(t, err)
 	n := 0
 	for _, q := range th.Turns {

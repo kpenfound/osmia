@@ -11,7 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// CodeInspection fixes the source behind a chief's code-based answer.
+// CodeInspection fixes the source behind a manager's code-based answer.
 type CodeInspection struct {
 	Commit  string `json:"commit"`
 	Path    string `json:"path"`
@@ -27,7 +27,7 @@ func (r *Repository) RecordCodeInspection(ctx context.Context, scope coreadapter
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	agent := ChiefOfStaff
+	agent := Manager
 	if scope.Role == "architect" {
 		agent = "agent_architect"
 	}
@@ -35,7 +35,7 @@ func (r *Repository) RecordCodeInspection(ctx context.Context, scope coreadapter
 	if err != nil {
 		return "", err
 	}
-	if scope.Role != ChiefOfStaff && scope.Role != "architect" {
+	if scope.Role != Manager && scope.Role != "architect" {
 		return "", fmt.Errorf("code inspection is not granted")
 	}
 	data, err := json.Marshal(inspection)

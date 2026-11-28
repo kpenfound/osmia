@@ -19,8 +19,8 @@ const (
 )
 
 // Workgroup is one feature request in flight in a project: one or more
-// workstreams sharing a chief of staff. A workgroup wrapping exactly one
-// workstream has no chief-of-staff thread of its own; that workstream's own
+// workstreams sharing a manager. A workgroup wrapping exactly one
+// workstream has no manager thread of its own; that workstream's own
 // existing thread serves as the workgroup's.
 type Workgroup struct {
 	ID           config.WorkgroupID    `json:"id"`
@@ -110,7 +110,7 @@ func EnsureWorkgroups(ctx context.Context, r *Repository, missing []config.Works
 }
 
 // CreateWorkgroup records one new workgroup holding exactly members, who
-// share its chief of staff from then on. It refuses, writing nothing, if
+// share its manager from then on. It refuses, writing nothing, if
 // members is empty, lists a workstream twice or names one that already
 // belongs to a recorded workgroup.
 func CreateWorkgroup(ctx context.Context, r *Repository, members []config.WorkstreamID, at time.Time, actor Actor, cause string) (Workgroup, error) {
@@ -189,29 +189,29 @@ func (r *Repository) RetractWorkgroup(ctx context.Context, stream config.Workstr
 	})
 }
 
-// ChiefOfStaffHost returns the workstream whose chief-of-staff thread serves
+// ManagerHost returns the workstream whose manager thread serves
 // the whole workgroup stream belongs to: the workgroup's first recorded
 // member. A stream with no recorded workgroup is its own one-workstream
 // workgroup and is its own host. r must be the project's own repository, not
 // an instance already scoped to one workstream: workgroups.json is a
 // project document.
-func (r *Repository) ChiefOfStaffHost(stream config.WorkstreamID) (config.WorkstreamID, error) {
+func (r *Repository) ManagerHost(stream config.WorkstreamID) (config.WorkstreamID, error) {
 	groups, _, err := Workgroups(r)
 	if err != nil {
 		return "", err
 	}
-	return chiefOfStaffHost(groups, stream), nil
+	return managerHost(groups, stream), nil
 }
 
-func chiefOfStaffHost(groups []Workgroup, stream config.WorkstreamID) config.WorkstreamID {
+func managerHost(groups []Workgroup, stream config.WorkstreamID) config.WorkstreamID {
 	if g, ok := WorkgroupOf(groups, stream); ok && len(g.Members) > 0 {
 		return g.Members[0]
 	}
 	return stream
 }
 
-// WorkgroupMembers returns every workstream that shares stream's chief of
-// staff: stream alone when no workgroup is recorded for it. r must be the
+// WorkgroupMembers returns every workstream that shares stream's manager:
+// stream alone when no workgroup is recorded for it. r must be the
 // project's own repository.
 func (r *Repository) WorkgroupMembers(stream config.WorkstreamID) ([]config.WorkstreamID, error) {
 	groups, _, err := Workgroups(r)
@@ -224,12 +224,12 @@ func (r *Repository) WorkgroupMembers(stream config.WorkstreamID) ([]config.Work
 	return []config.WorkstreamID{stream}, nil
 }
 
-// ChiefQuestionTarget resolves which member workstream, and that member's
-// own local question ID, a chief-of-staff tool's id argument names: id names
+// ManagerQuestionTarget resolves which member workstream, and that member's
+// own local question ID, a manager tool's id argument names: id names
 // a question of the turn's own workstream when it carries no qualifier, and
 // "<workstream>:<id>" names one of any other member of the shared workgroup.
 // r must be the project's own repository.
-func (r *Repository) ChiefQuestionTarget(host config.WorkstreamID, id string) (config.WorkstreamID, string, error) {
+func (r *Repository) ManagerQuestionTarget(host config.WorkstreamID, id string) (config.WorkstreamID, string, error) {
 	stream, local, ok := strings.Cut(id, ":")
 	if !ok {
 		return host, id, nil
@@ -244,13 +244,13 @@ func (r *Repository) ChiefQuestionTarget(host config.WorkstreamID, id string) (c
 	return config.WorkstreamID(stream), local, nil
 }
 
-// ChiefMember resolves the workstream a chief-of-staff tool's workstream
+// ManagerMember resolves the workstream a manager tool's workstream
 // input names, and the project-level repository holding that workstream's
 // trace: own on r itself when named is empty or own, or another member
-// sharing own's chief of staff, on that member's own repo. A non-empty
+// sharing own's manager, on that member's own repo. A non-empty
 // refusal names a workstream that does not share it. r must be the
 // project's own repository.
-func (r *Repository) ChiefMember(own, named config.WorkstreamID) (*Repository, config.WorkstreamID, string, error) {
+func (r *Repository) ManagerMember(own, named config.WorkstreamID) (*Repository, config.WorkstreamID, string, error) {
 	if named == "" || named == own {
 		return r, own, "", nil
 	}

@@ -41,9 +41,9 @@ func TestFactoryPolicyAdoptsInflightWorkOnceAcrossRestart(t *testing.T) {
 	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: h, Path: plan.PlanPath, Content: fixturekit.ValidPlan}}))
 	before, err := trace.Read[trace.Document](repo, stream)
 	fixturekit.Must(t, err)
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_legacy", Revision: 1, Project: repo.Project(), Workstream: stream, At: at, Actor: serviceActor, Cause: "legacy-build"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "legacy", Profile: coreadapter.Profile{Backend: "claude", Name: "default", Model: "test"}, SystemPrompt: "Only the owner decides amendments.", Prompt: "Recover this workstream."})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_legacy", Revision: 1, Project: repo.Project(), Workstream: stream, At: at, Actor: serviceActor, Cause: "legacy-build"}, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "legacy", Profile: coreadapter.Profile{Backend: "claude", Name: "default", Model: "test"}, SystemPrompt: "Only the owner decides amendments.", Prompt: "Recover this workstream."})
 	fixturekit.Must(t, err)
-	thread, err := repo.Thread(stream, trace.ChiefOfStaff)
+	thread, err := repo.Thread(stream, trace.Manager)
 	fixturekit.Must(t, err)
 
 	canceled, cancel := context.WithCancel(ctx)
@@ -75,7 +75,7 @@ func TestFactoryPolicyAdoptsInflightWorkOnceAcrossRestart(t *testing.T) {
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("adoption rewrote sealed documents")
 	}
-	afterThread, err := repo.Thread(stream, trace.ChiefOfStaff)
+	afterThread, err := repo.Thread(stream, trace.Manager)
 	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(thread, afterThread) {
 		t.Fatal("adoption rewrote queued requests or conversation history")
@@ -121,7 +121,7 @@ func TestResumedRolesReceiveCurrentFactoryInstructionsWithoutHearsay(t *testing.
 	f, stream, repo, _ := newFinalFixture(t, "resumed-policy")
 	defer repo.Close()
 	turns := memoryTurns(&isolation.Turns{}, f.s.cfg, repo)
-	for _, role := range []string{trace.ChiefOfStaff, masonRole, reviewerRole, architectRole, committeeRole} {
+	for _, role := range []string{trace.Manager, masonRole, reviewerRole, architectRole, committeeRole} {
 		scope := coreadapter.Scope{Workstream: string(stream), Role: role}
 		if role == masonRole || role == reviewerRole {
 			scope.Unit = "resume"
@@ -137,7 +137,7 @@ func TestResumedRolesReceiveCurrentFactoryInstructionsWithoutHearsay(t *testing.
 	}
 }
 
-var policyRoles = []string{trace.ChiefOfStaff, masonRole, reviewerRole, architectRole, committeeRole}
+var policyRoles = []string{trace.Manager, masonRole, reviewerRole, architectRole, committeeRole}
 
 func policyFor(t *testing.T, role, kind, turn string) string {
 	t.Helper()
@@ -162,7 +162,7 @@ func TestHillClimbArchitectAndCommitteeReceiveNoPlanAdvice(t *testing.T) {
 			}
 		}
 	}
-	for _, role := range []string{trace.ChiefOfStaff, masonRole, reviewerRole} {
+	for _, role := range []string{trace.Manager, masonRole, reviewerRole} {
 		got := policyFor(t, role, kindreg.HillClimb, "")
 		for _, banned := range []string{"size each unit", "connecting the feature", "plan revisions", "Neighboring assignments", "Footprints schedule work", "Plans and units"} {
 			if strings.Contains(got, banned) {
@@ -186,7 +186,7 @@ func TestFeatureArchitectAndCommitteeStillReceivePlanAdvice(t *testing.T) {
 	if strings.Contains(final, "whole check suite") || strings.Contains(final, "service-owned check gate") {
 		t.Errorf("a final committee turn receives unit-review wording: %s", final)
 	}
-	if got := policyFor(t, trace.ChiefOfStaff, kindreg.Feature, ""); !strings.Contains(got, "do not commission a revision only to widen one") || !strings.Contains(got, "approving a candidate stay the owner's") {
+	if got := policyFor(t, trace.Manager, kindreg.Feature, ""); !strings.Contains(got, "do not commission a revision only to widen one") || !strings.Contains(got, "approving a candidate stay the owner's") {
 		t.Errorf("feature chief lost its footprint or approval rule: %s", got)
 	}
 }

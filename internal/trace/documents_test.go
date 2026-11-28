@@ -661,9 +661,9 @@ func TestUnitAndFinalDocumentPathsAreValidated(t *testing.T) {
 	if err := r.RecordDocuments(ctx, []Document{move}); err != nil {
 		t.Fatal(err)
 	}
-	chief := unitReport("{\"decision\":\"escalate\"}\n", 1)
-	chief.ID, chief.Path = "unit-parser-chief-contest-1", "units/parser/chief-contest-1.json"
-	if err := r.RecordDocuments(ctx, []Document{chief}); err != nil {
+	manager := unitReport("{\"decision\":\"escalate\"}\n", 1)
+	manager.ID, manager.Path = "unit-parser-chief-contest-1", "units/parser/chief-contest-1.json"
+	if err := r.RecordDocuments(ctx, []Document{manager}); err != nil {
 		t.Fatal(err)
 	}
 }

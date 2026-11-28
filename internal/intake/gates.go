@@ -371,7 +371,7 @@ func (s *Controller) objectionGates(repository *trace.Repository, stream config.
 		reached := e.OpenedAt
 		if docs, err := trace.Read[trace.Document](repository, stream); err == nil && kind == jev.KindEscalatedObjection {
 			for _, d := range docs {
-				if d.Path == shed.ChiefPath(round) {
+				if d.Path == shed.ManagerPath(round) {
 					reached = d.At
 				}
 			}
@@ -384,7 +384,7 @@ func (s *Controller) objectionGates(repository *trace.Repository, stream config.
 			why = "it is the owner's own objection"
 		}
 		g := Gate{Kind: kind, Project: project, Stream: stream, Key: jev.ObjectionKey(entry.ID),
-			Label: fmt.Sprintf("objection %s of workstream %s", entry.ID, stream), Cause: shed.ChiefDocumentID(round), Reached: reached,
+			Label: fmt.Sprintf("objection %s of workstream %s", entry.ID, stream), Cause: shed.ManagerDocumentID(round), Reached: reached,
 			Options: []jev.DecisionOption{
 				{Name: string(shed.Dismissed), Description: "Dismiss the objection: it is settled, blocks no longer and is kept as the recorded disposition."},
 				{Name: string(shed.Overruled), Description: "Overrule the objection: proceed in spite of it; it blocks no longer and is kept as the recorded disposition."}}}
@@ -399,9 +399,9 @@ func (s *Controller) objectionGates(repository *trace.Repository, stream config.
 					GateSection(&b, fmt.Sprintf("Spec (revision %d)", packet.Revision.Spec), spec, maxGateSpec)
 				}
 				GateSection(&b, "Charter", s.charterText(ctx, project), maxGateCharter)
-				return b.String(), []jev.Source{{Kind: "packet", ID: shed.PacketDocumentID(packet.Round), Revision: doc.Revision}, {Kind: "chief-decisions", ID: shed.ChiefDocumentID(round)}}, nil
+				return b.String(), []jev.Source{{Kind: "packet", ID: shed.PacketDocumentID(packet.Round), Revision: doc.Revision}, {Kind: "chief-decisions", ID: shed.ManagerDocumentID(round)}}, nil
 			}
-			return b.String(), []jev.Source{{Kind: "chief-decisions", ID: shed.ChiefDocumentID(round)}}, nil
+			return b.String(), []jev.Source{{Kind: "chief-decisions", ID: shed.ManagerDocumentID(round)}}, nil
 		}
 		g.Apply = func(ctx context.Context, res jev.Result) *APIError {
 			disposition := shed.Disposition(res.Pick)

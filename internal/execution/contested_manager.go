@@ -19,26 +19,26 @@ import (
 
 const ResolveContestedTool = "resolve_contested"
 
-const ChiefContestLimit = -1
+const ManagerContestLimit = -1
 
 const EscalateContest = "escalate"
 
-func ChiefContestPath(unit, contest string) string {
-	return fmt.Sprintf("units/%s/chief-%s.json", trace.UnitSubject(unit), trace.EventID(contest, "chief"))
+func ManagerContestPath(unit, contest string) string {
+	return trace.ContestDecisionPath(trace.UnitSubject(unit), contest)
 }
 
-func ChiefDecisionDocument(repo *trace.Repository, stream config.WorkstreamID, unit, contest, decision, note, turn string, at time.Time) trace.Document {
+func ManagerDecisionDocument(repo *trace.Repository, stream config.WorkstreamID, unit, contest, decision, note, turn string, at time.Time) trace.Document {
 	return judgedDecisionDocument(repo, stream, unit, contest, decision, note, turn, at, "")
 }
 
 func judgedDecisionDocument(repo *trace.Repository, stream config.WorkstreamID, unit, contest, decision, note, turn string, at time.Time, judgment string) trace.Document {
-	d := ChiefContestDecision{Contest: contest, Decision: decision, Note: note, Turn: turn}
+	d := ManagerContestDecision{Contest: contest, Decision: decision, Note: note, Turn: turn}
 	if judgment != "" {
 		d.Actor, d.Judgment = trace.DecidedByJev, judgment
 	}
 	data, _ := json.MarshalIndent(d, "", "  ")
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: trace.EventID(contest, "chief"), Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: at, Actor: chiefActor, Cause: contest}
-	return trace.Document{Header: h, Path: ChiefContestPath(unit, contest), Content: string(data) + "\n"}
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: trace.ContestDecisionID(contest), Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: at, Actor: managerActor, Cause: contest}
+	return trace.Document{Header: h, Path: ManagerContestPath(unit, contest), Content: string(data) + "\n"}
 }
 
 func UnitContest(repo *trace.Repository, stream config.WorkstreamID, unit string) (trace.Transition, bool, error) {
@@ -50,19 +50,19 @@ func UnitContest(repo *trace.Repository, stream config.WorkstreamID, unit string
 	return contest, err == nil && contest.ID != "", err
 }
 
-func ChiefDecisions(repo *trace.Repository, stream config.WorkstreamID, unit string) ([]trace.Document, []ChiefContestDecision, error) {
+func ManagerDecisions(repo *trace.Repository, stream config.WorkstreamID, unit string) ([]trace.Document, []ManagerContestDecision, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
 		return nil, nil, err
 	}
-	prefix := "units/" + trace.UnitSubject(unit) + "/chief-"
+	prefix := trace.ContestDecisionPrefix(trace.UnitSubject(unit))
 	var records []trace.Document
-	var decisions []ChiefContestDecision
+	var decisions []ManagerContestDecision
 	for _, d := range docs {
 		if !strings.HasPrefix(d.Path, prefix) {
 			continue
 		}
-		var decision ChiefContestDecision
+		var decision ManagerContestDecision
 		if err := json.Unmarshal([]byte(d.Content), &decision); err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", d.Path, err)
 		}
@@ -71,7 +71,7 @@ func ChiefDecisions(repo *trace.Repository, stream config.WorkstreamID, unit str
 	return records, decisions, nil
 }
 
-func ChiefRulingsLeft(repo *trace.Repository, stream config.WorkstreamID, unit string) (int, error) {
+func ManagerRulingsLeft(repo *trace.Repository, stream config.WorkstreamID, unit string) (int, error) {
 	return -1, nil
 }
 
@@ -80,28 +80,28 @@ func ContestRaised(repo *trace.Repository, stream config.WorkstreamID, unit stri
 		note, err := moveNote(repo, stream, unit, contest)
 		return err == nil, note, err
 	}
-	_, decisions, err := ChiefDecisions(repo, stream, unit)
+	_, decisions, err := ManagerDecisions(repo, stream, unit)
 	if err != nil {
 		return false, "", err
 	}
-	if i := slices.IndexFunc(decisions, func(d ChiefContestDecision) bool { return d.Contest == contest.ID }); i >= 0 {
+	if i := slices.IndexFunc(decisions, func(d ManagerContestDecision) bool { return d.Contest == contest.ID }); i >= 0 {
 		return true, decisions[i].Note, nil
 	}
 	return false, "", nil
 }
 
-// ContestEscalated reports whether the chief of staff escalated the contest to
+// ContestEscalated reports whether the manager escalated the contest to
 // the owner, and its note. A contest the owner moved the unit into, or one the
-// chief of staff ruled on, is not an escalation.
+// manager ruled on, is not an escalation.
 func ContestEscalated(repo *trace.Repository, stream config.WorkstreamID, unit string, contest trace.Transition) (string, bool, error) {
 	if MoveContest(contest, unit) {
 		return "", false, nil
 	}
-	_, decisions, err := ChiefDecisions(repo, stream, unit)
+	_, decisions, err := ManagerDecisions(repo, stream, unit)
 	if err != nil {
 		return "", false, err
 	}
-	i := slices.IndexFunc(decisions, func(d ChiefContestDecision) bool { return d.Contest == contest.ID && d.Decision == EscalateContest })
+	i := slices.IndexFunc(decisions, func(d ManagerContestDecision) bool { return d.Contest == contest.ID && d.Decision == EscalateContest })
 	if i < 0 {
 		return "", false, nil
 	}
@@ -136,7 +136,7 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 		if err := repository.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
-		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		target, stream, refusal, err := repository.ManagerMember(config.WorkstreamID(scope.Workstream), input.Workstream)
 		if err != nil {
 			return nil, err
 		}
@@ -156,7 +156,7 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 		}
 		request := ContestedRulingRequest{Decision: input.Decision, Note: note}
 		if input.OwnerDecided {
-			turn, owner, err := repository.OwnerTurn(trace.ChiefOfStaff, scope)
+			turn, owner, err := repository.OwnerTurn(trace.Manager, scope)
 			if err != nil {
 				return nil, err
 			}
@@ -167,8 +167,8 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 				return priorityRefusal("the owner rules review or revise")
 			}
 			if BounceContest(contest, input.Unit) {
-				decision := ChiefDecisionDocument(target, stream, input.Unit, contest.ID, input.Decision, note, scope.Turn, s.Now())
-				docs, prior, err := ChiefDecisions(target, stream, input.Unit)
+				decision := ManagerDecisionDocument(target, stream, input.Unit, contest.ID, input.Decision, note, scope.Turn, s.Now())
+				docs, prior, err := ManagerDecisions(target, stream, input.Unit)
 				if err != nil {
 					return nil, err
 				}
@@ -184,11 +184,11 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 		if MoveContest(contest, input.Unit) {
 			return priorityRefusal(fmt.Sprintf("unit %s was moved to contested for the owner; the owner rules on it", input.Unit))
 		}
-		_, decisions, err := ChiefDecisions(target, stream, input.Unit)
+		_, decisions, err := ManagerDecisions(target, stream, input.Unit)
 		if err != nil {
 			return nil, err
 		}
-		if slices.ContainsFunc(decisions, func(d ChiefContestDecision) bool { return d.Contest == contest.ID }) {
+		if slices.ContainsFunc(decisions, func(d ManagerContestDecision) bool { return d.Contest == contest.ID }) {
 			return priorityRefusal(fmt.Sprintf("you already decided contest %s of unit %s; the owner rules on it", contest.ID, input.Unit))
 		}
 
@@ -200,7 +200,7 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 		if why != "" {
 			return priorityRefusal(why)
 		}
-		judgment, actor := "", chiefActor
+		judgment, actor := "", managerActor
 		if bound != nil {
 			judgment, actor = bound.Judgment, trace.JevActor
 		}

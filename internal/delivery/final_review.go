@@ -1436,7 +1436,7 @@ func (a *FinalReviewer) Record(ctx context.Context, stream config.WorkstreamID, 
 	plain := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: at, Actor: FinalReviewActor, Cause: report.Operation},
 			Subject: FinalReviewSubject, From: state.Value, To: fmt.Sprintf("%s-%d", report.Outcome, report.Review), Reason: reason},
-		Events: []trace.Event{trace.Notice(id, "chief", body)}}
+		Events: []trace.Event{trace.Notice(id, trace.ManagerKey, body)}}
 	documents := []trace.Document{doc}
 	if measure, ok := a.finalMeasure(stream, report); ok {
 		documents = append(documents, measure)

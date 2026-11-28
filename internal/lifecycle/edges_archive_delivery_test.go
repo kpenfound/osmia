@@ -388,7 +388,7 @@ func TestMergedUpstreamRepairKeepsTheProjectSpecActiveForTheDependent(t *testing
 	if len(resolved) != 0 || resolutionRevision != 0 || !active {
 		t.Fatalf("project spec retired before dependent delivery: resolved=%v revision=%d active=%v", resolved, resolutionRevision, active)
 	}
-	for _, role := range []string{intake.MasonRole, trace.ChiefOfStaff} {
+	for _, role := range []string{intake.MasonRole, trace.Manager} {
 		view, err := f.S.Context().Assemble(ctx, f.Project2, bundle.Scope{Role: role, Workstream: f.Stream2})
 		fixturekit.Must(t, err)
 		if view.ProjectSpec == nil || !strings.Contains(view.Render(), "Stored chunks are acknowledged with their offset.") {

@@ -742,7 +742,7 @@ func DesignTitleTool(repository *trace.Repository, scope coreadapter.Scope, now 
 				return nil, fmt.Errorf("%s sets the title of an open design session only", DesignTitleToolName)
 			}
 			known := []string{string(repository.Project()), string(stream)}
-			for _, read := range []func(config.WorkstreamID) (trace.Thread, error){repository.DesignerThread, repository.ChiefOfStaffThread} {
+			for _, read := range []func(config.WorkstreamID) (trace.Thread, error){repository.DesignerThread, repository.ManagerThread} {
 				if th, err := read(stream); err == nil {
 					known = append(known, th.Identity.ThreadID, th.Session.ID)
 					for _, turn := range th.Turns {
@@ -923,7 +923,7 @@ func DesignTranscript(repository *trace.Repository, stream config.WorkstreamID) 
 // It is empty for every other session. Nothing is sent to it any more; its
 // messages are still read.
 func earlierDesignThread(repository *trace.Repository, stream config.WorkstreamID) (trace.Thread, error) {
-	th, err := repository.ChiefOfStaffThread(stream)
+	th, err := repository.ManagerThread(stream)
 	if errors.Is(err, os.ErrNotExist) {
 		return trace.Thread{}, nil
 	}
@@ -1098,7 +1098,7 @@ func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string, reque
 	if err := s.PreparePinnedDesignStart(ctx, repository, stream, intent); err != nil {
 		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
-	if err := repository.BeginFreshChiefOfStaff(ctx, stream); err != nil {
+	if err := repository.BeginFreshManager(ctx, stream); err != nil {
 		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if err := s.ResumeHandedDesign(ctx, repository, stream, intent.Handed); err != nil {

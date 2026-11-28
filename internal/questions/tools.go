@@ -90,7 +90,7 @@ func tools(repository *trace.Repository, agent string, scope coreadapter.Scope, 
 	if repository == nil || now == nil {
 		return nil, errors.New("question tools require a trace and a clock")
 	}
-	if scope.Role == trace.ChiefOfStaff {
+	if scope.Role == trace.Manager {
 		return chiefTools(repository, agent, scope, now), nil
 	}
 	ask := coreadapter.Tool{Name: AskTool, Effect: coreadapter.ToolMemory,
@@ -164,7 +164,7 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 		target := stream
 		var bound *jev.Result
 		if routed && input.Question != "" {
-			member, _, err := repository.ChiefQuestionTarget(stream, input.Question)
+			member, _, err := repository.ManagerQuestionTarget(stream, input.Question)
 			if err != nil {
 				return refuse(err)
 			}
@@ -296,7 +296,7 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 		if err := decodeInput(raw, &input); err != nil {
 			return nil, err
 		}
-		member, _, err := repository.ChiefQuestionTarget(stream, input.Question)
+		member, _, err := repository.ManagerQuestionTarget(stream, input.Question)
 		if err != nil {
 			return refuse(err)
 		}

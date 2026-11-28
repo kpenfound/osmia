@@ -166,7 +166,7 @@ func (f *PreviewJourney) Capture(t *testing.T) api.FeedImage {
 				continue
 			}
 			if entry.State == api.TurnFailed {
-				thread, err := f.Repository(t).ChiefOfStaffThread(f.Sibling)
+				thread, err := f.Repository(t).ManagerThread(f.Sibling)
 				fixturekit.Must(t, err)
 				for _, turn := range thread.Turns {
 					if turn.Request.TurnID == message.Turn && turn.Response != nil {

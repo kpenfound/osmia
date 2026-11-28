@@ -160,7 +160,7 @@ func TestDesignProductionLifecycleResolverAcrossArchiveCleanup(t *testing.T) {
 		if !found || !intakefixture.EqualJSONTest(got, approval) || !intakefixture.EqualJSONTest(doc, approvalDoc) {
 			t.Fatal("resolver transition changed effective approval pins")
 		}
-		chief, err := current.Thread(host, trace.ChiefOfStaff)
+		chief, err := current.Thread(host, trace.Manager)
 		fixturekit.Must(t, err)
 		if !intakefixture.EqualJSONTest(chief.Identity, f.Before.Identity) || !intakefixture.EqualJSONTest(chief.Turns[:len(f.Before.Turns)], f.Before.Turns) {
 			t.Fatal("resolver transition replaced adopted conversation history")
@@ -194,7 +194,7 @@ func TestDesignProductionLifecycleResolverAcrossArchiveCleanup(t *testing.T) {
 		}
 		outbox, err := right.Outbox(f.Stream2)
 		fixturekit.Must(t, err)
-		chief, err := target.Thread(host, trace.ChiefOfStaff)
+		chief, err := target.Thread(host, trace.Manager)
 		fixturekit.Must(t, err)
 		for _, e := range outbox {
 			if e.Event.Operation != nil || !strings.Contains(e.Event.Body, "survivor-after-resolver-cleanup") {

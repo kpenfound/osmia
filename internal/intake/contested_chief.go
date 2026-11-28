@@ -5,7 +5,7 @@ import (
 )
 
 // ChiefActor is the chief of staff acting on the owner's behalf.
-var ChiefActor = trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+var ChiefActor = trace.Actor{Kind: "agent", ID: trace.Manager}
 
 // ContestGuidance tells the chief of staff how to handle contested units and
 // units that are stuck outside a contest. It belongs in the system prompt of

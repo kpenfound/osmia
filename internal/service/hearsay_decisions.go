@@ -26,7 +26,7 @@ const (
 
 const (
 	deciderOwner = "owner"
-	deciderChief = "chief_of_staff"
+	deciderChief = trace.Manager
 )
 
 type decider int
@@ -482,7 +482,7 @@ func amendmentDecider(doc trace.Document, verdict intake.AmendmentDecision) (dec
 		return byJev, jevDecider(verdict.Actor, verdict.Judgment)
 	case doc.Actor.Kind == "owner":
 		return byOwner, true
-	case doc.Actor.Kind == "agent" && doc.Actor.ID == trace.ChiefOfStaff:
+	case doc.Actor.Kind == "agent" && doc.Actor.ID == trace.Manager:
 		return byChief, true
 	}
 	return 0, false

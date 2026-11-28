@@ -149,11 +149,11 @@ func contestActor(r ContestedRuling) trace.Actor {
 	case trace.DecidedByJev:
 		return trace.JevActor
 	}
-	return chiefActor
+	return managerActor
 }
 
 // RecordContestedRuling rules on a contested unit as actor: the owner, or the
-// chief of staff on the owner's behalf. The rulings each contest takes, and
+// manager on the owner's behalf. The rulings each contest takes, and
 // what they resume, do not depend on who gives them.
 func (s *Controller) RecordContestedRuling(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, req ContestedRulingRequest, actor trace.Actor, decisions ...trace.Document) (ContestedRulingResponse, *APIError) {
 	return s.RecordContestedRulingJudged(ctx, repo, stream, unit, req, actor, "", decisions...)
@@ -162,7 +162,7 @@ func (s *Controller) RecordContestedRuling(ctx context.Context, repo *trace.Repo
 // RecordContestedRulingJudged is RecordContestedRuling with the Jev judgment
 // the ruling comes from. A non-empty judgment is Jev deciding an owner gate:
 // the actor must be the Jev actor, the ruling names the judgment, and the
-// owner's rules apply, not the chief of staff's.
+// owner's rules apply, not the manager's.
 func (s *Controller) RecordContestedRulingJudged(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, req ContestedRulingRequest, actor trace.Actor, judgment string, decisions ...trace.Document) (ContestedRulingResponse, *APIError) {
 	if judgment != "" && actor != trace.JevActor || judgment == "" && actor == trace.JevActor {
 		return ContestedRulingResponse{}, &APIError{Code: Validation, Message: "a Jev ruling is written by Jev and names its judgment"}
@@ -244,7 +244,7 @@ func (s *Controller) RecordContestedRulingJudged(ctx context.Context, repo *trac
 	docs := slices.Clone(decisions)
 	if found {
 		for i := range docs {
-			var decision ChiefContestDecision
+			var decision ManagerContestDecision
 			if err := json.Unmarshal([]byte(docs[i].Content), &decision); err != nil {
 				return ContestedRulingResponse{}, &APIError{Code: Internal, Message: "cannot read chief decision"}
 			}
@@ -329,7 +329,7 @@ func (r *reviewers) applyBounceRuling(ctx context.Context, scheduled bool, strea
 }
 
 func (s *Controller) routeRuling(ctx context.Context, scheduled bool, in UnitExitInput, ruling ContestedRuling) *APIError {
-	in.Trigger = TriggerChiefRuling
+	in.Trigger = TriggerManagerRuling
 	in.Authority = &router.Authority{Kind: router.AuthorityChief, Target: in.Default}
 	switch ruling.By {
 	case "", "owner":

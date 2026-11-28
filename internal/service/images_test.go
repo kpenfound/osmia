@@ -193,7 +193,7 @@ func newGroupImage(t *testing.T, cross bool) *groupImage {
 	h := trace.Header{Project: repo.Project(), Workstream: member, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "preview"}
 	v, err := repo.RecordImage(ctx, h, "preview", "image/png", data, "turn")
 	fixturekit.Must(t, err)
-	host, err := chief.ChiefOfStaffHost(g.Members[0])
+	host, err := chief.ManagerHost(g.Members[0])
 	fixturekit.Must(t, err)
 	h.Project, h.Workstream = chief.Project(), host
 	for range 2 {

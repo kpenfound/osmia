@@ -76,7 +76,7 @@ func (c *runtimeControls) preview(cfg *config.Config, repo *trace.Repository, sc
 		limitation := func(message string) (json.RawMessage, error) {
 			return json.Marshal(previewResult{Limitation: previewDiagnostic(message)})
 		}
-		if scope.Role != trace.ChiefOfStaff {
+		if scope.Role != trace.Manager {
 			return limitation("preview is only available to the chief of staff")
 		}
 		var in previewInput

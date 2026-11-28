@@ -50,7 +50,7 @@ func TestAChiefRequestAfterTheDebateConcludesIsPinned(t *testing.T) {
 				t.Fatalf("the chief's request: %+v", res)
 			}
 			moved := f.AwaitSubjectMove(t, stream, intake.OwnerSubject, c.moved)
-			if moved.DecidedBy != trace.DecidedByChief || moved.Departed() || moved.Judgment != "" {
+			if moved.DecidedBy != trace.DecidedByManager || moved.Departed() || moved.Judgment != "" {
 				t.Fatalf("the request's transition %+v", moved)
 			}
 			rec, ok := f.RouteOf(t, stream, intake.TriggerMoveProposal)

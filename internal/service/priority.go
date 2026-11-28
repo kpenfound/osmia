@@ -69,7 +69,7 @@ func (c *runtimeControls) prioritise(repository *trace.Repository, scope coreada
 		if project == repository.Project() {
 			targetProject = ""
 		}
-		change, err := repository.SetProjectPriority(ctx, trace.ChiefOfStaff, scope, targetProject, now(), func() ([]config.WorkstreamID, error) {
+		change, err := repository.SetProjectPriority(ctx, trace.Manager, scope, targetProject, now(), func() ([]config.WorkstreamID, error) {
 			if err := s.store.SetPriority(runtime.Priority{Project: project, Workstreams: order}); err != nil {
 				switch {
 				case errors.Is(err, runtime.ErrValidation):

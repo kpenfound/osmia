@@ -87,7 +87,7 @@ func Redrafts(repository *trace.Repository, stream config.WorkstreamID) ([]Redra
 	return out, nil
 }
 
-// Packet is what the chief of staff presents at the owner's decision point:
+// Packet is what the manager presents at the owner's decision point:
 // the revisions of the spec and the plan the owner decides on, why debate
 // ended, the dissent record with what blocks ratification first, and the
 // recommendation. Skipped says the owner skipped debate rather than the
@@ -141,7 +141,7 @@ func Present(round int, revision Pin, skipped bool, conclusion string, entries [
 		Dissent: dissent, Recommendation: Recommend(entries)}
 }
 
-// Recommend is what the chief of staff advises the owner to do about the
+// Recommend is what the manager advises the owner to do about the
 // dissent that stands: ratify when nothing blocks, and otherwise dispose of
 // what blocks or send the draft back to the architect.
 func Recommend(entries []Entry) string {
@@ -278,7 +278,7 @@ func (r Ratification) check() error {
 	case r.Revision.Spec < 1 || r.Revision.Plan < 0:
 		return errors.New("a ratification requires the revisions it approves")
 	}
-	if !trace.ValidDecider(r.DecidedBy, r.Judgment) || r.DecidedBy == trace.DecidedByChief {
+	if !trace.ValidDecider(r.DecidedBy, r.Judgment) || r.DecidedBy == trace.DecidedByManager {
 		return errors.New("a ratification names the owner or Jev with its judgment as its decider")
 	}
 	for _, e := range r.Dissent {
@@ -303,7 +303,7 @@ func (r Ratification) check() error {
 
 // Ratify returns the record of the owner's approval of the given revisions,
 // with the dissent record it was given over and the owner's dispositions in
-// force. The chief of staff's dismissals stay in the dissent record.
+// force. The manager's dismissals stay in the dissent record.
 func Ratify(round int, revision Pin, entries []Entry) Ratification {
 	r := Ratification{Version: Version, Round: round, Revision: revision, Dissent: slices.Clone(entries)}
 	for _, e := range entries {

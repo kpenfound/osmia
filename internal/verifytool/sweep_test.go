@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/verification"
 )
 
@@ -48,7 +49,7 @@ func TestMeasuredReadsRerunsAndReviewerRunsAndIgnoresEveryOtherCaller(t *testing
 		{"rerun skipped", Operation{Rerun: &Rerun{Unit: "u", Disposition: RerunSkipped}}, verification.SourceRerun, verification.OutcomeSkipped, true},
 		{"rerun refused", Operation{Rerun: &Rerun{Unit: "u", Disposition: RerunRefused}}, verification.SourceRerun, verification.OutcomeRefused, true},
 		{"reviewer", Operation{Scope: scopeOf("reviewer", "u"), Outcome: &ran}, verification.SourceReviewer, verification.OutcomeResult, true},
-		{"chief", Operation{Scope: scopeOf("chief_of_staff", ""), Outcome: &ran}, "", "", false},
+		{"manager", Operation{Scope: scopeOf(trace.Manager, ""), Outcome: &ran}, "", "", false},
 		{"final reviewer", Operation{Scope: scopeOf("committee", ""), Outcome: &ran}, "", "", false},
 	}
 	for _, c := range cases {

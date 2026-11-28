@@ -15,7 +15,7 @@ import (
 )
 
 // The states of a question's workflow subject. A question is open from the
-// moment it is asked until the chief of staff records its one choice.
+// moment it is asked until the manager records its one choice.
 const (
 	QuestionOpen      = "open"
 	QuestionEscalated = "escalated"
@@ -24,7 +24,7 @@ const (
 	QuestionRouted    = "routed"
 )
 
-// The Decision of a ruling: DecisionAnswer when the chief of staff answered
+// The Decision of a ruling: DecisionAnswer when the manager answered
 // from the record, DecisionRuling when the owner ruled on an escalation.
 const (
 	DecisionAnswer = "answer"
@@ -89,7 +89,7 @@ func refused(format string, args ...any) error {
 	return &QuestionRefused{Reason: fmt.Sprintf(format, args...)}
 }
 
-// QuestionState is one question with the chief of staff's choice. Asked is
+// QuestionState is one question with the manager's choice. Asked is
 // revision 1, the question as asked; Latest is its newest revision, which
 // carries the escalation once escalated. State is the value of the question's
 // workflow subject, empty for a question recorded without one. Ruling is the
@@ -199,8 +199,8 @@ func questionTransition(v *workflowView, h Header, id, from, to, reason string) 
 }
 
 // Ask records text as the workstream's next question, numbered from 1, asked
-// by the scope's active turn, and raises one notice for the chief of staff in
-// the same commit. A chief-of-staff turn fails. An empty question and a second
+// by the scope's active turn, and raises one notice for the manager in
+// the same commit. A manager turn fails. An empty question and a second
 // question from the same turn are refused with *QuestionRefused.
 func (r *Repository) Ask(ctx context.Context, agent string, scope coreadapter.Scope, text string, at time.Time) (Question, error) {
 	return r.AskCharterConflict(ctx, agent, scope, text, nil, at)
@@ -214,7 +214,7 @@ func (r *Repository) AskCharterConflict(ctx context.Context, agent string, scope
 	}
 	var inbox int
 	if len(citations) > 0 {
-		if scope.Role == ChiefOfStaff {
+		if scope.Role == Manager {
 			return Question{}, fmt.Errorf("the chief of staff answers questions and cannot ask one")
 		}
 		if !present(text) {
@@ -253,7 +253,7 @@ func (r *Repository) AskCharterConflict(ctx context.Context, agent string, scope
 		return Question{}, err
 	}
 	defer r.mu.Unlock()
-	if scope.Role == ChiefOfStaff {
+	if scope.Role == Manager {
 		return Question{}, fmt.Errorf("the chief of staff answers questions and cannot ask one")
 	}
 	turn, log, v, records, err := r.questionTurn(ctx, agent, scope, at)
@@ -332,20 +332,20 @@ func openQuestion(existing []QuestionState, id string) (QuestionState, error) {
 	return QuestionState{}, refused("there is no question %s in this workstream", id)
 }
 
-func (r *Repository) chiefTurn(ctx context.Context, agent string, scope coreadapter.Scope, at time.Time) (QueuedTurn, workflowLog, *workflowView, []Record, error) {
-	if scope.Role != ChiefOfStaff {
+func (r *Repository) managerTurn(ctx context.Context, agent string, scope coreadapter.Scope, at time.Time) (QueuedTurn, workflowLog, *workflowView, []Record, error) {
+	if scope.Role != Manager {
 		return QueuedTurn{}, workflowLog{}, nil, nil, fmt.Errorf("only a chief-of-staff turn may choose what happens to a question")
 	}
 	return r.questionTurn(ctx, agent, scope, at)
 }
 
-func (r *Repository) chiefTurnOn(ctx context.Context, agent string, scope coreadapter.Scope, member config.WorkstreamID, at time.Time) (*Repository, QueuedTurn, error) {
+func (r *Repository) managerTurnOn(ctx context.Context, agent string, scope coreadapter.Scope, member config.WorkstreamID, at time.Time) (*Repository, QueuedTurn, error) {
 	host := config.WorkstreamID(scope.Workstream)
 	hr, err := r.lockQuestionRead(host)
 	if err != nil {
 		return nil, QueuedTurn{}, err
 	}
-	turn, _, _, _, err := hr.chiefTurn(ctx, agent, scope, at)
+	turn, _, _, _, err := hr.managerTurn(ctx, agent, scope, at)
 	if member == host {
 		if err != nil {
 			hr.mu.Unlock()
@@ -364,16 +364,16 @@ func (r *Repository) chiefTurnOn(ctx context.Context, agent string, scope coread
 	return tr, turn, nil
 }
 
-func (r *Repository) chiefQuestionScope(ctx context.Context, agent string, scope coreadapter.Scope, id string, at time.Time) (target *Repository, localID string, turn QueuedTurn, err error) {
-	member, localID, err := r.ChiefQuestionTarget(config.WorkstreamID(scope.Workstream), id)
+func (r *Repository) managerQuestionScope(ctx context.Context, agent string, scope coreadapter.Scope, id string, at time.Time) (target *Repository, localID string, turn QueuedTurn, err error) {
+	member, localID, err := r.ManagerQuestionTarget(config.WorkstreamID(scope.Workstream), id)
 	if err != nil {
 		return nil, "", QueuedTurn{}, err
 	}
-	target, turn, err = r.chiefTurnOn(ctx, agent, scope, member, at)
+	target, turn, err = r.managerTurnOn(ctx, agent, scope, member, at)
 	return target, localID, turn, err
 }
 
-// AnswerQuestion records the chief of staff's answer to an open question as
+// AnswerQuestion records the manager's answer to an open question as
 // the question's ruling, with the citations it rests on, and moves the
 // question to answered in the same commit. id names a question of the
 // turn's own workstream when unqualified, or "<workstream>:<id>" one of any
@@ -390,9 +390,9 @@ func (r *Repository) AnswerQuestion(ctx context.Context, agent string, scope cor
 // AnswerQuestionJudged is AnswerQuestion for an answer Jev's binding decision
 // calls for: a non-empty judgment names the Jev judgment record, and the
 // ruling records Jev as its decider and actor and links the judgment. The
-// answer's text is still the chief of staff's.
+// answer's text is still the manager's.
 func (r *Repository) AnswerQuestionJudged(ctx context.Context, agent string, scope coreadapter.Scope, id, text string, citations []string, judgment string, at time.Time) (Ruling, error) {
-	target, localID, turn, err := r.chiefQuestionScope(ctx, agent, scope, id, at)
+	target, localID, turn, err := r.managerQuestionScope(ctx, agent, scope, id, at)
 	if err != nil {
 		return Ruling{}, err
 	}
@@ -442,7 +442,7 @@ func (r *Repository) AnswerQuestionJudged(ctx context.Context, agent string, sco
 	return ruling, nil
 }
 
-// EscalationRequest is what the chief of staff sends the owner for one or
+// EscalationRequest is what the manager sends the owner for one or
 // several open questions. Section cites the spec or plan passage in
 // tension and Conflict states the tension itself: a worker's escalated
 // question is structured with both, plus Options and a Recommendation.
@@ -479,7 +479,7 @@ func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope 
 	members := make([]config.WorkstreamID, len(req.Questions))
 	locals := make([]string, len(req.Questions))
 	for i, raw := range req.Questions {
-		member, local, err := project.ChiefQuestionTarget(host, raw)
+		member, local, err := project.ManagerQuestionTarget(host, raw)
 		if err != nil {
 			return "", err
 		}
@@ -511,7 +511,7 @@ func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope 
 	}
 	for _, member := range distinct {
 		if err := func() error {
-			mr, _, err := project.chiefTurnOn(ctx, agent, scope, member, at)
+			mr, _, err := project.managerTurnOn(ctx, agent, scope, member, at)
 			if err != nil {
 				return err
 			}
@@ -549,7 +549,7 @@ func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope 
 	}
 	for _, member := range distinct {
 		if err := func() error {
-			mr, turn, err := project.chiefTurnOn(ctx, agent, scope, member, at)
+			mr, turn, err := project.managerTurnOn(ctx, agent, scope, member, at)
 			if err != nil {
 				return err
 			}

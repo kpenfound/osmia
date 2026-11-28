@@ -123,7 +123,7 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 	cfg := s.current()
 	name, profile, err := s.chiefOverride(cfg)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("role %s has no usable profile %q; check osmia profiles", trace.ChiefOfStaff, name)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("role %s has no usable profile %q; check osmia profiles", trace.Manager, name)}
 	}
 	target, host, bundleStream, closeTarget, err := resolve()
 	if err != nil {
@@ -164,7 +164,7 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 		return ConversationEntry{}, workgroupAuthorityError(err)
 	}
 	defer closeTarget()
-	if _, err := target.EnsureChiefOfStaff(ctx, stream, at, serviceActor); err != nil {
+	if _, err := target.EnsureManager(ctx, stream, at, serviceActor); err != nil {
 		if wholeGroup {
 			return ConversationEntry{}, workgroupAuthorityError(err)
 		}
@@ -172,8 +172,8 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 	}
 	q, err := target.EnqueueTurn(ctx, trace.TurnRequest{
 		Header:       trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + id, Revision: 1, Project: target.Project(), Workstream: stream, At: at, Actor: ownerActor, Cause: "owner-message"},
-		AgentID:      trace.ChiefOfStaff,
-		ThreadID:     trace.ChiefOfStaff,
+		AgentID:      trace.Manager,
+		ThreadID:     trace.Manager,
 		TurnID:       "message_" + id,
 		Profile:      profile,
 		SystemPrompt: fmt.Sprintf(chiefPrompt, host) + "\n\n" + chiefGuidance(),
@@ -260,7 +260,7 @@ func (s *Service) conversationTarget(ctx context.Context, repository *trace.Repo
 // workgroup continues from another trace, merged in by when they were sent.
 func ConversationEntries(repository *trace.Repository, stream config.WorkstreamID, earlier ...[][]ConversationEntry) ([]ConversationEntry, error) {
 	threads := slices.Clone(earlier)
-	for _, read := range []func(config.WorkstreamID) (trace.Thread, error){repository.ChiefOfStaffThread, repository.DesignerThread} {
+	for _, read := range []func(config.WorkstreamID) (trace.Thread, error){repository.ManagerThread, repository.DesignerThread} {
 		t, err := read(stream)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -470,7 +470,7 @@ func chiefActionsWithIdentity(repository *trace.Repository, stream config.Workst
 		}
 	}
 	for _, d := range docs {
-		if d.Unit == "" || !strings.HasPrefix(d.Path, "units/"+trace.UnitSubject(d.Unit)+"/chief-") {
+		if d.Unit == "" || !strings.HasPrefix(d.Path, trace.ContestDecisionPrefix(trace.UnitSubject(d.Unit))) {
 			continue
 		}
 		var decision ChiefContestDecision
@@ -522,10 +522,10 @@ func chiefActionsWithIdentity(repository *trace.Repository, stream config.Workst
 	}
 	decided := map[string]bool{}
 	for _, d := range docs {
-		if !strings.HasPrefix(d.Path, "shed/") || !strings.HasSuffix(d.Path, "/chief.json") {
+		if !shed.IsManagerPath(d.Path) {
 			continue
 		}
-		decisions, err := shed.ParseChiefDecisions([]byte(d.Content))
+		decisions, err := shed.ParseManagerDecisions([]byte(d.Content))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", d.Path, err)
 		}
@@ -542,7 +542,7 @@ func chiefActionsWithIdentity(repository *trace.Repository, stream config.Workst
 		}
 	}
 
-	host, err := repository.ChiefOfStaffHost(stream)
+	host, err := repository.ManagerHost(stream)
 	if err != nil {
 		return nil, err
 	}

@@ -89,7 +89,7 @@ func (s *Service) recoverThread(ctx context.Context, cfg *config.Config, reposit
 			}
 		}
 	}
-	if trace.ChiefLike(th.Identity.Role) && s.options.Threads != nil {
+	if trace.ManagerLike(th.Identity.Role) && s.options.Threads != nil {
 		if err := s.recoverContinuations(ctx, repository, stream, th.Identity.ID, func(turn string) error {
 			return s.recoverChief(ctx, repository, stream, th.Identity.Role, th.Identity.ID, turn)
 		}); err != nil {
@@ -154,7 +154,7 @@ func (s *Service) recoverWorkgroupChiefSession(ctx context.Context, id config.Wo
 	}
 	defer wt.Close()
 	host := g.Members[0]
-	th, err := wt.Thread(host, trace.ChiefOfStaff)
+	th, err := wt.Thread(host, trace.Manager)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -167,7 +167,7 @@ func (s *Service) recoverWorkgroupChiefSession(ctx context.Context, id config.Wo
 	if g.Conversation != nil {
 		for _, q := range th.Turns {
 			if q.Response != nil && q.Status() == "interrupted" && q.Response.Result.Cancelled && q.Response.Stop == nil {
-				if err := s.recoverChief(ctx, wt, host, trace.ChiefOfStaff, trace.ChiefOfStaff, q.Request.TurnID); err != nil {
+				if err := s.recoverChief(ctx, wt, host, trace.Manager, trace.Manager, q.Request.TurnID); err != nil {
 					return err
 				}
 			}

@@ -47,7 +47,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 	fixturekit.Must(t, err)
 	target, host, _, closeTarget, err := f.S.Lifecycle().ChiefRepository(ctx, repo, f.Stream1)
 	fixturekit.Must(t, err)
-	chief, err := target.ChiefOfStaffThread(host)
+	chief, err := target.ManagerThread(host)
 	closeTarget()
 	fixturekit.Must(t, err)
 
@@ -71,7 +71,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 	fixturekit.Must(t, repo.CreateSessionWorkstream(ctx, session, "default", f.Repos[0].Main, "osmia/session/"+string(session), "Explore uploads", fixturekit.DemoStart, intake.RegistrationActor))
 	originalChiefs := map[config.WorkstreamID]trace.Thread{}
 	for _, stream := range []config.WorkstreamID{live, retained} {
-		originalChiefs[stream], err = repo.ChiefOfStaffThread(stream)
+		originalChiefs[stream], err = repo.ManagerThread(stream)
 		fixturekit.Must(t, err)
 	}
 	sessionPath := filepath.Join(f.Opts.Config.Root, "workstreams", string(f.Project), string(session))
@@ -127,7 +127,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 		if len(groups) != 1 || groups[0].ID != sharedID || !slices.Equal(groups[0].Members, []config.WorkstreamID{f.Origin, f.Stream1, f.Stream2}) {
 			t.Fatalf("shared authority lost exact membership: %+v", groups)
 		}
-		sharedChief, err := authority.ChiefOfStaffThread(f.Origin)
+		sharedChief, err := authority.ManagerThread(f.Origin)
 		authority.Close()
 		fixturekit.Must(t, err)
 		if !reflect.DeepEqual(sharedChief.Identity, chief.Identity) {
@@ -142,7 +142,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 				t.Fatalf("member %v points to %s, want %s", member, id, sharedID)
 			}
 			memberships[member] = append(memberships[member], sharedID)
-			if _, err := r.ChiefOfStaffThread(member.stream); !errors.Is(err, os.ErrNotExist) {
+			if _, err := r.ManagerThread(member.stream); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("member %v has an independent chief: %v", member, err)
 			}
 		}
@@ -172,7 +172,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 		r, err := f.S.Repository(f.Project)
 		fixturekit.Must(t, err)
 		for stream, original := range originalChiefs {
-			current, err := r.ChiefOfStaffThread(stream)
+			current, err := r.ManagerThread(stream)
 			fixturekit.Must(t, err)
 			if !reflect.DeepEqual(current.Identity, original.Identity) {
 				t.Fatalf("original chief changed for %s", stream)
@@ -181,7 +181,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 		if fixturekit.TraceCommits(t, sessionPath) != sessionBefore {
 			t.Fatal("startup changed the exploratory session")
 		}
-		if _, err := r.ChiefOfStaffThread(cleaned); !errors.Is(err, os.ErrNotExist) {
+		if _, err := r.ManagerThread(cleaned); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("cleaned archive gained a chief thread: %v", err)
 		}
 		if _, err := f.C.Conversation(ctx, cleaned); !intakefixture.Failed(err, api.Conflict) {

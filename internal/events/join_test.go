@@ -51,7 +51,7 @@ func TestEventDeliveryRechecksChiefTransferredAfterResolution(t *testing.T) {
 				if transfer {
 					return repo.JoinCrossRepoWorkgroup(ctx, stream, g.ID, f.clock.Now(), owner, "draft-workgroup")
 				}
-				return repo.RetractChiefOfStaff(ctx, stream)
+				return repo.RetractManager(ctx, stream)
 			}
 			err = d.Pass(ctx)
 			if !fired {
@@ -70,13 +70,13 @@ func TestEventDeliveryRechecksChiefTransferredAfterResolution(t *testing.T) {
 				t.Fatalf("transfer lost its retryable event: %+v", out)
 			}
 			must(t, d.Pass(ctx))
-			chief, err := wt.ChiefOfStaffThread(stream)
+			chief, err := wt.ManagerThread(stream)
 			must(t, err)
 			if len(chief.Turns) != 1 {
 				t.Fatalf("shared delivery count = %d", len(chief.Turns))
 			}
 			must(t, d.Pass(ctx))
-			chief, err = wt.ChiefOfStaffThread(stream)
+			chief, err = wt.ManagerThread(stream)
 			must(t, err)
 			if len(chief.Turns) != 1 {
 				t.Fatal("shared delivery repeated")

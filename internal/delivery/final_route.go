@@ -82,7 +82,7 @@ func (a *FinalReviewer) finalExit(in finalExitInput) router.Exit {
 			return router.Effect{Reason: in.Reason}, nil
 		},
 		Records: func(context.Context, router.Plan) (router.Effect, error) {
-			return router.Effect{Documents: in.Documents, Events: []trace.Event{trace.Notice(in.ID, "chief", in.Body)}, With: in.Followups}, nil
+			return router.Effect{Documents: in.Documents, Events: []trace.Event{trace.Notice(in.ID, trace.ManagerKey, in.Body)}, With: in.Followups}, nil
 		},
 		Note: finalMoveNote(in.Report),
 		Evidence: router.Evidence{

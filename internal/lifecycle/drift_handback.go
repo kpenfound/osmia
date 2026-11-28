@@ -169,7 +169,7 @@ func (c *Controls) HandBackDrift(repository *trace.Repository, scope coreadapter
 		if err := repository.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
-		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		target, stream, refusal, err := repository.ManagerMember(config.WorkstreamID(scope.Workstream), input.Workstream)
 		if err != nil {
 			return nil, err
 		}
@@ -183,7 +183,7 @@ func (c *Controls) HandBackDrift(repository *trace.Repository, scope coreadapter
 		}
 		actor := chiefActor
 		if input.OwnerDecided {
-			turn, owner, err := repository.OwnerTurn(trace.ChiefOfStaff, scope)
+			turn, owner, err := repository.OwnerTurn(trace.Manager, scope)
 			if err != nil {
 				return nil, err
 			}

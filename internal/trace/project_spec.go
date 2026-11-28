@@ -433,7 +433,7 @@ func RecordProjectSpec(ctx context.Context, r *Repository, workgroup Workgroup, 
 
 // ProjectSpecActive reports whether workgroup's project spec is still
 // active: present, and the workgroup is not yet recorded resolved. A
-// workgroup's project spec stays active for the chief of staff and every
+// workgroup's project spec stays active for the manager and every
 // unresolved member, including a dependent still waiting on or repairing
 // after an upstream merge, and leaves active state only once every member
 // is resolved. r must be the project's own repository or the workgroup's

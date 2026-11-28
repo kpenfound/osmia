@@ -88,7 +88,7 @@ func TestChiefOfStaffRaisesWhatItCannotResolve(t *testing.T) {
 	if _, apiErr := recordContestedRuling(c.F.S, context.Background(), c.Repo, c.Stream, "resume", api.ContestedRulingRequest{Decision: "review", Note: "Try the other profile."}, intake.OwnerActor); apiErr != nil {
 		t.Fatal(apiErr.Message)
 	}
-	if left, err := execution.ChiefRulingsLeft(c.Repo, c.Stream, "resume"); err != nil || left != execution.ChiefContestLimit {
+	if left, err := execution.ManagerRulingsLeft(c.Repo, c.Stream, "resume"); err != nil || left != execution.ManagerContestLimit {
 		t.Fatalf("rulings left after the owner's ruling: %d %v", left, err)
 	}
 	actions, err := service.ChiefActions(c.Repo, c.Stream)
@@ -119,7 +119,7 @@ func TestChiefViewShowsWhyAUnitIsStuck(t *testing.T) {
 	fixturekit.Must(t, err)
 	var activity api.UnitActivity
 	fixturekit.Must(t, json.Unmarshal(raw, &activity))
-	if !strings.Contains(strings.Join(paths, ","), "units") || activity.State != intake.UnitContested || activity.Contest == nil || activity.Contest.ID != contest.ID || strings.Join(activity.Contest.Rulings, ",") != "review" || activity.Contest.ChiefRulingsLeft != execution.ChiefContestLimit {
+	if !strings.Contains(strings.Join(paths, ","), "units") || activity.State != intake.UnitContested || activity.Contest == nil || activity.Contest.ID != contest.ID || strings.Join(activity.Contest.Rulings, ",") != "review" || activity.Contest.ChiefRulingsLeft != execution.ManagerContestLimit {
 		t.Fatalf("activity %s", raw)
 	}
 	var reviewed *api.ActivityTurn

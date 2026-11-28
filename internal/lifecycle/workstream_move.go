@@ -671,7 +671,7 @@ func (c *Controls) MoveWorkstream(repository *trace.Repository, scope coreadapte
 		if err := repository.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
-		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		target, stream, refusal, err := repository.ManagerMember(config.WorkstreamID(scope.Workstream), input.Workstream)
 		if err != nil {
 			return nil, err
 		}
@@ -685,7 +685,7 @@ func (c *Controls) MoveWorkstream(repository *trace.Repository, scope coreadapte
 			return priorityRefusal("an abandoned workstream does not move")
 		}
 		if input.OwnerDecided {
-			turn, owner, err := repository.OwnerTurn(trace.ChiefOfStaff, scope)
+			turn, owner, err := repository.OwnerTurn(trace.Manager, scope)
 			if err != nil {
 				return nil, err
 			}
@@ -732,7 +732,7 @@ func (c *Controls) ReopenForRevision(repository *trace.Repository, scope coreada
 		if s == nil {
 			return inner(ctx, raw)
 		}
-		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		target, stream, refusal, err := repository.ManagerMember(config.WorkstreamID(scope.Workstream), input.Workstream)
 		if err != nil || refusal != "" {
 			return inner(ctx, raw)
 		}

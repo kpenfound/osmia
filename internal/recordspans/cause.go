@@ -49,7 +49,7 @@ var UnitCauses = []string{CauseDispatched, CauseDependenciesMet, CauseCandidateR
 // never returns text from the transition's reason.
 func UnitCause(t trace.Transition) string {
 	from, to := t.From, t.To
-	chiefOrOwner := t.Actor.Kind == "owner" || t.Actor.ID == trace.ChiefOfStaff
+	chiefOrOwner := t.Actor.Kind == "owner" || t.Actor.ID == trace.Manager
 	switch {
 	case from == intake.UnitContested && to != intake.UnitContested:
 		return CauseContestRuled
@@ -126,7 +126,7 @@ func FeatureCause(t trace.Transition) string {
 	switch {
 	case t.Actor.Kind == "owner":
 		return CauseOwner
-	case t.Actor.ID == trace.ChiefOfStaff:
+	case t.Actor.ID == trace.Manager:
 		return CauseChief
 	case t.Actor.Kind == "agent":
 		return CauseAgent

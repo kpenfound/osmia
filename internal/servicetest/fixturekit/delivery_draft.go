@@ -16,16 +16,16 @@ import (
 func SetStatusGoal(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, goal string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	_, err := repository.EnsureChiefOfStaff(ctx, stream, at, ServiceActor)
+	_, err := repository.EnsureManager(ctx, stream, at, ServiceActor)
 	Must(t, err)
 	turn := fmt.Sprintf("status-%d", at.UnixNano())
 	h := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request-" + turn, Revision: 1, Project: repository.Project(), Workstream: stream, At: at, Actor: ServiceActor, Cause: "fixture"}
-	_, err = repository.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: turn, Profile: coreadapter.Profile{Name: "fake", Backend: "fake", Model: "fake"}, Prompt: "Set status"})
+	_, err = repository.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: turn, Profile: coreadapter.Profile{Name: "fake", Backend: "fake", Model: "fake"}, Prompt: "Set status"})
 	Must(t, err)
 	session := t.TempDir()
-	_, err = repository.ClaimTurn(ctx, stream, trace.ChiefOfStaff, turn+"-token", session, at)
+	_, err = repository.ClaimTurn(ctx, stream, trace.Manager, turn+"-token", session, at)
 	Must(t, err)
-	_, err = repository.SetStatus(ctx, trace.ChiefOfStaff, coreadapter.Scope{Project: string(repository.Project()), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: turn},
+	_, err = repository.SetStatus(ctx, trace.Manager, coreadapter.Scope{Project: string(repository.Project()), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: turn},
 		trace.StatusContent{Goal: goal, Note: "status", Agents: []string{}}, at, func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	Must(t, err)
 }

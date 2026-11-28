@@ -85,7 +85,7 @@ func (s *Controller) ObjectionSubject(repository *trace.Repository, stream confi
 		return shed.Entry{}, 0, &APIError{Code: Conflict, Message: "a conflict between member charters is escalated to the owner; the chief cannot resolve it"}
 	case entries[i].Member == shed.OwnerMember:
 		return shed.Entry{}, 0, &APIError{Code: Conflict, Message: fmt.Sprintf("objection %s is the owner's own; the owner decides it", objection)}
-	case entries[i].By == shed.ChiefOfStaff || entries[i].Escalated:
+	case entries[i].By == trace.Manager || entries[i].Escalated:
 		return shed.Entry{}, 0, &APIError{Code: Conflict, Message: fmt.Sprintf("you already decided objection %s; the owner rules on it now", objection)}
 	case entries[i].Disposition != "":
 		return shed.Entry{}, 0, &APIError{Code: Conflict, Message: fmt.Sprintf("the owner already ruled %s on objection %s", entries[i].Disposition, objection)}
@@ -128,22 +128,22 @@ func (s *Controller) objectionDocument(repository *trace.Repository, stream conf
 	if err != nil {
 		return trace.Document{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s has no recorded spec and plan yet", stream)}
 	}
-	rounds, err := shed.AllChiefDecisions(repository, stream)
+	rounds, err := shed.AllManagerDecisions(repository, stream)
 	if err != nil {
 		return trace.Document{}, failed
 	}
-	decisions := shed.ChiefDecisions{Version: shed.Version, Round: round, Revision: pin}
+	decisions := shed.ManagerDecisions{Version: shed.Version, Round: round, Revision: pin}
 	for _, r := range rounds {
 		if r.Round == round {
 			decisions = r
 		}
 	}
-	chosen := shed.ChiefDecision{Objection: objection, Decision: decision, Note: note, Turn: turn}
+	chosen := shed.ManagerDecision{Objection: objection, Decision: decision, Note: note, Turn: turn}
 	if judgment != "" {
 		chosen.DecidedBy, chosen.Judgment = trace.DecidedByJev, judgment
 	}
 	decisions.Decisions = append(slices.Clone(decisions.Decisions), chosen)
-	content, err := shed.EncodeChiefDecisions(decisions)
+	content, err := shed.EncodeManagerDecisions(decisions)
 	if err != nil {
 		return trace.Document{}, &APIError{Code: Validation, Message: "the decision cannot be recorded: " + err.Error()}
 	}
@@ -153,12 +153,12 @@ func (s *Controller) objectionDocument(repository *trace.Repository, stream conf
 	}
 	revision := 1
 	for _, d := range docs {
-		if d.Path == shed.ChiefPath(round) {
+		if d.Path == shed.ManagerPath(round) {
 			revision = d.Revision + 1
 		}
 	}
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.ChiefDocumentID(round), Revision: revision, Project: repository.Project(), Workstream: stream, At: s.Now(), Actor: ChiefActor, Cause: objection}
-	return trace.Document{Header: h, Path: shed.ChiefPath(round), Content: string(content)}, nil
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.ManagerDocumentID(round), Revision: revision, Project: repository.Project(), Workstream: stream, At: s.Now(), Actor: ChiefActor, Cause: objection}
+	return trace.Document{Header: h, Path: shed.ManagerPath(round), Content: string(content)}, nil
 }
 
 // RegisterObjectionEffects defines, in the router's registry, the effect of
@@ -326,7 +326,7 @@ func (c *Controls) ResolveObjection(repository *trace.Repository, scope coreadap
 		if err := repository.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
-		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		target, stream, refusal, err := repository.ManagerMember(config.WorkstreamID(scope.Workstream), input.Workstream)
 		if err != nil {
 			return nil, err
 		}

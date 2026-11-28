@@ -844,7 +844,7 @@ func (r *landingRun) finish(ctx context.Context, outcome, reason, notice string,
 	h := r.header(outcome)
 	tx := trace.Transaction{ExpectedVersion: subject.Version,
 		Transition: trace.Transition{Header: h, Subject: LandingSubject, From: subject.Value, To: fmt.Sprintf("%s-%d", outcome, r.in.Landing), Reason: reason},
-		Events:     []trace.Event{trace.Notice(h.ID, "chief", notice)}}
+		Events:     []trace.Event{trace.Notice(h.ID, trace.ManagerKey, notice)}}
 	var recordErr error
 	if len(docs) > 0 {
 		_, recordErr = r.Repository.RecordDocumentsWith(ctx, docs, tx)

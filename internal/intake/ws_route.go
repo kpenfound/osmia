@@ -269,7 +269,7 @@ func (d *Drafter) exhaustedExit(stream config.WorkstreamID, state trace.Workflow
 		Default: TargetExhausted, Targets: targets, Questions: ExitQuestions(TriggerDraftExhausted),
 		TransitionID: func(router.Target) string { return id },
 		Enter: func(_ context.Context, p router.Plan) (router.Effect, error) {
-			return router.Effect{Events: []trace.Event{trace.Notice(id, "chief", body)}, Reason: reason}, nil
+			return router.Effect{Events: []trace.Event{trace.Notice(id, trace.ManagerKey, body)}, Reason: reason}, nil
 		},
 		Evidence: router.Evidence{
 			Intent:  "The workstream was handed in and the architect drafts its spec and plan.",

@@ -349,10 +349,10 @@ func TestNewProjectStartCreatesTheProjectAndAllocatesIt(t *testing.T) {
 	if _, shared := trace.WorkgroupProjectID(chief.Project()); !shared {
 		t.Fatalf("the conversation stayed in %s", chief.Project())
 	}
-	if _, err := chief.Thread(host, trace.ChiefOfStaff); err != nil {
+	if _, err := chief.Thread(host, trace.Manager); err != nil {
 		t.Fatalf("the workgroup holds no chief of staff thread: %v", err)
 	}
-	if _, err := r.Thread(stream, trace.ChiefOfStaff); !errors.Is(err, os.ErrNotExist) {
+	if _, err := r.Thread(stream, trace.Manager); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the host project keeps the conversation: %v", err)
 	}
 	streams, err := r.Workstreams()

@@ -36,9 +36,9 @@ func (f *watchFixture) secondPush() FinalReport {
 func (f *watchFixture) chief(turn string) coreadapter.Scope {
 	f.t.Helper()
 	if f.scope == nil {
-		_, err := f.repo.EnsureChiefOfStaff(context.Background(), stream, fixturekit.DemoStart, fixturekit.ServiceActor)
+		_, err := f.repo.EnsureManager(context.Background(), stream, fixturekit.DemoStart, fixturekit.ServiceActor)
 		fixturekit.Must(f.t, err)
-		scope := fixturekit.ClaimTurn(f.t, f.repo, f.t.TempDir(), stream, trace.ChiefOfStaff, trace.ChiefOfStaff, turn, fixturekit.DemoStart)
+		scope := fixturekit.ClaimTurn(f.t, f.repo, f.t.TempDir(), stream, trace.Manager, trace.Manager, turn, fixturekit.DemoStart)
 		f.scope = &scope
 	}
 	return *f.scope

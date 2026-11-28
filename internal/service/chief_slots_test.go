@@ -343,9 +343,9 @@ func TestChiefSlotsRestartAdmitsFourteenInterruptedTurnsAgainstThePool(t *testin
 		fixturekit.Must(t, err)
 		_, err = repo.EnqueueTurn(ctx, f.request(i, "interrupted", chiefAt(i), serviceActor, "event", "ok", "default"))
 		fixturekit.Must(t, err)
-		dir := filepath.Join(f.cfg.Root.String(), "threads", string(p.ID), string(f.streams[i]), trace.ChiefOfStaff, "interrupted")
+		dir := filepath.Join(f.cfg.Root.String(), "threads", string(p.ID), string(f.streams[i]), trace.Manager, "interrupted")
 		fixturekit.Must(t, os.MkdirAll(dir, 0700))
-		_, err = repo.ClaimTurn(ctx, f.streams[i], trace.ChiefOfStaff, "old-claim", dir, chiefAt(i))
+		_, err = repo.ClaimTurn(ctx, f.streams[i], trace.Manager, "old-claim", dir, chiefAt(i))
 		fixturekit.Must(t, err)
 		fixturekit.Must(t, repo.Close())
 	}
@@ -401,17 +401,17 @@ func TestChiefSlotsSharedWorkgroupChiefTakesFromTheSamePool(t *testing.T) {
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { wt.Close() })
 	s.chief.resize(0)
-	_, err = wt.EnsureChiefOfStaff(ctx, host, chiefBase, serviceActor)
+	_, err = wt.EnsureManager(ctx, host, chiefBase, serviceActor)
 	fixturekit.Must(t, err)
 	profile, err := s.cfg.NamedProfile("default")
 	fixturekit.Must(t, err)
-	_, err = wt.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, Revision: 1, ID: "request_shared", Project: wt.Project(), Workstream: host, At: chiefAt(1), Actor: serviceActor, Cause: "event"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "shared", Profile: profile, Prompt: "ok"})
+	_, err = wt.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, Revision: 1, ID: "request_shared", Project: wt.Project(), Workstream: host, At: chiefAt(1), Actor: serviceActor, Cause: "event"}, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "shared", Profile: profile, Prompt: "ok"})
 	fixturekit.Must(t, err)
 	s.conversationSignal.wake()
 	intakefixture.Soon(t, "the shared chief turn to wait for a slot", func() bool {
 		return slices.Equal(chiefTurns(s.ChiefSlots().Waiting), []string{"shared"})
 	})
-	th, err := wt.Thread(host, trace.ChiefOfStaff)
+	th, err := wt.Thread(host, trace.Manager)
 	fixturekit.Must(t, err)
 	if reason := s.queuedReason(th, th.Turns[0]); reason != "waiting for a chief slot" || agent.hasStarted("shared@"+string(host)) {
 		t.Fatalf("shared chief turn: reason %q", reason)
@@ -477,7 +477,7 @@ func TestChiefSlotsFullPoolIsReportedByTheCapacityToolAndStatus(t *testing.T) {
 	fixturekit.Must(t, err)
 	awaitStarted(t, f.agent, f.key(4, sent.Turn))
 	repo := f.repo(t, s, 4)
-	scope := coreadapter.Scope{Project: string(f.ids[4]), Workstream: string(f.streams[4]), Thread: trace.ChiefOfStaff, Turn: sent.Turn, Role: trace.ChiefOfStaff}
+	scope := coreadapter.Scope{Project: string(f.ids[4]), Workstream: string(f.streams[4]), Thread: trace.Manager, Turn: sent.Turn, Role: trace.Manager}
 	controls := &runtimeControls{}
 	controls.service.Store(s)
 	out, err := controls.capacity(repo, scope).Handle(ctx, json.RawMessage(`{}`))
@@ -509,7 +509,7 @@ func TestChiefSlotsFullPoolIsReportedByTheCapacityToolAndStatus(t *testing.T) {
 			turn   string
 		}{{f.streams[2], "W1"}, {f.streams[3], "W2"}} {
 			w := chief.Waiting[i]
-			if w.Project != f.ids[i+2] || w.Workstream != want.stream || w.Agent != trace.ChiefOfStaff || w.Turn != want.turn || w.Reason != DeferCapacity {
+			if w.Project != f.ids[i+2] || w.Workstream != want.stream || w.Agent != trace.Manager || w.Turn != want.turn || w.Reason != DeferCapacity {
 				t.Fatalf("%s chief waiting[%d] %+v", name, i, w)
 			}
 		}

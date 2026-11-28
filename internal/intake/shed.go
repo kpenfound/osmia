@@ -505,7 +505,7 @@ func DissentRecord(repository *trace.Repository, stream config.WorkstreamID, rec
 	if err != nil {
 		return nil, err
 	}
-	chief, err := shed.AllChiefDecisions(repository, stream)
+	chief, err := shed.AllManagerDecisions(repository, stream)
 	if err != nil {
 		return nil, err
 	}

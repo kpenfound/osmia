@@ -313,7 +313,7 @@ func (f *ProductionDesign) OwnerSummary(t *testing.T) {
 			}
 		}
 	}
-	th, err := chief.Thread(host, trace.ChiefOfStaff)
+	th, err := chief.Thread(host, trace.Manager)
 	if err != nil {
 		t.Logf("OWNER thread error=%v", err)
 		return
@@ -330,7 +330,7 @@ func (f *ProductionDesign) OwnerSummary(t *testing.T) {
 		}
 		t.Logf("OWNER turn=%s request=%s revision=%d project=%s workstream=%s actor=%+v text-matches=%v status=%s claim=%+v response=%s completed=%v failure=%s", turn.Request.TurnID, turn.Request.ID, turn.Request.Revision, turn.Request.Project, turn.Request.Workstream, turn.Request.Actor, turn.Request.Prompt == sent.Text, turn.Status(), turn.Claim, response, turn.CompletedAt, failure)
 	}
-	op, err := thread.TurnOperation(chief.Project(), "workgroup-chief-"+sent.Turn, thread.TurnInput{Workstream: host, Agent: trace.ChiefOfStaff, Turn: sent.Turn})
+	op, err := thread.TurnOperation(chief.Project(), "workgroup-chief-"+sent.Turn, thread.TurnInput{Workstream: host, Agent: trace.Manager, Turn: sent.Turn})
 	if err != nil {
 		t.Logf("OWNER operation error=%v", err)
 		return
@@ -489,7 +489,7 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 				t.Fatalf("factory state leaked into target repo at %s: %v", name, err)
 			}
 		}
-		if _, err := repo.Thread(m, trace.ChiefOfStaff); !errors.Is(err, os.ErrNotExist) {
+		if _, err := repo.Thread(m, trace.Manager); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("member retains an independent chief: %v", err)
 		}
 		groups, _, err := trace.Workgroups(repo)
@@ -499,10 +499,10 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 		}
 		target, host, _, close, err := f.ChiefRepository(ctx, repo, m)
 		fixturekit.Must(t, err)
-		chief, err := target.Thread(host, trace.ChiefOfStaff)
+		chief, err := target.Thread(host, trace.Manager)
 		close()
 		fixturekit.Must(t, err)
-		if chief.Identity.Role != trace.ChiefOfStaff {
+		if chief.Identity.Role != trace.Manager {
 			t.Fatalf("the workgroup's chief thread has role %q", chief.Identity.Role)
 		}
 		for _, design := range f.Design.Turns {
@@ -542,7 +542,7 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 	if slices.ContainsFunc(listed.Workstreams, func(w api.WorkstreamStatus) bool { return w.Workstream == *f.Origin }) {
 		t.Fatal("status list exposes the adopted design host as independent work")
 	}
-	if _, err := repo.Thread(*f.Origin, trace.ChiefOfStaff); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo.Thread(*f.Origin, trace.Manager); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("source retains an authoritative queue")
 	}
 	if f.Design.Identity.Role == trace.Designer {
@@ -664,7 +664,7 @@ func (f *ProductionDesign) RebaseChief(t *testing.T) {
 	fixturekit.Must(t, err)
 	chief, host, _, closeChief, err := f.ChiefRepository(context.Background(), repo, *f.Stream1)
 	fixturekit.Must(t, err)
-	th, err := chief.Thread(host, trace.ChiefOfStaff)
+	th, err := chief.Thread(host, trace.Manager)
 	closeChief()
 	fixturekit.Must(t, err)
 	if !EqualJSONTest(f.Before.Identity, th.Identity) {
@@ -761,7 +761,7 @@ func (f *ProductionDesign) BindProductionDesign(production func(*trace.Repositor
 		turns.Select = func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 			if !ProductionWorker(scope) {
 				selection, err := originalSelect(ctx, scope)
-				if scope.Role == trace.ChiefOfStaff {
+				if scope.Role == trace.Manager {
 					f.Dispatch.Mu.Lock()
 					f.Dispatch.Scope, f.Dispatch.SelectionError = scope, fmt.Sprint(err)
 					f.Dispatch.Mu.Unlock()
@@ -774,7 +774,7 @@ func (f *ProductionDesign) BindProductionDesign(production func(*trace.Repositor
 		turns.Scoped = func(ctx context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if !ProductionWorker(scope) {
 				tools, err := originalScoped(ctx, scope)
-				if scope.Role == trace.ChiefOfStaff {
+				if scope.Role == trace.Manager {
 					f.Dispatch.Mu.Lock()
 					f.Dispatch.ToolsError = fmt.Sprint(err)
 					f.Dispatch.Mu.Unlock()
@@ -875,7 +875,7 @@ func (f *ProductionDesign) Setup(t *testing.T, handIn bool) {
 	})
 	repo, err := f.Repository(*f.Project)
 	fixturekit.Must(t, err)
-	*f.Before, err = repo.ChiefOfStaffThread(*f.Origin)
+	*f.Before, err = repo.ManagerThread(*f.Origin)
 	fixturekit.Must(t, err)
 	*f.Design, err = repo.DesignerThread(*f.Origin)
 	fixturekit.Must(t, err)

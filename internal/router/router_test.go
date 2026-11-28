@@ -1082,7 +1082,7 @@ func TestAChiefMoveIsPinnedButOpensNoOwnerGate(t *testing.T) {
 	f.track("implementing")
 	x := f.exit()
 	x.Trigger, x.Default = "unit.move_proposal", "implementing"
-	x.Actor = trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	x.Actor = trace.Actor{Kind: "agent", ID: trace.Manager}
 	x.Authority = &router.Authority{Kind: router.AuthorityChief, Target: "implementing"}
 	res := route(t, f, x)
 	if !res.Committed || res.State != "implementing" || res.Outcome != "followed" || res.Rule != "pinned" || f.ran("implementing") != 1 {
@@ -1091,7 +1091,7 @@ func TestAChiefMoveIsPinnedButOpensNoOwnerGate(t *testing.T) {
 	if n := len(f.provider.Requests()); n != 0 {
 		t.Fatalf("a chief move made %d requests", n)
 	}
-	if m := f.moves()[0]; m.DecidedBy != trace.DecidedByChief || m.Judgment != "" || !trace.ValidRouting(m.To, m.Routing()) {
+	if m := f.moves()[0]; m.DecidedBy != trace.DecidedByManager || m.Judgment != "" || !trace.ValidRouting(m.To, m.Routing()) {
 		t.Fatalf("transition = %+v", m)
 	}
 
@@ -1101,7 +1101,7 @@ func TestAChiefMoveIsPinnedButOpensNoOwnerGate(t *testing.T) {
 		g.track(target)
 		y := g.exit()
 		y.Trigger, y.Default = "unit.move_proposal", target
-		y.Actor = trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+		y.Actor = trace.Actor{Kind: "agent", ID: trace.Manager}
 		y.Authority = &router.Authority{Kind: router.AuthorityChief, Target: target}
 		if res := route(t, g, y); res.Committed || g.ran(target) != 0 || g.state().Value != "checking" {
 			t.Fatalf("%s: result = %+v", target, res)

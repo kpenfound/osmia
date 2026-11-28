@@ -14,15 +14,15 @@ func TestToolCallsRecordIntentCompletionAndInterruptedEffect(t *testing.T) {
 	ctx := context.Background()
 	r, root, p := create(t)
 	h := header("turn-request", "request_audit")
-	_, err := r.EnqueueTurn(ctx, TurnRequest{Header: h, AgentID: ChiefOfStaff, ThreadID: ChiefOfStaff, TurnID: "audit", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Read"})
+	_, err := r.EnqueueTurn(ctx, TurnRequest{Header: h, AgentID: Manager, ThreadID: Manager, TurnID: "audit", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Read"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = r.ClaimTurn(ctx, streamID, ChiefOfStaff, "claim", "/owned/audit", at)
+	_, err = r.ClaimTurn(ctx, streamID, Manager, "claim", "/owned/audit", at)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Thread: ChiefOfStaff, Turn: "audit", Role: ChiefOfStaff}
+	scope := coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Thread: Manager, Turn: "audit", Role: Manager}
 	tool := coreadapter.Tool{Name: "file_read", Effect: coreadapter.ToolRead}
 	complete, err := r.BeginTool(ctx, scope, tool, json.RawMessage(`{"path":"a.go"}`), func() time.Time { return at })
 	if err != nil {
@@ -57,7 +57,7 @@ func TestToolCallsRecordIntentCompletionAndInterruptedEffect(t *testing.T) {
 			t.Fatal(err)
 		}
 		latest[d.ID] = call
-		if d.Actor.ID != ChiefOfStaff || d.Cause != "request_audit" {
+		if d.Actor.ID != Manager || d.Cause != "request_audit" {
 			t.Fatal("missing tool provenance")
 		}
 	}

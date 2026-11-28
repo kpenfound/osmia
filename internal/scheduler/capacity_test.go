@@ -207,7 +207,7 @@ func TestChiefOfStaffTakesNoSlot(t *testing.T) {
 	f, repo := setup(t, "mason1", "mason2")
 	defer repo.Close()
 	limits := &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 1}
-	f.queueOn(t, repo, stream, trace.ChiefOfStaff, "one")
+	f.queueOn(t, repo, stream, trace.Manager, "one")
 	f.queue(t, repo, "mason1", "one")
 	s, err := New(repo, Options{Now: f.clock.Now, Capacity: limits})
 	must(t, err)
@@ -216,7 +216,7 @@ func TestChiefOfStaffTakesNoSlot(t *testing.T) {
 		t.Fatalf("dispatched %v", got)
 	}
 	f.queue(t, repo, "mason2", "one")
-	f.queueOn(t, repo, stream, trace.ChiefOfStaff, "two")
+	f.queueOn(t, repo, stream, trace.Manager, "two")
 	_, err = repo.ClaimTurn(ctx, stream, "mason1", "token", t.TempDir(), f.clock.Now())
 	must(t, err)
 	var ran []string
@@ -326,7 +326,7 @@ func TestWorkstreamOfAnUnregisteredKindRunsOnlyItsChiefOfStaff(t *testing.T) {
 	waiting := config.WorkstreamID("w_00000000000000000000000000000009")
 	must(t, repo.CreateWorkstreamKind(ctx, waiting, "", "mystery", f.clock.Now(), owner))
 	f.thread(t, repo, waiting, "mason9", "mason")
-	f.queueOn(t, repo, waiting, trace.ChiefOfStaff, "notice")
+	f.queueOn(t, repo, waiting, trace.Manager, "notice")
 	f.queueOn(t, repo, waiting, "mason9", "one")
 	f.queue(t, repo, "mason1", "one")
 	limits := &config.Capacity{Masons: 2, Reviewers: 1, Committee: 1, PerWorkstream: 2}

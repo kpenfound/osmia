@@ -153,7 +153,7 @@ func TestAChiefMoveToBuildingIsPinnedAndCommitted(t *testing.T) {
 			feature = tr
 		}
 	}
-	if feature.DecidedBy != trace.DecidedByChief || feature.DefaultTo != intake.BuildingState || feature.Departed() {
+	if feature.DecidedBy != trace.DecidedByManager || feature.DefaultTo != intake.BuildingState || feature.Departed() {
 		t.Fatalf("the feature's transition %+v", feature)
 	}
 	rec, ok := journey.LookupRoute(t, repository, stream, "ws.move_proposal")

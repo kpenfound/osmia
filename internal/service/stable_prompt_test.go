@@ -29,7 +29,7 @@ type stableLease struct{}
 
 func (stableLease) Release(context.Context) error { return nil }
 
-var stableRoles = []string{trace.ChiefOfStaff, masonRole, reviewerRole, architectRole, committeeRole}
+var stableRoles = []string{trace.Manager, masonRole, reviewerRole, architectRole, committeeRole}
 
 func stableStack(t *testing.T, cfg *config.Config, repo *trace.Repository, engine *adaptertest.Engine) thread.Runner {
 	t.Helper()
@@ -165,7 +165,7 @@ func TestResumedSessionsKeepTheirSystemPromptAfterPolicyAndPromptTextChange(t *t
 
 func TestLegacyBaselineIsEstablishedOnlyWhereTheServiceAddedNothingToTheRecordedPrompt(t *testing.T) {
 	opening := trace.QueuedTurn{Request: trace.TurnRequest{SystemPrompt: "recorded", TurnID: "opened"}}
-	production := map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, sessionRole: {WriteFiles: true, Execute: true, Web: true}}
+	production := map[string]coreadapter.Capabilities{trace.Manager: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, sessionRole: {WriteFiles: true, Execute: true, Web: true}}
 	for role := range production {
 		if prompt, ok := legacyBaseline(production)(role, opening); ok {
 			t.Fatalf("%s: a prompt %q was recovered although the service appended text to it that no record shows", role, prompt)

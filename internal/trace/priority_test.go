@@ -13,10 +13,10 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-func chiefTurnFrom(t *testing.T, r *Repository, agent, turn string, actor Actor) coreadapter.Scope {
+func managerTurnFrom(t *testing.T, r *Repository, agent, turn string, actor Actor) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
-	if err := r.CreateThread(ctx, Agent{Header: header("agent", agent), Role: ChiefOfStaff, ThreadID: agent + "_thread"}); err != nil {
+	if err := r.CreateThread(ctx, Agent{Header: header("agent", agent), Role: Manager, ThreadID: agent + "_thread"}); err != nil {
 		t.Fatal(err)
 	}
 	h := header("turn-request", "request_"+turn)
@@ -28,14 +28,14 @@ func chiefTurnFrom(t *testing.T, r *Repository, agent, turn string, actor Actor)
 	if _, err := r.ClaimTurn(ctx, streamID, agent, "token_"+turn, "/owned/"+turn, at); err != nil {
 		t.Fatal(err)
 	}
-	return coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Thread: agent + "_thread", Turn: turn, Role: ChiefOfStaff}
+	return coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Thread: agent + "_thread", Turn: turn, Role: Manager}
 }
 
 func TestSetPriorityRecordsTheOwnersRequest(t *testing.T) {
 	ctx := context.Background()
 	r, root, p := create(t)
 	owner := Actor{Kind: "owner", ID: "local"}
-	scope := chiefTurnFrom(t, r, "chief", "message1", owner)
+	scope := managerTurnFrom(t, r, "chief", "message1", owner)
 	order := func(ids ...config.WorkstreamID) func() ([]config.WorkstreamID, error) {
 		return func() ([]config.WorkstreamID, error) { return ids, nil }
 	}
@@ -65,7 +65,7 @@ func TestSetPriorityRecordsTheOwnersRequest(t *testing.T) {
 
 	called := false
 	apply := func() ([]config.WorkstreamID, error) { called = true; return nil, nil }
-	events := chiefTurnFrom(t, r, "chief_events", "events1", Actor{Kind: "service", ID: "events"})
+	events := managerTurnFrom(t, r, "chief_events", "events1", Actor{Kind: "service", ID: "events"})
 	var refused *PriorityRefused
 	if _, err := r.SetPriority(ctx, "chief_events", events, at, apply); !errors.As(err, &refused) || !strings.Contains(refused.Reason, "only the owner") {
 		t.Fatalf("service turn: %v", err)

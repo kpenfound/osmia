@@ -362,7 +362,7 @@ func (j *flowJourney) credentialNotices(t *testing.T, review int) int {
 	fixturekit.Must(t, err)
 	n := 0
 	for _, e := range entries {
-		if e.Event.ID == trace.EventID(fmt.Sprintf("final-review-%d-credential-notice", review), "chief") {
+		if e.Event.ID == trace.EventID(fmt.Sprintf("final-review-%d-credential-notice", review), trace.ManagerKey) {
 			n++
 		}
 	}

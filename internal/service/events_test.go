@@ -89,12 +89,12 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	bound.Lock()
 	repo = live
 	bound.Unlock()
-	th, err := repo.ChiefOfStaffThread(fixturekit.Stream)
+	th, err := repo.ManagerThread(fixturekit.Stream)
 	fixturekit.Must(t, err)
 	if len(th.Turns) != 0 {
 		t.Fatalf("event turn inside the window: %+v", th.Turns)
 	}
-	fixturekit.Must(t, s.store.SetProfile(trace.ChiefOfStaff, "other"))
+	fixturekit.Must(t, s.store.SetProfile(trace.Manager, "other"))
 	clock.Advance(2 * time.Minute)
 	pass(s)
 	select {
@@ -123,13 +123,13 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 		t.Fatalf("backend runs %+v", calls)
 	}
 	call := calls[0]
-	if call.Scope.Role != trace.ChiefOfStaff || !strings.HasPrefix(call.Prompt, events.Preamble) ||
+	if call.Scope.Role != trace.Manager || !strings.HasPrefix(call.Prompt, events.Preamble) ||
 		!strings.Contains(call.Prompt, "Reassess this in-flight workstream") ||
 		!strings.Contains(call.Prompt, "Workstream state changed to handed: Owner moved the feature to handed") ||
 		!strings.Contains(call.Prompt, "Workstream state changed from handed to planning: Owner moved the feature to planning") {
 		t.Fatalf("event turn %+v", call)
 	}
-	th, err = repo.ChiefOfStaffThread(fixturekit.Stream)
+	th, err = repo.ManagerThread(fixturekit.Stream)
 	fixturekit.Must(t, err)
 	if len(th.Turns) != 1 || th.Turns[0].CompletedAt.IsZero() || th.Turns[0].Request.Profile.Name != "other" || th.Turns[0].Request.Profile.Backend != "codex" {
 		t.Fatalf("chief-of-staff thread %+v", th)
@@ -206,7 +206,7 @@ func TestAbandonedWorkstreamEventsAreNotDelivered(t *testing.T) {
 	repo, err = trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	defer repo.Close()
-	th, err := repo.ChiefOfStaffThread(fixturekit.Stream)
+	th, err := repo.ManagerThread(fixturekit.Stream)
 	fixturekit.Must(t, err)
 	if len(th.Turns) != 0 {
 		t.Fatalf("event turns of an abandoned workstream: %+v", th.Turns)

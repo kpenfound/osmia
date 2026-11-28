@@ -120,7 +120,7 @@ func (l *flakeFixLive) chief(t *testing.T, stream config.WorkstreamID, name stri
 		h := func(schema, hid string) trace.Header {
 			return trace.Header{Schema: "osmia.trace." + schema, Version: trace.Version, ID: hid, Revision: 1, Project: repo.Project(), Workstream: stream, At: now, Actor: ownerActor, Cause: "flake-fix-test"}
 		}
-		fixturekit.Must(t, repo.CreateThread(ctx, trace.Agent{Header: h("agent", agentID), Role: trace.ChiefOfStaff, ThreadID: thread}))
+		fixturekit.Must(t, repo.CreateThread(ctx, trace.Agent{Header: h("agent", agentID), Role: trace.Manager, ThreadID: thread}))
 		_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h("turn-request", "request_"+turn), AgentID: agentID, ThreadID: thread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Work"})
 		fixturekit.Must(t, err)
 		if _, err := repo.ClaimTurn(ctx, stream, agentID, "token_"+id, "/owned/"+id, now); err != nil {
@@ -131,7 +131,7 @@ func (l *flakeFixLive) chief(t *testing.T, stream config.WorkstreamID, name stri
 		}
 		controls := &runtimeControls{}
 		controls.service.Store(l.s)
-		return controls.flakeFix(repo, coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: thread, Turn: turn, Role: trace.ChiefOfStaff})
+		return controls.flakeFix(repo, coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: thread, Turn: turn, Role: trace.Manager})
 	}
 }
 

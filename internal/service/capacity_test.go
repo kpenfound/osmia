@@ -291,7 +291,7 @@ func TestStatusProviderUsageShowsALimitedProvidersFallbacksAndPausedRoles(t *tes
 	if claude.Provider != "claude" || claude.ProviderSpend != (ProviderSpend{SpendUSD: "0"}) || claude.Limit == nil || !reflect.DeepEqual(*claude.Limit, r.limit) {
 		t.Fatalf("claude %+v", claude)
 	}
-	if !slices.Contains(claude.Fallbacks, RoleFallback{Role: masonRole, Configured: "default", Profile: "other"}) || slices.ContainsFunc(claude.Fallbacks, func(f RoleFallback) bool { return f.Role == reviewerRole || f.Role == trace.ChiefOfStaff }) {
+	if !slices.Contains(claude.Fallbacks, RoleFallback{Role: masonRole, Configured: "default", Profile: "other"}) || slices.ContainsFunc(claude.Fallbacks, func(f RoleFallback) bool { return f.Role == reviewerRole || f.Role == trace.Manager }) {
 		t.Fatalf("claude fallbacks %+v", claude.Fallbacks)
 	}
 	for _, f := range claude.Fallbacks {

@@ -128,7 +128,7 @@ func awaitQuestionJourneyQuiet(t *testing.T, f *journey.ShedFixture, stream conf
 				return false
 			}
 		}
-		chief, err := f.Repository().ChiefOfStaffThread(stream)
+		chief, err := f.Repository().ManagerThread(stream)
 		fixturekit.Must(t, err)
 		return !slices.ContainsFunc(chief.Turns, func(turn trace.QueuedTurn) bool { return turn.CompletedAt.IsZero() })
 	})
@@ -404,7 +404,7 @@ func questionJourneySnapshot(t *testing.T, f *journey.ShedFixture, stream config
 	for _, agent := range []string{intake.MasonAgent("resume"), intake.MasonAgent("dedupe"), intake.ReviewerAgent("resume"), intake.ReviewerAgent("dedupe"), intake.CommitteeAgent(1)} {
 		threads = append(threads, f.Thread(t, stream, agent))
 	}
-	chief, err := f.Repository().ChiefOfStaffThread(stream)
+	chief, err := f.Repository().ManagerThread(stream)
 	fixturekit.Must(t, err)
 	threads = append(threads, chief)
 	data, err := json.Marshal([]any{transitions, docs, notices, threads})

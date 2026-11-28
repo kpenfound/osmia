@@ -83,7 +83,7 @@ func (f *crossRepoWiringFixture) problem(format string, args ...any) {
 func TestWorkgroupChiefDispatchVisitsLeaderAfterRetainedSourceLocatorAcrossRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newCrossRepoWiringFixture(t, map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff})
+	f := newCrossRepoWiringFixture(t, map[string]string{trace.Manager: trace.Manager})
 	f.engine.Turns["*"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		return intakefixture.QuestionResult(req, "session-chief", "The agreed work continues."), nil
 	}
@@ -106,7 +106,7 @@ func TestWorkgroupChiefDispatchVisitsLeaderAfterRetainedSourceLocatorAcrossResta
 		t.Fatal("retained source must sort before the dispatch leader")
 	}
 	fixturekit.Must(t, repo.CreateWorkstream(ctx, source, f.clock.Now(), intake.OwnerActor))
-	fixturekit.Must(t, repo.RetractChiefOfStaff(ctx, source))
+	fixturekit.Must(t, repo.RetractManager(ctx, source))
 	fixturekit.Must(t, repo.RecordCrossRepoWorkgroup(ctx, source, id, f.clock.Now(), intake.OwnerActor, "design-start"))
 	for lifetime := 0; lifetime < 2; lifetime++ {
 		if lifetime > 0 {
@@ -160,7 +160,7 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 	const question1, question2 = "Where does the server store chunks?", "Does the client ever see the offset?"
 	const answer1, answer2 = "In a content-addressed store.", "No, only the server does."
 
-	agents := map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff, "thread_mason": fixturekit.DemoAgent, "thread_mason2": "agent_mason2"}
+	agents := map[string]string{trace.Manager: trace.Manager, "thread_mason": fixturekit.DemoAgent, "thread_mason2": "agent_mason2"}
 	f := newCrossRepoWiringFixture(t, agents)
 	opts, clock := f.opts, f.clock
 
@@ -268,10 +268,10 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 		}
 	}
 
-	if _, err := repo1.ChiefOfStaffThread(f.stream1); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo1.ManagerThread(f.stream1); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member1's own repository got a chief-of-staff thread: %v", err)
 	}
-	if _, err := repo2.ChiefOfStaffThread(f.stream2); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo2.ManagerThread(f.stream2); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member2's own repository got a chief-of-staff thread: %v", err)
 	}
 
@@ -370,7 +370,7 @@ func (f *crossRepoWiringFixture) driveTicksUntil(t *testing.T, condition func() 
 func TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupChiefTurnRuns(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	agents := map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff, "thread_mason": fixturekit.DemoAgent, "thread_mason2": "agent_mason2"}
+	agents := map[string]string{trace.Manager: trace.Manager, "thread_mason": fixturekit.DemoAgent, "thread_mason2": "agent_mason2"}
 	f := newCrossRepoWiringFixture(t, agents)
 	opts := f.opts
 
@@ -538,12 +538,12 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 	fixturekit.Must(t, err)
 	sent1, err := f.C.Send(ctx, f.Stream1, "Where does the acknowledgment live?")
 	fixturekit.Must(t, err)
-	if _, err := repo1.ChiefOfStaffThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo1.ManagerThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member1's own repository got a chief-of-staff thread of its own: %v", err)
 	}
 	sent2, err := f.C.Send(ctx, f.Stream2, "Does the client ever see the offset?")
 	fixturekit.Must(t, err)
-	if _, err := repo2.ChiefOfStaffThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo2.ManagerThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member2's own repository got a chief-of-staff thread of its own: %v", err)
 	}
 
@@ -592,7 +592,7 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 			}
 
 			for _, e := range feed.Entries {
-				if e.Kind == "message" || e.Kind == "response" || e.Kind == "status" || e.Kind == "action" || e.Session != nil && e.Session.Role == trace.ChiefOfStaff {
+				if e.Kind == "message" || e.Kind == "response" || e.Kind == "status" || e.Kind == "action" || e.Session != nil && e.Session.Role == trace.Manager {
 					t.Fatalf("workstream %s's member feed contains a shared chief entry: %+v", m, e)
 				}
 			}
@@ -635,10 +635,10 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 		t.Fatalf("member2's own repository was wrapped in its own one-workstream workgroup: %+v", groups2)
 	}
 
-	if _, err := repo1.ChiefOfStaffThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo1.ManagerThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member1's own repository got a chief-of-staff thread after restart: %v", err)
 	}
-	if _, err := repo2.ChiefOfStaffThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo2.ManagerThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member2's own repository got a chief-of-staff thread after restart: %v", err)
 	}
 

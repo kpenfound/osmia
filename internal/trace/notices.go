@@ -14,14 +14,14 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// ProjectNotice carries the chief's message and the exact turn that published it.
+// ProjectNotice carries the manager's message and the exact turn that published it.
 // It informs subsequent turns; it is not an owner ruling or a charter rule.
 type ProjectNotice struct {
 	Text  string            `json:"text"`
 	Scope coreadapter.Scope `json:"scope"`
 }
 
-// NotifyTool binds project-wide notices to a chief-of-staff turn. Repeating the
+// NotifyTool binds project-wide notices to a manager turn. Repeating the
 // same call in the same turn returns the existing record.
 func (r *Repository) NotifyTool(scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: "notify", Effect: coreadapter.ToolMemory,
@@ -37,7 +37,7 @@ func (r *Repository) NotifyTool(scope coreadapter.Scope, now func() time.Time) c
 		if strings.TrimSpace(in.Text) == "" || len(in.Text) > 16384 || !utf8.ValidString(in.Text) || strings.ContainsRune(in.Text, 0) {
 			return nil, errors.New("notice requires UTF-8 text of at most 16384 bytes")
 		}
-		if scope.Role != ChiefOfStaff {
+		if scope.Role != Manager {
 			return nil, errors.New("only the chief of staff can publish notices")
 		}
 		workstream, err := r.scoped(config.WorkstreamID(scope.Workstream))
@@ -45,7 +45,7 @@ func (r *Repository) NotifyTool(scope coreadapter.Scope, now func() time.Time) c
 			return nil, err
 		}
 		workstream.mu.Lock()
-		_, turn, err := workstream.turnScope(ChiefOfStaff, scope, true)
+		_, turn, err := workstream.turnScope(Manager, scope, true)
 		workstream.mu.Unlock()
 		if err != nil {
 			return nil, err
@@ -69,7 +69,7 @@ func (r *Repository) NotifyTool(scope coreadapter.Scope, now func() time.Time) c
 		}
 		h := turn.Request.Header
 		h.Schema, h.ID, h.Revision, h.Workstream, h.Unit, h.At, h.Cause = "osmia.trace.document", id, 1, "", "", now().UTC(), turn.Request.ID
-		h.Actor = Actor{Kind: "agent", ID: ChiefOfStaff}
+		h.Actor = Actor{Kind: "agent", ID: Manager}
 		h.Depth++
 		d := Document{Header: h, Path: "notices/" + id + ".json", Content: string(data)}
 		files, err := r.documentFiles(ctx, []Document{d})

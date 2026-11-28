@@ -24,7 +24,7 @@ func chiefOfStaffAgents(t *testing.T, s *Service, id config.WorkstreamID) []trac
 	fixturekit.Must(t, err)
 	var out []trace.Agent
 	for _, a := range agents {
-		if a.ID == trace.ChiefOfStaff {
+		if a.ID == trace.Manager {
 			out = append(out, a)
 		}
 	}
@@ -43,15 +43,15 @@ func TestRestartKeepsOneChiefOfStaffThreadPerWorkstream(t *testing.T) {
 	plantWorkstream(t, s.cfg.Root, id, existing)
 
 	s, _ = start(t, opts)
-	th, err := s.sole().repository.ChiefOfStaffThread(existing)
+	th, err := s.sole().repository.ManagerThread(existing)
 	fixturekit.Must(t, err)
-	if th.Identity.Role != trace.ChiefOfStaff || th.Identity.Actor != serviceActor || th.Status != "idle" {
+	if th.Identity.Role != trace.Manager || th.Identity.Actor != serviceActor || th.Status != "idle" {
 		t.Fatalf("thread = %+v", th)
 	}
 	fixturekit.Must(t, s.Close())
 
 	s, _ = start(t, opts)
-	again, err := s.sole().repository.ChiefOfStaffThread(existing)
+	again, err := s.sole().repository.ManagerThread(existing)
 	fixturekit.Must(t, err)
 	if got := chiefOfStaffAgents(t, s, existing); len(got) != 1 || !again.Identity.At.Equal(th.Identity.At) {
 		t.Fatalf("agents after restart = %+v", got)

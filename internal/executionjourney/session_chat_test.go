@@ -823,7 +823,7 @@ func TestResumeRoleGateCoversEveryRole(t *testing.T) {
 		t.Fatal("no resumable-roles gate is configured")
 	}
 	for role, want := range map[string]bool{
-		service.SessionAgentID: true, trace.ChiefOfStaff: false, intake.MasonRole: false, intake.ReviewerRole: false,
+		service.SessionAgentID: true, trace.Manager: false, intake.MasonRole: false, intake.ReviewerRole: false,
 	} {
 		if got := d.Runner.ResumableRoles(role); got != want {
 			t.Errorf("ResumableRoles(%q) = %v, want %v", role, got, want)

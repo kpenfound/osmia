@@ -47,7 +47,7 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 	fixturekit.Must(t, live.CreateThread(ctx, trace.Agent{Header: header("osmia.trace.agent", fixturekit.DemoAgent, intake.OwnerActor), Role: fixturekit.DemoRole, ThreadID: fixturekit.DemoThread}))
 	asked, err := live.Ask(ctx, fixturekit.DemoAgent, fixturekit.ClaimTurn(t, live, t.TempDir(), fixturekit.Stream, fixturekit.DemoAgent, fixturekit.DemoThread, "build_"+fixturekit.DemoAgent, at), "Where does upload state live?", at)
 	fixturekit.Must(t, err)
-	_, err = live.EscalateQuestions(ctx, trace.ChiefOfStaff, f.Chief, trace.EscalationRequest{Questions: []string{asked.ID}, Rephrasing: "Where should upload state live?",
+	_, err = live.EscalateQuestions(ctx, trace.Manager, f.Chief, trace.EscalationRequest{Questions: []string{asked.ID}, Rephrasing: "Where should upload state live?",
 		Blocked: "The upload unit.", Recommendation: "Keep it in files."}, at)
 	fixturekit.Must(t, err)
 	plantReport(t, live, fixturekit.Stream, "index", at)

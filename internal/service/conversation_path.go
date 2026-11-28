@@ -36,7 +36,7 @@ func (w *conversationSignal) wake() {
 	}
 	w.changed = make(chan struct{})
 }
-func conversationRole(role string) bool { return trace.ChiefLike(role) || role == sessionRole }
+func conversationRole(role string) bool { return trace.ManagerLike(role) || role == sessionRole }
 func conversationOperation(op coreadapter.Operation) bool {
 	in, err := thread.DecodeTurn(op)
 	return err == nil && conversationRole(in.Agent)

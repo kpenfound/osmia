@@ -27,7 +27,7 @@ func TestKindChiefToolsFollowTheWorkstreamsKind(t *testing.T) {
 	f, stream, repository := newReviewFixture(t, "kind-chief-tools")
 	controls := &runtimeControls{}
 	scope := func(stream config.WorkstreamID) coreadapter.Scope {
-		return coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "turn"}
+		return coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: "turn"}
 	}
 	tools, err := controls.kindChiefTools(repository, scope(stream), time.Now)
 	fixturekit.Must(t, err)

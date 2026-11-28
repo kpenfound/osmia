@@ -34,10 +34,10 @@ func recordBriefFor(t *testing.T, repo *trace.Repository, member config.Workstre
 func logAssumptionFor(t *testing.T, repo *trace.Repository, text string) {
 	t.Helper()
 	ctx := context.Background()
-	_, err := repo.EnsureChiefOfStaff(ctx, stream, fixturekit.DemoStart, fixturekit.ServiceActor)
+	_, err := repo.EnsureManager(ctx, stream, fixturekit.DemoStart, fixturekit.ServiceActor)
 	fixturekit.Must(t, err)
-	scope := fixturekit.ClaimTurn(t, repo, t.TempDir(), stream, trace.ChiefOfStaff, trace.ChiefOfStaff, "assumption", fixturekit.DemoStart)
-	_, err = repo.LogAssumption(ctx, trace.ChiefOfStaff, scope, text, fixturekit.DemoStart)
+	scope := fixturekit.ClaimTurn(t, repo, t.TempDir(), stream, trace.Manager, trace.Manager, "assumption", fixturekit.DemoStart)
+	_, err = repo.LogAssumption(ctx, trace.Manager, scope, text, fixturekit.DemoStart)
 	fixturekit.Must(t, err)
 }
 

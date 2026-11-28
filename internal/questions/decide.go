@@ -55,7 +55,7 @@ func (s RoutingSubject) Label() string {
 // open, it reports a conflict between member charters, or its asker is not a
 // role Jev takes part in routing for. Such a question keeps the route it has.
 func RoutingSubjectOf(repository *trace.Repository, host config.WorkstreamID, id string) (RoutingSubject, string, error) {
-	member, local, err := repository.ChiefQuestionTarget(host, strings.TrimSpace(id))
+	member, local, err := repository.ManagerQuestionTarget(host, strings.TrimSpace(id))
 	if err != nil {
 		return RoutingSubject{}, "", err
 	}

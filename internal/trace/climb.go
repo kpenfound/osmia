@@ -53,7 +53,7 @@ const (
 )
 
 // The workstream documents of the climbing loop: what the running attempt is
-// doing, the steering notes the chief of staff left, the budget extensions the
+// doing, the steering notes the manager left, the budget extensions the
 // owner granted, and one journal and one stop record per attempt.
 const (
 	ClimbRunningID    = "climb-running"

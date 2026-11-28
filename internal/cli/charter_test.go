@@ -27,7 +27,7 @@ func withCharterProposal(t *testing.T) service.Options {
 	must(t, repo.CreateWorkstream(ctx, stream, written, owner))
 	content, err := json.Marshal(trace.CharterProposal{Question: "1", Ruling: "workstreams/" + stream + "/questions/1/rulings.jsonl", RulingRevision: 2, OwnerResponse: "Uploads always resume.\nNo exceptions.", Rule: "Uploads resume.", Number: 2})
 	must(t, err)
-	chief := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: trace.CharterProposalID("1"), Revision: 1, Project: project, Workstream: stream, At: written, Actor: chief, Cause: "planted"}
 	tx := h
 	tx.Schema, tx.ID = "osmia.trace.transition", trace.CharterSubject("1")+"_proposed"

@@ -18,9 +18,9 @@ import (
 // read, when it read one.
 type AmendmentRequest struct {
 	QuestionID string
-	// Workstream names the member a chief of staff's revision without a
-	// question is for: another member sharing its chief of staff. Empty is the
-	// chief's own workstream.
+	// Workstream names the member a manager's revision without a
+	// question is for: another member sharing its manager. Empty is the
+	// manager's own workstream.
 	Workstream   config.WorkstreamID
 	Citations    []string
 	Change       string
@@ -143,23 +143,23 @@ func touchedCitations(spec ProjectSpec, workgroup config.WorkgroupID, stream con
 // an interrupted one files nothing twice. A mason turn with no unit, which
 // resolves the feature branch's conflicts with upstream, parks nothing.
 //
-// A chief-of-staff tool naming a question (route_amendment) resolves it
-// through the same member-workstream routing every other chief-of-staff
+// A manager tool naming a question (route_amendment) resolves it
+// through the same member-workstream routing every other manager
 // question tool uses: the amendment is recorded against the asking
-// member's own workstream, never against the chief's host workstream by
+// member's own workstream, never against the manager's host workstream by
 // default. When the request would change a contract section read-only to
 // that member's own slice, the amendment is never recorded against the
 // workstream at all: it becomes a ProjectAmendment instead, and the
-// question is routed to it the same way. A repeated chief call naming the
+// question is routed to it the same way. A repeated manager call naming the
 // same already-routed question returns that same ProjectAmendment, rather
 // than the refusal a second routing of an ordinary question would get.
 func (r *Repository) FileAmendment(ctx context.Context, agent string, scope coreadapter.Scope, req AmendmentRequest, at time.Time) (AmendmentOutcome, error) {
 	project := r
-	if scope.Role != "mason" && scope.Role != "reviewer" && scope.Role != ChiefOfStaff {
+	if scope.Role != "mason" && scope.Role != "reviewer" && scope.Role != Manager {
 		return AmendmentOutcome{}, fmt.Errorf("only masons, reviewers and the chief of staff may file amendments")
 	}
 	host := config.WorkstreamID(scope.Workstream)
-	if scope.Role != ChiefOfStaff {
+	if scope.Role != Manager {
 		if req.QuestionID != "" {
 			return AmendmentOutcome{}, refused("only the chief of staff may route a question")
 		}
@@ -181,9 +181,9 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 		records []Record
 		err     error
 	)
-	if scope.Role == ChiefOfStaff && req.QuestionID != "" {
+	if scope.Role == Manager && req.QuestionID != "" {
 		var localID string
-		target, localID, turn, err = r.chiefQuestionScope(ctx, agent, scope, req.QuestionID, at)
+		target, localID, turn, err = r.managerQuestionScope(ctx, agent, scope, req.QuestionID, at)
 		if err != nil {
 			return AmendmentOutcome{}, err
 		}
@@ -199,7 +199,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 			target.mu.Unlock()
 			return AmendmentOutcome{}, err
 		}
-	} else if scope.Role == ChiefOfStaff && req.Workstream != "" && req.Workstream != host {
+	} else if scope.Role == Manager && req.Workstream != "" && req.Workstream != host {
 		members, err := r.WorkgroupMembers(host)
 		if err != nil {
 			return AmendmentOutcome{}, err
@@ -207,7 +207,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 		if !slices.Contains(members, req.Workstream) {
 			return AmendmentOutcome{}, refused("workstream %s does not share this chief of staff", req.Workstream)
 		}
-		target, turn, err = r.chiefTurnOn(ctx, agent, scope, req.Workstream, at)
+		target, turn, err = r.managerTurnOn(ctx, agent, scope, req.Workstream, at)
 		if err != nil {
 			return AmendmentOutcome{}, err
 		}
@@ -242,7 +242,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 			return AmendmentOutcome{Amendment: a}, nil
 		}
 	}
-	if scope.Role == ChiefOfStaff && req.QuestionID != "" {
+	if scope.Role == Manager && req.QuestionID != "" {
 		pas, _, err := ProjectAmendments(project)
 		if err != nil {
 			return AmendmentOutcome{}, err
@@ -254,7 +254,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 		}
 	}
 	if req.Upstream != nil {
-		if scope.Role == ChiefOfStaff || req.Upstream.Drift < 1 || !present(req.Upstream.From) || !present(req.Upstream.To) {
+		if scope.Role == Manager || req.Upstream.Drift < 1 || !present(req.Upstream.From) || !present(req.Upstream.To) {
 			return AmendmentOutcome{}, fmt.Errorf("an amendment cites a drift rebase by its number and upstream commits, from a mason or reviewer turn")
 		}
 		for _, record := range records {
@@ -263,7 +263,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 			}
 		}
 	}
-	if scope.Role != ChiefOfStaff {
+	if scope.Role != Manager {
 		for _, q := range questions(records, v, member) {
 			if q.Asked.AskedBy.ID == agent && q.Asked.Thread == scope.Thread && q.Asked.Turn == scope.Turn {
 				return AmendmentOutcome{}, refused("this turn already asked question %s; end the turn", q.Asked.ID)
@@ -288,7 +288,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 	requester := Actor{Kind: "agent", ID: agent}
 	unit := scope.Unit
 	parkRole := scope.Role
-	if scope.Role == ChiefOfStaff && req.QuestionID != "" {
+	if scope.Role == Manager && req.QuestionID != "" {
 		q, err := openQuestion(questions(records, v, member), req.QuestionID)
 		if err != nil {
 			return AmendmentOutcome{}, err
@@ -301,10 +301,10 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 		}
 	}
 	var from string
-	if (parkRole == "mason" || parkRole == "reviewer") && !(scope.Role != ChiefOfStaff && unit == "" && req.Upstream != nil) {
+	if (parkRole == "mason" || parkRole == "reviewer") && !(scope.Role != Manager && unit == "" && req.Upstream != nil) {
 		stage := map[string]string{"mason": "implementing", "reviewer": "reviewing"}[parkRole]
 		from = v.states[UnitSubject(unit)].Value
-		if unit == "" || from != stage && !(scope.Role == ChiefOfStaff && from == "waiting") {
+		if unit == "" || from != stage && !(scope.Role == Manager && from == "waiting") {
 			return AmendmentOutcome{}, refused("the requesting unit must be %s or waiting on its question", stage)
 		}
 	}
@@ -390,7 +390,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 }
 
 // OwnerTurn returns the request of the scope's active, uncaptured
-// chief-of-staff turn and reports whether that turn answers a message from
+// manager turn and reports whether that turn answers a message from
 // the owner.
 func (r *Repository) OwnerTurn(agent string, scope coreadapter.Scope) (TurnRequest, bool, error) {
 	r, err := r.scoped(config.WorkstreamID(scope.Workstream))
@@ -399,7 +399,7 @@ func (r *Repository) OwnerTurn(agent string, scope coreadapter.Scope) (TurnReque
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if scope.Role != ChiefOfStaff {
+	if scope.Role != Manager {
 		return TurnRequest{}, false, fmt.Errorf("only a chief-of-staff turn answers the owner")
 	}
 	_, q, err := r.turnScope(agent, scope, true)

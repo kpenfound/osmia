@@ -378,7 +378,7 @@ func (d *Drafter) RequestAgain(ctx context.Context, stream config.WorkstreamID, 
 	switch {
 	case by.Kind == OwnerActor.Kind:
 		asker = "the owner"
-	case by.ID == trace.ChiefOfStaff:
+	case by.ID == trace.Manager:
 		asker = "the chief of staff"
 	}
 	reason := fmt.Sprintf("drafting had stopped; %s asked for another run of %d drafts: %s", asker, MaxDrafts, note)

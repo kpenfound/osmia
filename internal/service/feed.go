@@ -72,7 +72,7 @@ func FeedEntries(repository, chief *trace.Repository, stream config.WorkstreamID
 		return nil, err
 	}
 	for _, th := range threads {
-		if shared && (trace.ChiefLike(th.Identity.ID) || trace.ChiefLike(th.Identity.Role)) {
+		if shared && (trace.ManagerLike(th.Identity.ID) || trace.ManagerLike(th.Identity.Role)) {
 			continue
 		}
 		for _, q := range th.Turns {
@@ -136,7 +136,7 @@ func chiefFeedEntries(chief *trace.Repository, stream config.WorkstreamID, earli
 	for _, e := range conversation {
 		out = append(out, FeedEntry{Kind: e.Kind, At: e.At, Turn: e.Turn, Text: e.Text, State: e.State, QueuedReason: e.QueuedReason})
 	}
-	host, err := chief.ChiefOfStaffHost(stream)
+	host, err := chief.ManagerHost(stream)
 	if err != nil {
 		return nil, err
 	}

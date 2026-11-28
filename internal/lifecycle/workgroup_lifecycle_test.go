@@ -214,7 +214,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 			})
 			otherRepo, err := f.S.Repository(f.Project)
 			fixturekit.Must(t, err)
-			otherChief, err := otherRepo.ChiefOfStaffThread(unrelated)
+			otherChief, err := otherRepo.ManagerThread(unrelated)
 			fixturekit.Must(t, err)
 			lifecycleWorker(t, f, retiredProject, retired, retiredWorker, "lifecycle-ask", "consolidated-origin")
 			lifecycleWorker(t, f, survivorProject, survivor, "worker_unaffected", "lifecycle-ask", "consolidated-survivor")
@@ -301,12 +301,12 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				if !active {
 					t.Fatal("one archived member resolved the group")
 				}
-				b, err := f.S.Context().Assemble(ctx, survivorProject, bundle.Scope{Role: trace.ChiefOfStaff, Workstream: survivor})
+				b, err := f.S.Context().Assemble(ctx, survivorProject, bundle.Scope{Role: trace.Manager, Workstream: survivor})
 				fixturekit.Must(t, err)
 				if !strings.Contains(b.Brief(), "acknowledgment") {
 					t.Fatal("survivor lost active contracts")
 				}
-				th, err := target.Thread(host, trace.ChiefOfStaff)
+				th, err := target.Thread(host, trace.Manager)
 				fixturekit.Must(t, err)
 				if !intakefixture.EqualJSONTest(f.Before.Identity, th.Identity) || !intakefixture.EqualJSONTest(f.Before.Turns, th.Turns[:len(f.Before.Turns)]) {
 					t.Fatal("adopted conversation changed")
@@ -368,7 +368,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				journey.LifecycleAwait(t, f, "survivor event acknowledgment "+boundary, func() bool {
 					outbox, err := repo.Outbox(survivor)
 					fixturekit.Must(t, err)
-					chief, err := target.Thread(host, trace.ChiefOfStaff)
+					chief, err := target.Thread(host, trace.Manager)
 					fixturekit.Must(t, err)
 					for _, e := range outbox {
 						if e.Event.Operation != nil || !strings.Contains(e.Event.Body, "direct-"+boundary) {
@@ -449,7 +449,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				}
 				otherRepo, err := f.S.Repository(f.Project)
 				fixturekit.Must(t, err)
-				continuedOther, err := otherRepo.ChiefOfStaffThread(unrelated)
+				continuedOther, err := otherRepo.ManagerThread(unrelated)
 				fixturekit.Must(t, err)
 				if !intakefixture.EqualJSONTest(otherChief.Identity, continuedOther.Identity) {
 					t.Fatal("retirement replaced an unrelated chief")

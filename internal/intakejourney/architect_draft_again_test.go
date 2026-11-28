@@ -36,7 +36,7 @@ func TestAMoveToSketchedDraftsAStoppedWorkstreamAgain(t *testing.T) {
 	}
 
 	moves := service.InspectForTest(f.S.Core()).LifecycleController()
-	chief := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
 	note := "Drop the dependency between the units; they share no state."
 	out, apiErr := moves.MoveWorkstream(ctx, f.Repository(), stream, lifecycle.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, chief, "chief-turn-1")
 	if apiErr != nil {

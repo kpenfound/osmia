@@ -19,13 +19,13 @@ func TestJevRulingsAreWrittenByJevAndNeverByAnotherActor(t *testing.T) {
 		h.Revision, h.Actor = revision, actor
 		return Ruling{Header: h, QuestionID: "q1", QuestionRevision: 1, Decision: DecisionRuling, OwnerResponse: "Files.", ReturnedAnswer: relayed, DecidedBy: by, Judgment: judgment}
 	}
-	chief := Actor{Kind: "agent", ID: ChiefOfStaff}
+	manager := Actor{Kind: "agent", ID: Manager}
 	owner := Actor{Kind: "owner", ID: "local"}
 	for name, bad := range map[string]Ruling{
 		"Jev's decision with the owner as actor":          ruling("b1", 1, DecidedByJev, "judgment_ab12", owner, ""),
-		"Jev's decision with the chief of staff as actor": ruling("b2", 1, DecidedByJev, "judgment_ab12", chief, ""),
+		"Jev's decision with the chief of staff as actor": ruling("b2", 1, DecidedByJev, "judgment_ab12", manager, ""),
 		"Jev as the actor of an owner decision":           ruling("b3", 1, "", "", JevActor, ""),
-		"Jev as the actor of a chief of staff decision":   ruling("b4", 1, DecidedByChief, "", JevActor, ""),
+		"Jev as the actor of a chief of staff decision":   ruling("b4", 1, DecidedByManager, "", JevActor, ""),
 		"Jev's decision by a service other than Jev":      ruling("b5", 1, DecidedByJev, "judgment_ab12", Actor{Kind: "service", ID: "questions"}, ""),
 	} {
 		if err := r.Append(ctx, bad); err == nil {
@@ -33,21 +33,21 @@ func TestJevRulingsAreWrittenByJevAndNeverByAnotherActor(t *testing.T) {
 		}
 	}
 	jev, own := ruling("r1", 1, DecidedByJev, "judgment_ab12", JevActor, ""), ruling("r2", 1, "", "", owner, "")
-	for _, good := range []Ruling{jev, own, ruling("r3", 1, DecidedByChief, "", chief, "")} {
+	for _, good := range []Ruling{jev, own, ruling("r3", 1, DecidedByManager, "", manager, "")} {
 		if err := r.Append(ctx, good); err != nil {
 			t.Fatalf("ruling %s: %v", good.ID, err)
 		}
 	}
 	for name, bad := range map[string]Ruling{
 		"a relay of Jev's decision by the owner":      ruling("r1", 2, DecidedByJev, "judgment_ab12", owner, "Files."),
-		"a relay of Jev's decision that returns none": ruling("r1", 2, DecidedByJev, "judgment_ab12", chief, ""),
+		"a relay of Jev's decision that returns none": ruling("r1", 2, DecidedByJev, "judgment_ab12", manager, ""),
 		"the owner's decision relayed by Jev":         ruling("r2", 2, "", "", JevActor, "Files."),
 	} {
 		if err := r.Append(ctx, bad); err == nil {
 			t.Fatalf("%s was recorded", name)
 		}
 	}
-	if err := r.Append(ctx, ruling("r1", 2, DecidedByJev, "judgment_ab12", chief, "Files.")); err != nil {
+	if err := r.Append(ctx, ruling("r1", 2, DecidedByJev, "judgment_ab12", manager, "Files.")); err != nil {
 		t.Fatalf("the chief of staff's relay of Jev's decision: %v", err)
 	}
 }
@@ -91,10 +91,10 @@ func TestJevDecisionDocumentsAreWrittenByJevAndNeverByAnotherActor(t *testing.T)
 	}
 }
 
-func TestJevRulesOnAnEscalationAndTheChiefOfStaffRelaysIt(t *testing.T) {
+func TestJevRulesOnAnEscalationAndTheManagerRelaysIt(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)
-	chief := chiefThread(t, r, "chief1")
+	manager := managerThread(t, r, "chief1")
 	for i, agent := range []string{"mason1", "mason2"} {
 		scope := askerThread(t, r, agent, "mason", "build_"+agent)
 		if _, err := r.Ask(ctx, agent, scope, "Question from "+agent, at.Add(time.Duration(i)*time.Second)); err != nil {
@@ -103,7 +103,7 @@ func TestJevRulesOnAnEscalationAndTheChiefOfStaffRelaysIt(t *testing.T) {
 	}
 	for _, id := range []string{"1", "2"} {
 		req := EscalationRequest{Questions: []string{id}, Rephrasing: "Should uploads resume?", Blocked: "The upload unit.", Options: []string{"Resume", "Restart"}, Recommendation: "Resume."}
-		if _, err := r.EscalateQuestions(ctx, "chief", chief, req, at.Add(time.Hour)); err != nil {
+		if _, err := r.EscalateQuestions(ctx, "chief", manager, req, at.Add(time.Hour)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -153,7 +153,7 @@ func TestJevRulesOnAnEscalationAndTheChiefOfStaffRelaysIt(t *testing.T) {
 	if err := second(r.RuleDecided(ctx, 1, "Resume.", JevActor, "judgment_ab12", when)); err == nil {
 		t.Fatal("an escalation ruled twice")
 	}
-	if _, err := r.RelayRuling(ctx, "chief", chief, "1", "Resume.", ScopeLocal, when.Add(time.Hour)); err != nil {
+	if _, err := r.RelayRuling(ctx, "chief", manager, "1", "Resume.", ScopeLocal, when.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	relayed := questionStates(t, r)["1"]

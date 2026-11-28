@@ -11,7 +11,7 @@ import (
 
 // Measured reads a recorded operation as the run a measure counts. A service
 // rerun is the source rerun and a unit reviewer's verify call the source
-// reviewer; any other call, such as the chief of staff's or the final
+// reviewer; any other call, such as the manager's or the final
 // reviewer's, has no source and returns false.
 func Measured(op Operation) (verification.MeasuredRun, bool) {
 	run := verification.MeasuredRun{Outcome: verification.OutcomeLimited}

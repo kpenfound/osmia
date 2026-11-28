@@ -167,12 +167,12 @@ func unitActivity(r *trace.Repository, stream config.WorkstreamID, docs []trace.
 				if err != nil {
 					return nil, err
 				}
-				left, err := execution.ChiefRulingsLeft(r, stream, unit)
+				left, err := execution.ManagerRulingsLeft(r, stream, unit)
 				if err != nil {
 					return nil, err
 				}
 				a.Contest = &api.ActivityContest{ID: contest.ID, Reason: contest.Reason, Rulings: ContestOptions(contest, unit, mason), ChiefRulingsLeft: left}
-				_, decisions, err := execution.ChiefDecisions(r, stream, unit)
+				_, decisions, err := execution.ManagerDecisions(r, stream, unit)
 				if err != nil {
 					return nil, err
 				}

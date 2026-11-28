@@ -254,7 +254,7 @@ func chiefDispatchDiagnostics(t *testing.T, c *service.Client, root string, proj
 	logView("feed", feed, err)
 	state, err := c.Status(ctx, stream)
 	logView("status", state, err)
-	for _, body := range traceBodies(t, workstreamDatabase(t, root, project, string(stream)), "workstreams/"+string(stream)+"/agents/"+trace.ChiefOfStaff+"/log.jsonl") {
+	for _, body := range traceBodies(t, workstreamDatabase(t, root, project, string(stream)), "workstreams/"+string(stream)+"/agents/"+trace.Manager+"/log.jsonl") {
 		t.Logf("durable chief log record: %s", body)
 	}
 }

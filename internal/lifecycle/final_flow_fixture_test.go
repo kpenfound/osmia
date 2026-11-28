@@ -355,7 +355,7 @@ func (j *flowJourney) loadMissingNotices(t *testing.T, review, push int) int {
 	fixturekit.Must(t, err)
 	n := 0
 	for _, e := range entries {
-		if e.Event.ID == trace.EventID(fmt.Sprintf("final-checks-%d-push-%d-load-missing", review, push), "chief") {
+		if e.Event.ID == trace.EventID(fmt.Sprintf("final-checks-%d-push-%d-load-missing", review, push), trace.ManagerKey) {
 			n++
 		}
 	}

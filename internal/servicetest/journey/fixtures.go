@@ -287,7 +287,7 @@ func RaiseFixtureContest(t *testing.T, r *trace.Repository, stream config.Workst
 	intakefixture.RaiseFixtureContest(t, r, stream, unit, func() (trace.Header, bool, error) {
 		c, found, err := execution.UnitContest(r, stream, unit)
 		return c.Header, found, err
-	}, intake.ChiefActor, execution.EscalateContest, execution.ChiefContestPath)
+	}, intake.ChiefActor, execution.EscalateContest, execution.ManagerContestPath)
 }
 
 // RecordBuild publishes the sealed documents and unit states atomically so

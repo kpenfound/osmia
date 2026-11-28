@@ -129,7 +129,7 @@ func resolutionGroupState(t *testing.T, f *journey.ProductionDesignFixture, want
 		if _, archived := f.S.Lifecycle().ArchivedWorkstream(string(m.stream)); archived {
 			continue
 		}
-		for _, role := range []string{intake.MasonRole, trace.ChiefOfStaff} {
+		for _, role := range []string{intake.MasonRole, trace.Manager} {
 			b, err := f.S.Context().Assemble(ctx, m.project, bundle.Scope{Role: role, Workstream: m.stream})
 			fixturekit.Must(t, err)
 			if (b.ProjectSpec != nil) == wantResolved {

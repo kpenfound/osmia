@@ -231,7 +231,7 @@ func TestFetchCloudTraceIsGrantedOnlyToItsRoles(t *testing.T) {
 	if calls() != 0 {
 		t.Fatal("a refused role ran the CLI")
 	}
-	granted := checks.TraceTool(fetcher, c.scope, chiefActor, trace.ChiefOfStaff)
+	granted := checks.TraceTool(fetcher, c.scope, chiefActor, trace.Manager)
 	if !callTrace(t, granted, `{"trace_id":"t1"}`).Fetched || calls() != 1 {
 		t.Fatalf("the chief of staff's fetch ran %d times", calls())
 	}

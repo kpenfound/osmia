@@ -714,7 +714,7 @@ func TestTheChiefOfStaffDropsADependency(t *testing.T) {
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
 	p := &jevfixture.Transitions{}
 	journey.InspectForTest(f.s).SetRouterJudge(jevfixture.TransitionJudge(f.s.Now, p))
-	host, err := f.repository.ChiefOfStaffHost(f.downstream)
+	host, err := f.repository.ManagerHost(f.downstream)
 	fixturekit.Must(t, err)
 	scope := intakefixture.ClaimChiefTurn(t, f.repository, f.project, host, func() time.Time { return fixturekit.DemoStart }, intakefixture.ChiefTurnInput{
 		Turn: "events_drop", Prompt: "The upstream will not merge.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-events_drop", Directory: "events_drop",
@@ -728,7 +728,7 @@ func TestTheChiefOfStaffDropsADependency(t *testing.T) {
 		t.Fatalf("the chief's drop: %s", out)
 	}
 	dropped := lastOn(t, f.repository, f.downstream, lifecycle.DependencySubject(f.upstream, trace.EdgeHardBlock))
-	if dropped.To != lifecycle.DependencyWaived || dropped.DecidedBy != trace.DecidedByChief || dropped.Judgment != "" {
+	if dropped.To != lifecycle.DependencyWaived || dropped.DecidedBy != trace.DecidedByManager || dropped.Judgment != "" {
 		t.Fatalf("the chief's drop %+v", dropped)
 	}
 	if n := len(p.TransitionRequests()); n != 0 {
@@ -736,7 +736,7 @@ func TestTheChiefOfStaffDropsADependency(t *testing.T) {
 	}
 	waivers, _, err := lifecycle.EdgeWaiversAt(f.repository, f.downstream)
 	fixturekit.Must(t, err)
-	if len(waivers.Waivers) != 1 || waivers.Waivers[0].DecidedBy != trace.DecidedByChief || waivers.Waivers[0].Ended != trace.ChiefOfStaff {
+	if len(waivers.Waivers) != 1 || waivers.Waivers[0].DecidedBy != trace.DecidedByManager || waivers.Waivers[0].Ended != trace.Manager {
 		t.Fatalf("waivers %+v", waivers)
 	}
 	if f.holdsMason(t, f.downstream) {

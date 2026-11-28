@@ -386,7 +386,7 @@ func TestAnswerQueuedBehindAReservedTurnRuns(t *testing.T) {
 	}
 
 	intakefixture.Eventually(t, "the chief of staff's turns were never claimed", func() bool {
-		th, err := f.Repository().Thread(stream, trace.ChiefOfStaff)
+		th, err := f.Repository().Thread(stream, trace.Manager)
 		fixturekit.Must(t, err)
 		return !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Claim == nil && q.CompletedAt.IsZero() })
 	})
@@ -413,24 +413,24 @@ func TestAnswerQueuedBehindAReservedTurnRuns(t *testing.T) {
 	_, err = repo.ClaimTurn(ctx, stream, member, "token_"+reserved, filepath.Join(home, reserved), f.Clock.Now())
 	fixturekit.Must(t, err)
 
-	chief, err := repo.Thread(stream, trace.ChiefOfStaff)
+	chief, err := repo.Thread(stream, trace.Manager)
 	fixturekit.Must(t, err)
 	if chief.Active != "" {
-		fixturekit.Must(t, repo.AbandonTurn(ctx, stream, trace.ChiefOfStaff, chief.Active, f.Clock.Now()))
+		fixturekit.Must(t, repo.AbandonTurn(ctx, stream, trace.Manager, chief.Active, f.Clock.Now()))
 	}
 	chiefHeader := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_planted", Revision: 1, Project: f.Project, Workstream: stream, At: f.Clock.Now(), Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "planted"}
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: chiefHeader, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "planted", Profile: second.Profile, Prompt: "Answer"})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: chiefHeader, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "planted", Profile: second.Profile, Prompt: "Answer"})
 	fixturekit.Must(t, err)
-	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token_planted", filepath.Join(home, "planted"), f.Clock.Now())
+	_, err = repo.ClaimTurn(ctx, stream, trace.Manager, "token_planted", filepath.Join(home, "planted"), f.Clock.Now())
 	fixturekit.Must(t, err)
-	chiefScope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Thread: trace.ChiefOfStaff, Turn: "planted", Role: trace.ChiefOfStaff}
-	_, err = repo.AnswerQuestion(ctx, trace.ChiefOfStaff, chiefScope, "1", intakefixture.AskedAnswer, []string{"charter#1"}, f.Clock.Now())
+	chiefScope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Thread: trace.Manager, Turn: "planted", Role: trace.Manager}
+	_, err = repo.AnswerQuestion(ctx, trace.Manager, chiefScope, "1", intakefixture.AskedAnswer, []string{"charter#1"}, f.Clock.Now())
 	fixturekit.Must(t, err)
 
 	fixturekit.Must(t, repo.Close())
 	repo, err = trace.Open(cfg.Root, config.Project{ID: f.Project, Clone: f.Clone})
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, repo.AbandonTurn(ctx, stream, trace.ChiefOfStaff, "planted", f.Clock.Now()))
+	fixturekit.Must(t, repo.AbandonTurn(ctx, stream, trace.Manager, "planted", f.Clock.Now()))
 	planted, err := repo.Questions(stream)
 	fixturekit.Must(t, err)
 	if len(planted) != 1 || planted[0].State != trace.QuestionAnswered {

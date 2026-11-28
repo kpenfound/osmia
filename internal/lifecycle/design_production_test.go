@@ -67,7 +67,7 @@ func awaitOwnerTurnRunning(f *journey.ProductionDesignFixture, t *testing.T, sen
 	}
 	diagnose := func() {
 		t.Helper()
-		th, err := chief.Thread(host, trace.ChiefOfStaff)
+		th, err := chief.Thread(host, trace.Manager)
 		if err != nil {
 			t.Logf("owner turn=%s shared thread error=%v", sent.Turn, err)
 			return
@@ -82,7 +82,7 @@ func awaitOwnerTurnRunning(f *journey.ProductionDesignFixture, t *testing.T, sen
 				}
 			}
 		}
-		op, err := thread.TurnOperation(chief.Project(), "workgroup-chief-"+sent.Turn, thread.TurnInput{Workstream: host, Agent: trace.ChiefOfStaff, Turn: sent.Turn})
+		op, err := thread.TurnOperation(chief.Project(), "workgroup-chief-"+sent.Turn, thread.TurnInput{Workstream: host, Agent: trace.Manager, Turn: sent.Turn})
 		fixturekit.Must(t, err)
 		observed, err := (thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: chief}}).Inspect(context.Background(), op)
 		t.Logf("owner dispatch operation=%s observation=%+v error=%v; shared chief dispatch applies directly without an operation retry timer", op.ID, observed, err)
@@ -640,7 +640,7 @@ func TestDesignProductionSingleAffectedRepoKeepsOrdinaryRatification(t *testing.
 	})
 	repo, err := f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	chief, err := repo.ChiefOfStaffThread(f.Origin)
+	chief, err := repo.ManagerThread(f.Origin)
 	fixturekit.Must(t, err)
 	if !intakefixture.EqualJSONTest(chief.Identity, f.Before.Identity) || !intakefixture.EqualJSONTest(chief.Turns[:len(f.Before.Turns)], f.Before.Turns) {
 		t.Fatal("single-member continuation changed")
@@ -685,7 +685,7 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 	fixturekit.Must(t, err)
 	chief, host, _, close, err := f.S.Lifecycle().ChiefRepository(ctx, repo, f.Stream1)
 	fixturekit.Must(t, err)
-	before, err := chief.Thread(host, trace.ChiefOfStaff)
+	before, err := chief.Thread(host, trace.Manager)
 	close()
 	fixturekit.Must(t, err)
 	index := slices.IndexFunc(before.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == sent.Turn })
@@ -717,13 +717,13 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 	fixturekit.Must(t, err)
 	defer close()
 	f.Wait(t, "recovery turn completion", func() bool {
-		recovered, err := chief.Thread(host, trace.ChiefOfStaff)
+		recovered, err := chief.Thread(host, trace.Manager)
 		fixturekit.Must(t, err)
 		return recovered.Active == "" && slices.ContainsFunc(recovered.Turns, func(q trace.QueuedTurn) bool {
 			return q.Request.Actor == intake.RecoveryActor && strings.Contains(q.Request.Prompt, message) && q.Response != nil && !q.CompletedAt.IsZero()
 		})
 	})
-	recovered, err := chief.Thread(host, trace.ChiefOfStaff)
+	recovered, err := chief.Thread(host, trace.Manager)
 	fixturekit.Must(t, err)
 	q := recovered.Turns[index]
 	if !intakefixture.EqualJSONTest(q.Request, request) || q.Response == nil || q.Response.RequestID != request.ID || q.Response.RequestRevision != request.Revision {

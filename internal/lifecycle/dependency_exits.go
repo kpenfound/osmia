@@ -273,7 +273,7 @@ type dependencyCase struct {
 
 const ownerEnded = "owner"
 
-const chiefEnded = trace.ChiefOfStaff
+const chiefEnded = trace.Manager
 
 func (c dependencyCase) base() bool { return c.Type == BaseEdgeType }
 

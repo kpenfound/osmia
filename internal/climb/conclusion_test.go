@@ -351,7 +351,7 @@ func noticeCount(t *testing.T, r *concludeRig, id string) int {
 	fixturekit.Must(t, err)
 	n := 0
 	for _, e := range entries {
-		if e.Event.ID == trace.EventID(id, "chief") {
+		if e.Event.ID == trace.EventID(id, trace.ManagerKey) {
 			n++
 		}
 	}

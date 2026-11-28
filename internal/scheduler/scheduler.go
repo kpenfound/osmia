@@ -493,7 +493,7 @@ func loadSnapshot(repository *trace.Repository, all []config.WorkstreamID) (load
 			return loaded{}, fmt.Errorf("workstream %s: %w", stream, err)
 		}
 		if _, known := kinds.Lookup(kind); !known {
-			threads = slices.DeleteFunc(threads, func(t trace.Thread) bool { return t.Identity.Role != trace.ChiefOfStaff })
+			threads = slices.DeleteFunc(threads, func(t trace.Thread) bool { return t.Identity.Role != trace.Manager })
 		}
 		records, err := repository.Operations(stream)
 		if err != nil {
@@ -600,7 +600,7 @@ func rotationKey(project config.ProjectID, stream config.WorkstreamID, role stri
 }
 
 func (u usage) add(project config.ProjectID, stream config.WorkstreamID, role string) {
-	if trace.ChiefLike(role) {
+	if trace.ManagerLike(role) {
 		return
 	}
 	u.roles[role]++
@@ -622,7 +622,7 @@ func (u usage) merge(other usage) {
 
 func (s *Scheduler) refusal(used usage, c Candidate) string {
 	limits, role := s.options.Capacity, c.Thread.Identity.Role
-	if limits == nil || trace.ChiefLike(role) {
+	if limits == nil || trace.ManagerLike(role) {
 		return ""
 	}
 	if used.streams[streamKey{c.Project, c.Workstream}] >= limits.PerWorkstream {
@@ -633,7 +633,7 @@ func (s *Scheduler) refusal(used usage, c Candidate) string {
 
 func (s *Scheduler) roleRefusal(used usage, c Candidate) string {
 	limits, role := s.options.Capacity, c.Thread.Identity.Role
-	if limits == nil || trace.ChiefLike(role) {
+	if limits == nil || trace.ManagerLike(role) {
 		return ""
 	}
 	fits := used.local[localKey{c.Project, c.Workstream, role}] < 1

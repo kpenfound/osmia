@@ -26,8 +26,8 @@ type Thread struct {
 	// Epoch is the first sequence number of the thread's current run of turns,
 	// or zero when the thread has one run only. Turns before it belong to a
 	// conversation the thread's backend session and replayed history no longer
-	// continue: a design session that began on this thread starts the chief of
-	// staff's own conversation from its brief.
+	// continue: a design session that began on this thread starts the manager's
+	// own conversation from its brief.
 	Epoch uint64       `json:"epoch,omitempty"`
 	Turns []QueuedTurn `json:"turns,omitempty"`
 }
@@ -169,7 +169,7 @@ func validateThreads(threads map[string]Thread, records []Record, project config
 	expected := map[string]Record{}
 	for id, t := range threads {
 		a := t.Identity
-		if id != a.ID || (a.Project != project && a.Role != ChiefOfStaff) || a.Workstream != stream || a.Revision != 1 {
+		if id != a.ID || (a.Project != project && a.Role != Manager) || a.Workstream != stream || a.Revision != 1 {
 			return fmt.Errorf("invalid thread identity")
 		}
 		if err := validate(a); err != nil {
@@ -187,7 +187,7 @@ func validateThreads(threads map[string]Thread, records []Record, project config
 			if err := validate(req); err != nil {
 				return err
 			}
-			if (req.Project != project && (a.Role != ChiefOfStaff || req.Project != a.Project)) || req.Workstream != stream || req.AgentID != id || req.ThreadID != a.ThreadID || req.Revision != 1 || q.Sequence != uint64(i+1) || seenTurns[req.TurnID] {
+			if (req.Project != project && (a.Role != Manager || req.Project != a.Project)) || req.Workstream != stream || req.AgentID != id || req.ThreadID != a.ThreadID || req.Revision != 1 || q.Sequence != uint64(i+1) || seenTurns[req.TurnID] {
 				return fmt.Errorf("invalid queued turn")
 			}
 			seenTurns[req.TurnID] = true
@@ -212,7 +212,7 @@ func validateThreads(threads map[string]Thread, records []Record, project config
 				if err := validate(res); err != nil {
 					return err
 				}
-				if (res.Project != req.Project && (a.Role != ChiefOfStaff || res.Project != project)) || res.Workstream != stream || res.Unit != req.Unit || res.AgentID != id || res.ThreadID != a.ThreadID || res.TurnID != req.TurnID || res.RequestID != req.ID || res.RequestRevision != req.Revision || res.Revision != 1 || res.Cause != req.Cause || res.Depth != req.Depth || res.At.Before(c.At) || res.Result.SessionDirectory != c.SessionDirectory || (res.Result.Session.Backend != "" && res.Result.Session.Backend != responseProfile(q).Backend) {
+				if (res.Project != req.Project && (a.Role != Manager || res.Project != project)) || res.Workstream != stream || res.Unit != req.Unit || res.AgentID != id || res.ThreadID != a.ThreadID || res.TurnID != req.TurnID || res.RequestID != req.ID || res.RequestRevision != req.Revision || res.Revision != 1 || res.Cause != req.Cause || res.Depth != req.Depth || res.At.Before(c.At) || res.Result.SessionDirectory != c.SessionDirectory || (res.Result.Session.Backend != "" && res.Result.Session.Backend != responseProfile(q).Backend) {
 					return fmt.Errorf("invalid captured response provenance")
 				}
 				if _, ok := expected[recordKey(res)]; ok {
@@ -299,17 +299,23 @@ func (r *Repository) CreateThread(ctx context.Context, agent Agent) error {
 	return r.saveThread(ctx, agent.Workstream, log, agent)
 }
 
-// ChiefOfStaff is the agent and thread ID of a workstream's chief-of-staff
-// thread.
-const ChiefOfStaff = "chief_of_staff"
+// Manager is the stored name of the manager role: the agent ID, role and
+// thread ID of a workstream's manager thread, the name of that thread's
+// directory, and the decider of the manager's own decisions. Saved traces hold
+// this value, so it must not change.
+const Manager = "chief_of_staff"
 
-// EnsureChiefOfStaff creates the chief-of-staff thread of stream's workgroup
+// managerCreateCause is the stored cause of the record that creates a manager
+// thread. Saved traces hold this value, so it must not change.
+const managerCreateCause = "chief-of-staff-create"
+
+// EnsureManager creates the manager thread of stream's workgroup
 // unless it already exists, and returns the thread. The thread lives on the
 // workgroup's host (its first member), so no other member ever gets a thread
 // of its own. The first creation fixes the identity's timestamp and actor;
 // later calls leave it unchanged.
-func (r *Repository) EnsureChiefOfStaff(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor) (Thread, error) {
-	host, err := r.ChiefOfStaffHost(stream)
+func (r *Repository) EnsureManager(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor) (Thread, error) {
+	host, err := r.ManagerHost(stream)
 	if err != nil {
 		return Thread{}, err
 	}
@@ -319,21 +325,21 @@ func (r *Repository) EnsureChiefOfStaff(ctx context.Context, stream config.Works
 	}
 	hr.mu.Lock()
 	defer hr.mu.Unlock()
-	return hr.ensureChiefOfStaff(ctx, host, at, actor)
+	return hr.ensureManager(ctx, host, at, actor)
 }
 
-func (r *Repository) ensureChiefOfStaff(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor) (Thread, error) {
+func (r *Repository) ensureManager(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor) (Thread, error) {
 	log, _, err := r.loadWorkflow(stream)
 	if err != nil {
 		return Thread{}, err
 	}
-	if t, ok := log.Threads[ChiefOfStaff]; ok {
-		if t.Identity.Role != ChiefOfStaff || t.Identity.ThreadID != ChiefOfStaff {
-			return Thread{}, fmt.Errorf("%w: agent %s has another role", ErrConflict, ChiefOfStaff)
+	if t, ok := log.Threads[Manager]; ok {
+		if t.Identity.Role != Manager || t.Identity.ThreadID != Manager {
+			return Thread{}, fmt.Errorf("%w: agent %s has another role", ErrConflict, Manager)
 		}
 		return r.snapshot(t), nil
 	}
-	agent := Agent{Header: Header{Schema: "osmia.trace.agent", Version: Version, ID: ChiefOfStaff, Revision: 1, Project: r.project, Workstream: stream, At: at, Actor: actor, Cause: "chief-of-staff-create"}, Role: ChiefOfStaff, ThreadID: ChiefOfStaff}
+	agent := Agent{Header: Header{Schema: "osmia.trace.agent", Version: Version, ID: Manager, Revision: 1, Project: r.project, Workstream: stream, At: at, Actor: actor, Cause: managerCreateCause}, Role: Manager, ThreadID: Manager}
 	if err := validate(agent); err != nil {
 		return Thread{}, err
 	}
@@ -341,7 +347,7 @@ func (r *Repository) ensureChiefOfStaff(ctx context.Context, stream config.Works
 		log.Threads = map[string]Thread{}
 	}
 	t := Thread{Identity: agent, Status: "idle"}
-	log.Threads[ChiefOfStaff] = t
+	log.Threads[Manager] = t
 	if err := r.saveThread(ctx, stream, log, agent); err != nil {
 		return Thread{}, err
 	}
@@ -349,14 +355,14 @@ func (r *Repository) ensureChiefOfStaff(ctx context.Context, stream config.Works
 }
 
 // Designer is the agent, thread and role ID of a design session's own thread.
-// The design conversation lives there, apart from the chief-of-staff thread
+// The design conversation lives there, apart from the manager thread
 // that continues a started workgroup.
 const Designer = "designer"
 
-// ChiefLike reports whether role is a role whose turns answer the owner in a
-// conversation: the chief of staff and the design agent. Neither holds a
+// ManagerLike reports whether role is a role whose turns answer the owner in a
+// conversation: the manager and the design agent. Neither holds a
 // capacity slot or waits for a factory pause the way the factory's own roles do.
-func ChiefLike(role string) bool { return role == ChiefOfStaff || role == Designer }
+func ManagerLike(role string) bool { return role == Manager || role == Designer }
 
 // EnsureDesigner creates the design thread of the design session stream
 // unless it already exists, and returns the thread. The thread lives in
@@ -400,12 +406,12 @@ func (r *Repository) DesignerThread(stream config.WorkstreamID) (Thread, error) 
 	return r.Thread(stream, Designer)
 }
 
-// BeginFreshChiefOfStaff starts a new conversation on stream's own
-// chief-of-staff thread when the thread already holds turns: later turns
+// BeginFreshManager starts a new conversation on stream's own
+// manager thread when the thread already holds turns: later turns
 // resume none of the earlier backend sessions and replay none of the earlier
 // requests. A thread without turns, or one already begun afresh, is left as it
 // is. r must be the project's own repository.
-func (r *Repository) BeginFreshChiefOfStaff(ctx context.Context, stream config.WorkstreamID) error {
+func (r *Repository) BeginFreshManager(ctx context.Context, stream config.WorkstreamID) error {
 	sr, err := r.scoped(stream)
 	if err != nil {
 		return err
@@ -416,25 +422,25 @@ func (r *Repository) BeginFreshChiefOfStaff(ctx context.Context, stream config.W
 	if err != nil {
 		return err
 	}
-	t, ok := log.Threads[ChiefOfStaff]
+	t, ok := log.Threads[Manager]
 	if !ok || t.Epoch != 0 || len(t.Turns) == 0 {
 		return nil
 	}
 	t.Epoch = uint64(len(t.Turns) + 1)
-	log.Threads[ChiefOfStaff] = t
+	log.Threads[Manager] = t
 	return sr.saveThread(ctx, stream, log)
 }
 
-// RetractChiefOfStaff removes stream's own chief-of-staff thread identity,
+// RetractManager removes stream's own manager thread identity,
 // if one was created before stream joined a cross-repo workgroup. Once
 // RecordCrossRepoWorkgroup points stream at its shared thread in the
 // workgroup's own trace, the unused identity on stream's own repository
-// would make the chief of staff authoritative in two places. It changes
-// nothing when stream carries no chief-of-staff thread of its own. It
+// would make the manager authoritative in two places. It changes
+// nothing when stream carries no manager thread of its own. It
 // refuses, changing nothing, when that thread already has turns. r must be
 // the project's own repository, not an instance already scoped to one
 // workstream.
-func (r *Repository) RetractChiefOfStaff(ctx context.Context, stream config.WorkstreamID) error {
+func (r *Repository) RetractManager(ctx context.Context, stream config.WorkstreamID) error {
 	sr, err := r.scoped(stream)
 	if err != nil {
 		return err
@@ -445,25 +451,25 @@ func (r *Repository) RetractChiefOfStaff(ctx context.Context, stream config.Work
 	if err != nil {
 		return err
 	}
-	t, ok := log.Threads[ChiefOfStaff]
+	t, ok := log.Threads[Manager]
 	if !ok {
 		return nil
 	}
 	if len(t.Turns) > 0 {
 		return fmt.Errorf("%w: workstream %s already has chief-of-staff turns of its own", ErrConflict, stream)
 	}
-	delete(log.Threads, ChiefOfStaff)
+	delete(log.Threads, Manager)
 	return sr.saveThread(ctx, stream, log)
 }
 
-// ChiefOfStaffThread returns a snapshot of the shared chief-of-staff thread
+// ManagerThread returns a snapshot of the shared manager thread
 // of stream's workgroup, or os.ErrNotExist before it is created.
-func (r *Repository) ChiefOfStaffThread(stream config.WorkstreamID) (Thread, error) {
-	host, err := r.ChiefOfStaffHost(stream)
+func (r *Repository) ManagerThread(stream config.WorkstreamID) (Thread, error) {
+	host, err := r.ManagerHost(stream)
 	if err != nil {
 		return Thread{}, err
 	}
-	return r.Thread(host, ChiefOfStaff)
+	return r.Thread(host, Manager)
 }
 
 // Thread returns a detached snapshot. A claim from a previous service session
@@ -517,13 +523,13 @@ func (r *Repository) snapshot(t Thread) Thread {
 
 // EnqueueTurn fixes the request and its profile at acceptance. Sequence numbers
 // reflect serialized durable acceptance, not timestamps or goroutine launch order.
-// A chief-of-staff turn is always enqueued on the workgroup's shared thread,
+// A manager turn is always enqueued on the workgroup's shared thread,
 // so req.Workstream is rewritten to the workgroup's host when it names
-// another member: callers that address the chief of staff by any member's
+// another member: callers that address the manager by any member's
 // ID reach the one thread every member shares.
 func (r *Repository) EnqueueTurn(ctx context.Context, req TurnRequest) (QueuedTurn, error) {
-	if req.AgentID == ChiefOfStaff {
-		host, err := r.ChiefOfStaffHost(req.Workstream)
+	if req.AgentID == Manager {
+		host, err := r.ManagerHost(req.Workstream)
 		if err != nil {
 			return QueuedTurn{}, err
 		}

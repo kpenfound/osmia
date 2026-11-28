@@ -44,8 +44,8 @@ func TestContractRoutingUsesApprovedDeltaUnderMemberLock(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			chief := chiefThread(t, r, "chief_turn")
-			outcome, err := r.FileAmendment(ctx, "chief", chief, AmendmentRequest{
+			manager := managerThread(t, r, "chief_turn")
+			outcome, err := r.FileAmendment(ctx, "chief", manager, AmendmentRequest{
 				QuestionID: string(member) + ":" + q.ID, Citations: []string{"spec#2"},
 				Change: "Extend the amended interface", Reason: "New evidence",
 				Seal: 1, SealRevision: 1, SpecHash: "deadbeef",
@@ -108,10 +108,10 @@ func building(t *testing.T, r *Repository, stream config.WorkstreamID) {
 }
 
 type contractCitationFixture struct {
-	r     *Repository
-	wg    Workgroup
-	scope coreadapter.Scope
-	chief coreadapter.Scope
+	r       *Repository
+	wg      Workgroup
+	scope   coreadapter.Scope
+	manager coreadapter.Scope
 }
 
 func newContractCitationFixture(t *testing.T) *contractCitationFixture {
@@ -143,7 +143,7 @@ func newContractCitationFixture(t *testing.T) *contractCitationFixture {
 
 	scope := askerOn(t, r, streamID, "agent_mason", "mason", "build", "unit-a")
 	implementing(t, r, streamID, "unit-a")
-	return &contractCitationFixture{r: r, wg: wg, scope: scope, chief: chiefThread(t, r, "chief_turn")}
+	return &contractCitationFixture{r: r, wg: wg, scope: scope, manager: managerThread(t, r, "chief_turn")}
 }
 
 func contractCitation(question, change, reason string) AmendmentRequest {
@@ -157,7 +157,7 @@ func (f *contractCitationFixture) routeFirstMembersCitation(t *testing.T) (Quest
 	if err != nil {
 		t.Fatal(err)
 	}
-	outcome, err := f.r.FileAmendment(ctx, "chief", f.chief, contractCitation(q.ID, "Return {id, status}.", "The caller also needs the upload's status."), at.Add(2*time.Second))
+	outcome, err := f.r.FileAmendment(ctx, "chief", f.manager, contractCitation(q.ID, "Return {id, status}.", "The caller also needs the upload's status."), at.Add(2*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func (f *contractCitationFixture) routeSecondMembersCitation(t *testing.T) Amend
 	if err != nil {
 		t.Fatal(err)
 	}
-	outcome, err := f.r.FileAmendment(ctx, "chief", f.chief, contractCitation(string(secondStream)+":"+qb.ID, "Return {id, status}.", "The second repo also needs the status."), at.Add(4*time.Second))
+	outcome, err := f.r.FileAmendment(ctx, "chief", f.manager, contractCitation(string(secondStream)+":"+qb.ID, "Return {id, status}.", "The second repo also needs the status."), at.Add(4*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestFileAmendmentRoutesAContractCitationToAProjectLevelAmendment(t *testing
 func TestRepeatingARoutedContractCitationReusesItsProjectAmendment(t *testing.T) {
 	f := newContractCitationFixture(t)
 	q, outcome := f.routeFirstMembersCitation(t)
-	again, err := f.r.FileAmendment(context.Background(), "chief", f.chief, contractCitation(q.ID, "Return {id, status}.", "The caller also needs the upload's status."), at.Add(2*time.Second))
+	again, err := f.r.FileAmendment(context.Background(), "chief", f.manager, contractCitation(q.ID, "Return {id, status}.", "The caller also needs the upload's status."), at.Add(2*time.Second))
 	if err != nil || again.ProjectAmendment.ID != outcome.ProjectAmendment.ID {
 		t.Fatalf("repeated request: %+v err=%v", again, err)
 	}
@@ -257,7 +257,7 @@ func TestANonContractCitationFromANonHostMemberStaysAnOrdinaryAmendmentOfItsStre
 	if err != nil {
 		t.Fatal(err)
 	}
-	outcomeB2, err := f.r.FileAmendment(ctx, "chief", f.chief, AmendmentRequest{
+	outcomeB2, err := f.r.FileAmendment(ctx, "chief", f.manager, AmendmentRequest{
 		QuestionID: string(secondStream) + ":" + qb2.ID, Citations: []string{"spec#2"}, Change: "Document the upload size cap.", Reason: "Operators asked where the limit is documented.",
 		Seal: 1, SealRevision: 1, SpecHash: "deadbeef",
 	}, at.Add(4400*time.Millisecond))

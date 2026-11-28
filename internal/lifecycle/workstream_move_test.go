@@ -436,7 +436,7 @@ func TestTheChiefReopensAWorkstreamPastTheFinalRoundLimit(t *testing.T) {
 		t.Fatalf("the chief of staff did not reopen the workstream: %s", out)
 	}
 	moved := lastOn(t, repository, stream, trace.FeatureSubject)
-	if moved.To != intake.BuildingState || moved.DecidedBy != trace.DecidedByChief || moved.Departed() {
+	if moved.To != intake.BuildingState || moved.DecidedBy != trace.DecidedByManager || moved.Departed() {
 		t.Fatalf("the transition %+v", moved)
 	}
 	if n := len(jev.TransitionRequests()); n != 0 {
@@ -459,7 +459,7 @@ func TestARevisionCommissionedOnAnAssembledWorkstreamReopensIt(t *testing.T) {
 	scope := intakefixture.ClaimChiefTurn(t, repository, f.Project, stream, func() time.Time { return fixturekit.DemoStart }, intakefixture.ChiefTurnInput{
 		Turn: "events_revision", Prompt: "The final review found a gap.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-events_revision", Directory: "events_revision",
 	})
-	tools, err := questions.Tools(repository, trace.ChiefOfStaff, scope, f.S.Now)
+	tools, err := questions.Tools(repository, trace.Manager, scope, f.S.Now)
 	fixturekit.Must(t, err)
 	i := slices.IndexFunc(tools, func(t coreadapter.Tool) bool { return t.Name == questions.RouteAmendmentTool })
 	if i < 0 {
@@ -473,7 +473,7 @@ func TestARevisionCommissionedOnAnAssembledWorkstreamReopensIt(t *testing.T) {
 		t.Fatalf("the commissioned revision: %s", out)
 	}
 	moved := lastOn(t, repository, stream, trace.FeatureSubject)
-	if moved.To != intake.BuildingState || moved.DecidedBy != trace.DecidedByChief {
+	if moved.To != intake.BuildingState || moved.DecidedBy != trace.DecidedByManager {
 		t.Fatalf("the reopening %+v", moved)
 	}
 }

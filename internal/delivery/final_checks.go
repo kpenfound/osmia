@@ -595,7 +595,7 @@ func (w *finalWatch) noticeLoadMissing(ctx context.Context) error {
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: a.Repository.Project(), Workstream: w.stream, At: a.S.Now(), Actor: FinalReviewActor, Cause: w.report.Operation}
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: "noticed", Reason: fmt.Sprintf("no load status for %s after push %d", w.push.Commit, w.push.Number)},
-		Events:     []trace.Event{trace.Notice(id, "chief", body)}}
+		Events:     []trace.Event{trace.Notice(id, trace.ManagerKey, body)}}
 	if _, err := a.Repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
 		return err
 	}

@@ -55,7 +55,7 @@ func TestOrdinaryChiefTurnHoldsWebTools(t *testing.T) {
 	for backend, web := range webToolsByBackend {
 		t.Run(backend, func(t *testing.T) {
 			turns, engine, hosts := enforcedTurns(t, f, repository)
-			got := runEnforced(t, turns, engine, hosts, coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "turn-" + backend}, backend)
+			got := runEnforced(t, turns, engine, hosts, coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: "turn-" + backend}, backend)
 			for _, tool := range web {
 				if !slices.Contains(got.Native, tool) {
 					t.Errorf("%s chief native tools %v lack %s", backend, got.Native, tool)
@@ -103,8 +103,8 @@ func TestWebIsGrantedToDesignAndSessionRoles(t *testing.T) {
 	t.Parallel()
 	f, _, repository := newReviewFixture(t, "design-web")
 	turns, _, _ := enforcedTurns(t, f, repository)
-	if !turns.Grants[trace.ChiefOfStaff].Web || !chiefOrdinaryNarrow.Web || !designNarrow.Web {
-		t.Fatalf("chief grant %+v, ordinary narrowing %+v, design narrowing %+v", turns.Grants[trace.ChiefOfStaff], chiefOrdinaryNarrow, designNarrow)
+	if !turns.Grants[trace.Manager].Web || !chiefOrdinaryNarrow.Web || !designNarrow.Web {
+		t.Fatalf("chief grant %+v, ordinary narrowing %+v, design narrowing %+v", turns.Grants[trace.Manager], chiefOrdinaryNarrow, designNarrow)
 	}
 	if want := []string{"file_read", draftBriefToolName, designReadRepoToolName, designTitleToolName}; !slices.Equal(designNarrow.Tools, want) {
 		t.Fatalf("design narrowing tools %v, want %v", designNarrow.Tools, want)
@@ -157,7 +157,7 @@ func TestRolesWithoutWebGetNoWebTools(t *testing.T) {
 	}
 	turns, _, _ := enforcedTurns(t, f, repository)
 	for role, grant := range turns.Grants {
-		if grant.Web != (role == trace.ChiefOfStaff || role == trace.Designer || role == sessionRole) {
+		if grant.Web != (role == trace.Manager || role == trace.Designer || role == sessionRole) {
 			t.Errorf("%s grant %+v", role, grant)
 		}
 	}

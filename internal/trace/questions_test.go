@@ -74,14 +74,14 @@ func TestAskRecordsTheQuestionAndOneEventTogether(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)
 	s := mustScoped(t, r, streamID)
-	chief := chiefThread(t, r, "chief1")
+	manager := managerThread(t, r, "chief1")
 	mason := askerThread(t, r, "mason1", "mason", "build1")
 	before, err := r.Outbox(streamID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	failure(t, second(r.Ask(ctx, "chief", chief, "May I ask?", at)), "the chief of staff answers questions and cannot ask one")
+	failure(t, second(r.Ask(ctx, "chief", manager, "May I ask?", at)), "the chief of staff answers questions and cannot ask one")
 	if got := refusal(t, second(r.Ask(ctx, "mason1", mason, " \n", at))); !strings.Contains(got, "question is required") {
 		t.Fatalf("empty question: %s", got)
 	}
@@ -155,10 +155,10 @@ func TestAskRecordsTheQuestionAndOneEventTogether(t *testing.T) {
 
 func second[T any](_ T, err error) error { return err }
 
-func TestChiefOfStaffChoosesOnceForEachQuestion(t *testing.T) {
+func TestManagerChoosesOnceForEachQuestion(t *testing.T) {
 	ctx := context.Background()
 	r, root, p := create(t)
-	chief := chiefThread(t, r, "chief1")
+	manager := managerThread(t, r, "chief1")
 	for i, agent := range []string{"mason1", "mason2", "mason3", "mason4"} {
 		scope := askerThread(t, r, agent, "mason", "build_"+agent)
 		if _, err := r.Ask(ctx, agent, scope, "Question from "+agent, at.Add(time.Duration(i)*time.Second)); err != nil {
@@ -170,18 +170,18 @@ func TestChiefOfStaffChoosesOnceForEachQuestion(t *testing.T) {
 
 	failure(t, second(r.AnswerQuestion(ctx, "mason1", mason, "1", "Use the file store.", []string{"charter#1"}, when)), "only a chief-of-staff turn may choose what happens to a question")
 	failure(t, second(r.EscalateQuestions(ctx, "mason1", mason, EscalationRequest{Questions: []string{"1"}, Rephrasing: "r", Blocked: "b", Recommendation: "c"}, when)), "only a chief-of-staff turn may choose what happens to a question")
-	stale := chief
+	stale := manager
 	stale.Turn = "other"
 	failure(t, second(r.AnswerQuestion(ctx, "chief", stale, "1", "Use the file store.", []string{"charter#1"}, when)), "turn scope denied")
 	for reason, call := range map[string]func() error{
 		"an answer needs at least one citation; escalate a question the record does not settle": func() error {
-			return second(r.AnswerQuestion(ctx, "chief", chief, "1", "Use the file store.", nil, when))
+			return second(r.AnswerQuestion(ctx, "chief", manager, "1", "Use the file store.", nil, when))
 		},
 		"text is required: the answer the asker receives": func() error {
-			return second(r.AnswerQuestion(ctx, "chief", chief, "1", " ", []string{"charter#1"}, when))
+			return second(r.AnswerQuestion(ctx, "chief", manager, "1", " ", []string{"charter#1"}, when))
 		},
 		"there is no question 9 in this workstream": func() error {
-			return second(r.AnswerQuestion(ctx, "chief", chief, "9", "Use the file store.", []string{"charter#1"}, when))
+			return second(r.AnswerQuestion(ctx, "chief", manager, "9", "Use the file store.", []string{"charter#1"}, when))
 		},
 	} {
 		if got := refusal(t, call()); got != reason {
@@ -192,7 +192,7 @@ func TestChiefOfStaffChoosesOnceForEachQuestion(t *testing.T) {
 		t.Fatalf("refused answers changed question 1: %+v", s)
 	}
 
-	ruling, err := r.AnswerQuestion(ctx, "chief", chief, "1", "Use the file store.", []string{"charter#1", "kb/store.md"}, when)
+	ruling, err := r.AnswerQuestion(ctx, "chief", manager, "1", "Use the file store.", []string{"charter#1", "kb/store.md"}, when)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,10 +201,10 @@ func TestChiefOfStaffChoosesOnceForEachQuestion(t *testing.T) {
 	if !reflect.DeepEqual(ruling, wantRuling) {
 		t.Fatalf("ruling:\n%+v\nwant\n%+v", ruling, wantRuling)
 	}
-	if got := refusal(t, second(r.AnswerQuestion(ctx, "chief", chief, "1", "Use the database.", []string{"charter#2"}, when))); got != "question 1 is already answered" {
+	if got := refusal(t, second(r.AnswerQuestion(ctx, "chief", manager, "1", "Use the database.", []string{"charter#2"}, when))); got != "question 1 is already answered" {
 		t.Fatalf("second answer: %s", got)
 	}
-	if got := refusal(t, second(r.EscalateQuestions(ctx, "chief", chief, EscalationRequest{Questions: []string{"1"}, Rephrasing: "r", Blocked: "b", Recommendation: "c"}, when))); got != "question 1 is already answered" {
+	if got := refusal(t, second(r.EscalateQuestions(ctx, "chief", manager, EscalationRequest{Questions: []string{"1"}, Rephrasing: "r", Blocked: "b", Recommendation: "c"}, when))); got != "question 1 is already answered" {
 		t.Fatalf("escalation of an answered question: %s", got)
 	}
 
@@ -221,31 +221,31 @@ func TestChiefOfStaffChoosesOnceForEachQuestion(t *testing.T) {
 	} {
 		bad := request
 		change(&bad)
-		if got := refusal(t, second(r.EscalateQuestions(ctx, "chief", chief, bad, when))); got != reason {
+		if got := refusal(t, second(r.EscalateQuestions(ctx, "chief", manager, bad, when))); got != reason {
 			t.Fatalf("refusal %q, want %q", got, reason)
 		}
 	}
 	if s := questionStates(t, r); s["2"].State != QuestionOpen || s["2"].Latest.Revision != 1 {
 		t.Fatalf("a refused batch escalated question 2: %+v", s["2"])
 	}
-	batch, err := r.EscalateQuestions(ctx, "chief", chief, request, when)
+	batch, err := r.EscalateQuestions(ctx, "chief", manager, request, when)
 	if err != nil || batch != "escalation_2" {
 		t.Fatalf("batch %q: %v", batch, err)
 	}
 	for _, name := range []string{"1/rulings.jsonl", "2/question.jsonl", "3/question.jsonl"} {
 		committed(t, r, name)
 	}
-	if got := refusal(t, second(r.AnswerQuestion(ctx, "chief", chief, "2", "Resume.", []string{"charter#1"}, when))); got != "question 2 is escalated to the owner; only the owner's ruling answers it" {
+	if got := refusal(t, second(r.AnswerQuestion(ctx, "chief", manager, "2", "Resume.", []string{"charter#1"}, when))); got != "question 2 is escalated to the owner; only the owner's ruling answers it" {
 		t.Fatalf("answer to an escalated question: %s", got)
 	}
 	again := request
 	again.Questions = []string{"3", "4"}
-	if got := refusal(t, second(r.EscalateQuestions(ctx, "chief", chief, again, when))); got != "question 3 is escalated to the owner; only the owner's ruling answers it" {
+	if got := refusal(t, second(r.EscalateQuestions(ctx, "chief", manager, again, when))); got != "question 3 is escalated to the owner; only the owner's ruling answers it" {
 		t.Fatalf("second escalation: %s", got)
 	}
 	single := request
 	single.Questions, single.Options = []string{"4"}, nil
-	if batch, err := r.EscalateQuestions(ctx, "chief", chief, single, when); err != nil || batch != "escalation_4" {
+	if batch, err := r.EscalateQuestions(ctx, "chief", manager, single, when); err != nil || batch != "escalation_4" {
 		t.Fatalf("single escalation %q: %v", batch, err)
 	}
 
@@ -285,7 +285,7 @@ func TestChiefOfStaffChoosesOnceForEachQuestion(t *testing.T) {
 func TestAnswerRefusesToOverwriteARuling(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)
-	chief := chiefThread(t, r, "chief1")
+	manager := managerThread(t, r, "chief1")
 	if _, err := r.Ask(ctx, "mason1", askerThread(t, r, "mason1", "mason", "build1"), "Which store?", at); err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func TestAnswerRefusesToOverwriteARuling(t *testing.T) {
 	if err := r.Append(ctx, imported); err != nil {
 		t.Fatal(err)
 	}
-	_, err := r.AnswerQuestion(ctx, "chief", chief, "1", "Use the file store.", []string{"charter#1"}, at.Add(time.Hour))
+	_, err := r.AnswerQuestion(ctx, "chief", manager, "1", "Use the file store.", []string{"charter#1"}, at.Add(time.Hour))
 	var refused *QuestionRefused
 	if !errors.Is(err, ErrConflict) || errors.As(err, &refused) {
 		t.Fatalf("answer over an existing ruling: %v", err)

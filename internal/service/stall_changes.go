@@ -280,7 +280,7 @@ func (w stallWatch) changeExit(host config.WorkstreamID, c changeWatch, v schedu
 		Questions: intake.ExitQuestions(intake.TriggerStalled), Evidence: router.Evidence{Facts: facts, Records: records},
 		TransitionID: func(router.Target) string { return id },
 		Enter: func(context.Context, router.Plan) (router.Effect, error) {
-			return router.Effect{Events: []trace.Event{trace.Notice(id+"-"+cause, "chief", body)}, Reason: reason}, nil
+			return router.Effect{Events: []trace.Event{trace.Notice(id+"-"+cause, trace.ManagerKey, body)}, Reason: reason}, nil
 		},
 	}
 }

@@ -10,7 +10,7 @@ import (
 // role. The manager's turns run under its stored role name, and its settings
 // sit under roles.manager; every other role's settings sit under its own name.
 func ConfigRole(role string) string {
-	if role == ChiefOfStaff {
+	if role == Manager {
 		return config.ManagerRole
 	}
 	return role
@@ -20,7 +20,7 @@ func ConfigRole(role string) string {
 // role key. It inverts ConfigRole.
 func RuntimeRole(key string) string {
 	if key == config.ManagerRole {
-		return ChiefOfStaff
+		return Manager
 	}
 	return key
 }

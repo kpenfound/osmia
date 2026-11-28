@@ -148,7 +148,7 @@ func presentCancellation(t *testing.T, f *gateFixture) lifecycle.WorkgroupChange
 	stream := fixturekit.Stream
 	groups, err := trace.EnsureWorkgroups(ctx, f.repo, []config.WorkstreamID{stream}, f.now(), serviceActor, "fixture")
 	fixturekit.Must(t, err)
-	_, err = f.repo.EnsureChiefOfStaff(ctx, stream, f.now(), serviceActor)
+	_, err = f.repo.EnsureManager(ctx, stream, f.now(), serviceActor)
 	fixturekit.Must(t, err)
 	c := lifecycle.WorkgroupChange{ID: "cancel", Workgroup: groups[0].ID, Origin: stream, Host: stream, State: "presented",
 		Request: lifecycle.ChangeRequest{Key: "cancel", Kind: "cancel", Scope: "workgroup", Change: "Superseded by the owner"}}

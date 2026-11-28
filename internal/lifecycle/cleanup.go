@@ -30,7 +30,7 @@ const (
 // views the chief of staff and drift reviewers are staged.
 var TurnDirectories = []string{
 
-	"threads", "architect", "shed", "final", "chief_of_staff", "workspaces", "views", "checks"}
+	"threads", "architect", "shed", "final", trace.Manager, "workspaces", "views", "checks"}
 
 // WorkspaceCleanup removes the workspaces of the configured project that the
 // workflow is done with: a unit's workspace and its reviewer's export once
@@ -216,7 +216,7 @@ func (c *WorkspaceCleanup) Busy(stream config.WorkstreamID) (map[string]bool, bo
 		}
 		switch {
 		case !unfinished:
-		case th.Identity.Role == trace.ChiefOfStaff:
+		case th.Identity.Role == trace.Manager:
 			chief = true
 		default:
 			busy[th.Identity.Unit] = true

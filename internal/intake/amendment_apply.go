@@ -55,7 +55,7 @@ func ClassifyAmendment(req trace.Amendment, d AmendmentDecision, affectedDoc, se
 	}
 	a := amendment.Application{Amendment: req.ID, From: from, To: to, Citations: req.Citations, Change: req.Change, Reason: req.Reason, Note: d.Note,
 		Criteria: append([]string{}, affected.Criteria...)}
-	if d.Actor == trace.ChiefOfStaff {
+	if d.Actor == trace.Manager {
 		a.Actor = d.Actor
 	}
 	a.Rework, a.Notify, a.Added, a.Removed = amendment.Classify(a.Criteria, affected.Units, before, after)
@@ -412,7 +412,7 @@ func AmendedMasonPrompt(app amendment.Application, m bundle.Mason, rework bool) 
 	if !rework {
 		what = fmt.Sprintf("The owner approved amendment %s. It changed the entry of unit %s in the plan; the criteria the unit serves keep their meaning. Continue in your existing workspace against the amended task and acceptance below.", app.Amendment, m.Unit)
 	}
-	if app.Actor == trace.ChiefOfStaff {
+	if app.Actor == trace.Manager {
 		what = strings.ReplaceAll(what, "The owner", "The chief of staff")
 	}
 	return fmt.Sprintf("%s When the task is done and its acceptance holds, call done with the outcome of your work, then end your turn.\n\n%s", what, m.Render())

@@ -10,7 +10,7 @@ func TestContestedRulingByJev(t *testing.T) {
 	if got := RulerName(trace.JevActor); got != trace.DecidedByJev {
 		t.Fatalf("rulerName(Jev) = %q", got)
 	}
-	if RulerName(chiefActor) != "chief of staff" || RulerName(ownerActor) != "owner" {
+	if RulerName(managerActor) != "chief of staff" || RulerName(ownerActor) != "owner" {
 		t.Fatal("rulerName changed for the owner or the chief of staff")
 	}
 	jev := ContestedRuling{Decision: "review", By: trace.DecidedByJev, Judgment: "judgment_ab12"}
@@ -20,7 +20,7 @@ func TestContestedRulingByJev(t *testing.T) {
 	if contestActor(ContestedRuling{}) != ownerActor || ContestRuler(ContestedRuling{}) != "owner" {
 		t.Fatal("an unattributed ruling is not the owner's")
 	}
-	if contestActor(ContestedRuling{By: "chief of staff"}) != chiefActor {
+	if contestActor(ContestedRuling{By: "chief of staff"}) != managerActor {
 		t.Fatal("the chief of staff's ruling is not the chief's")
 	}
 }

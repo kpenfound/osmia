@@ -9,7 +9,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-func TestMemoryWatchCommitsCursorAndTerminalChiefNoticesTogether(t *testing.T) {
+func TestMemoryWatchCommitsCursorAndTerminalManagerNoticesTogether(t *testing.T) {
 	ctx := context.Background()
 	r, root, p := create(t)
 	h := header("transition", "delivered")

@@ -505,7 +505,7 @@ func (c *changePass) requireDesignConversationUnchanged(t *testing.T) {
 	repo := c.survivorRepo(t)
 	authority, _, _, closeAuthority, err := c.f.S.Lifecycle().ChiefRepository(context.Background(), repo, c.survivor)
 	fixturekit.Must(t, err)
-	chief, err := authority.Thread(c.host, trace.ChiefOfStaff)
+	chief, err := authority.Thread(c.host, trace.Manager)
 	closeAuthority()
 	fixturekit.Must(t, err)
 	if !intakefixture.EqualJSONTest(c.f.Before.Identity, chief.Identity) {

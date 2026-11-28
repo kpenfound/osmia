@@ -202,7 +202,7 @@ func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
 				} else if inbox[0].Hold != "" || inbox[0].State != trace.QuestionAnswered {
 					t.Fatal("completed saved relay did not permit eligible survivor recovery")
 				}
-				_, err = target.Thread(host, trace.ChiefOfStaff)
+				_, err = target.Thread(host, trace.Manager)
 				fixturekit.Must(t, err)
 			}
 			check("retained")

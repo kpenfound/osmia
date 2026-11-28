@@ -106,7 +106,7 @@ func TestUnitStateSpansCarryTheCauseAndNextState(t *testing.T) {
 }
 
 func TestUnitCauseIsFromTheBoundedVocabulary(t *testing.T) {
-	chief := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
 	rebase := func(from, to string) trace.Transition {
 		return trace.Transition{Header: trace.Header{Actor: service, Cause: "unit-u1-rebase-3-conflicted"}, From: from, To: to}
 	}

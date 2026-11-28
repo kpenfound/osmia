@@ -98,7 +98,7 @@ func crossRepoMembers(members []CrossRepoMember, group ...config.WorkgroupID) (m
 // CreateWorkgroupTrace creates a new workgroup-level trace, outside every
 // one of members' own repos and outside every target repository, for a
 // workgroup whose members span more than one repo. It creates the trace's
-// own host workstream, which carries the one shared chief-of-staff thread
+// own host workstream, which carries the one shared manager thread
 // and is never one of the real members, and records the workgroup itself,
 // host first and then every real member in the given order, in the same
 // commit CreateWorkstreamOn makes for the host. The caller must Close the
@@ -171,7 +171,7 @@ func recordWorkgroup(ctx context.Context, r *Repository, g Workgroup, at time.Ti
 // has the same workgroup id open, this call reuses that one instance
 // instead of taking a second exclusive hold on the same directory
 // (openSharedWorkgroupTrace), so it answers promptly even while a long
-// call such as a dispatched chief-of-staff turn is in flight on it. The
+// call such as a dispatched manager turn is in flight on it. The
 // caller must Close the returned repository exactly once.
 func OpenWorkgroupTrace(root config.Root, id config.WorkgroupID, members []CrossRepoMember) (*Repository, error) {
 	byStream, _, err := crossRepoMembers(members, id)

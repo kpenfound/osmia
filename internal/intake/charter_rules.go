@@ -250,14 +250,14 @@ func (c *Controls) DecideCharter(repository *trace.Repository, scope coreadapter
 		if s == nil {
 			return nil, errors.New("charter decisions are unavailable")
 		}
-		request, owner, err := repository.OwnerTurn(trace.ChiefOfStaff, scope)
+		request, owner, err := repository.OwnerTurn(trace.Manager, scope)
 		if err != nil {
 			return nil, err
 		}
 		if !owner {
 			return PriorityRefusal("only the owner decides a charter proposal; this turn does not answer a message from the owner")
 		}
-		member, question, err := repository.ChiefQuestionTarget(config.WorkstreamID(scope.Workstream), input.Question)
+		member, question, err := repository.ManagerQuestionTarget(config.WorkstreamID(scope.Workstream), input.Question)
 		if err != nil {
 			return PriorityRefusal(err.Error())
 		}

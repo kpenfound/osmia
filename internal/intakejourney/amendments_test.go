@@ -61,7 +61,7 @@ func TestRoutedAmendmentFreesSlotForAnotherUnit(t *testing.T) {
 	if len(requests) != 1 {
 		t.Fatalf("requests %+v", requests)
 	}
-	if requests[0].Unit != "resume" || requests[0].Role != trace.ChiefOfStaff || requests[0].Requester.ID != intake.MasonAgent("resume") || requests[0].QuestionID != "1" {
+	if requests[0].Unit != "resume" || requests[0].Role != trace.Manager || requests[0].Requester.ID != intake.MasonAgent("resume") || requests[0].QuestionID != "1" {
 		t.Fatalf("request %+v", requests[0])
 	}
 	masons.Check(t)

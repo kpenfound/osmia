@@ -83,7 +83,7 @@ func workgroupFeedFixture(t *testing.T, cross bool, count int, pending ...bool) 
 	for _, m := range members {
 		s.installMemberLifecycle(m.Project)
 	}
-	_, err = chief.EnsureChiefOfStaff(context.Background(), group.Members[0], fixturekit.DemoStart, serviceActor)
+	_, err = chief.EnsureManager(context.Background(), group.Members[0], fixturekit.DemoStart, serviceActor)
 	fixturekit.Must(t, err)
 	return s, chief, group
 }
@@ -91,12 +91,12 @@ func workgroupFeedFixture(t *testing.T, cross bool, count int, pending ...bool) 
 func finishFeedChief(t *testing.T, chief *trace.Repository, host config.WorkstreamID) trace.QueuedTurn {
 	t.Helper()
 	ctx := context.Background()
-	q, err := chief.ClaimTurn(ctx, host, trace.ChiefOfStaff, "chief-token", filepath.Join(t.TempDir(), "chief"), fixturekit.DemoStart.Add(time.Minute))
+	q, err := chief.ClaimTurn(ctx, host, trace.Manager, "chief-token", filepath.Join(t.TempDir(), "chief"), fixturekit.DemoStart.Add(time.Minute))
 	fixturekit.Must(t, err)
 	h := q.Request.Header
 	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), fixturekit.DemoStart.Add(2*time.Minute)
-	fixturekit.Must(t, chief.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: "chief-session"}, StartedAt: q.Claim.At, SessionDirectory: q.Claim.SessionDirectory, FinalResponse: "Shared reply"}}))
-	fixturekit.Must(t, chief.CompleteTurn(ctx, host, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, h.At))
+	fixturekit.Must(t, chief.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: "chief-session"}, StartedAt: q.Claim.At, SessionDirectory: q.Claim.SessionDirectory, FinalResponse: "Shared reply"}}))
+	fixturekit.Must(t, chief.CompleteTurn(ctx, host, trace.Manager, q.Request.TurnID, q.Claim.Token, h.At))
 	return q
 }
 
@@ -150,24 +150,24 @@ func newWorkgroupFeedScenario(t *testing.T, cross bool) *workgroupFeedScenario {
 	if code := feedHTTP(t, s, http.MethodPost, Prefix+"/workgroups/"+string(g.ID)+"/conversation", "Whole group", &accepted); code != 200 {
 		t.Fatalf("send status %d: %+v", code, accepted)
 	}
-	th, err := chief.ChiefOfStaffThread(g.Members[0])
+	th, err := chief.ManagerThread(g.Members[0])
 	fixturekit.Must(t, err)
 	groupTurns := th.Turns
 	q := finishFeedChief(t, chief, g.Members[0])
-	scope := coreadapter.Scope{Project: string(chief.Project()), Workstream: string(g.Members[0]), Thread: trace.ChiefOfStaff, Turn: q.Request.TurnID, Role: trace.ChiefOfStaff}
+	scope := coreadapter.Scope{Project: string(chief.Project()), Workstream: string(g.Members[0]), Thread: trace.Manager, Turn: q.Request.TurnID, Role: trace.Manager}
 	scope.Turn = "status-turn"
-	_, err = chief.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request-status", Project: chief.Project(), Workstream: g.Members[0], At: fixturekit.DemoStart.Add(3 * time.Minute), Actor: serviceActor, Cause: "test"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: scope.Turn, Profile: q.Request.Profile, Prompt: "status"})
+	_, err = chief.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request-status", Project: chief.Project(), Workstream: g.Members[0], At: fixturekit.DemoStart.Add(3 * time.Minute), Actor: serviceActor, Cause: "test"}, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: scope.Turn, Profile: q.Request.Profile, Prompt: "status"})
 	fixturekit.Must(t, err)
-	_, err = chief.ClaimTurn(ctx, g.Members[0], trace.ChiefOfStaff, "status-token", filepath.Join(t.TempDir(), "status"), fixturekit.DemoStart.Add(3*time.Minute))
+	_, err = chief.ClaimTurn(ctx, g.Members[0], trace.Manager, "status-token", filepath.Join(t.TempDir(), "status"), fixturekit.DemoStart.Add(3*time.Minute))
 	fixturekit.Must(t, err)
-	_, err = chief.SetStatus(ctx, trace.ChiefOfStaff, scope, trace.StatusContent{Goal: "Shared goal", Note: "Working", Agents: []string{}}, fixturekit.DemoStart.Add(4*time.Minute), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	_, err = chief.SetStatus(ctx, trace.Manager, scope, trace.StatusContent{Goal: "Shared goal", Note: "Working", Agents: []string{}}, fixturekit.DemoStart.Add(4*time.Minute), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	fixturekit.Must(t, err)
 	member := fixturekit.Quiet
 	second, api := s.send(ctx, string(member), SendRequest{Text: "About this member"})
 	if api != nil {
 		t.Fatal(api)
 	}
-	th, err = chief.ChiefOfStaffThread(member)
+	th, err = chief.ManagerThread(member)
 	fixturekit.Must(t, err)
 	memberPrompt := th.Turns[len(th.Turns)-1].Request.Context
 	_, _, repo, api := s.conversationTrace(string(member))
@@ -185,7 +185,7 @@ func newWorkgroupFeedScenario(t *testing.T, cross bool) *workgroupFeedScenario {
 	fixturekit.Must(t, err)
 	question, err := repo.Ask(ctx, "worker", coreadapter.Scope{Project: string(repo.Project()), Workstream: string(member), Thread: "worker", Turn: "worker-turn", Unit: "upload", Role: masonRole}, "Which retry budget?", fixturekit.DemoStart.Add(5*time.Minute))
 	fixturekit.Must(t, err)
-	batch, err := chief.EscalateQuestions(ctx, trace.ChiefOfStaff, scope, trace.EscalationRequest{Questions: []string{string(member) + ":" + question.ID}, Rephrasing: "Which retry budget?", Blocked: "Upload retry", Recommendation: "Use three retries"}, fixturekit.DemoStart.Add(6*time.Minute))
+	batch, err := chief.EscalateQuestions(ctx, trace.Manager, scope, trace.EscalationRequest{Questions: []string{string(member) + ":" + question.ID}, Rephrasing: "Which retry budget?", Blocked: "Upload retry", Recommendation: "Use three retries"}, fixturekit.DemoStart.Add(6*time.Minute))
 	fixturekit.Must(t, err)
 	fixturekit.FeedDocument(t, repo, member, checkDocumentID("upload", 1), "units/upload/checks-1.json", 1, fixturekit.DemoStart, UnitCheckRun{Unit: "upload", Run: 1, Status: ChecksPassed, StartedAt: fixturekit.DemoStart, FinishedAt: fixturekit.DemoStart})
 	fixturekit.FeedDocument(t, repo, member, "final-checks-1", "final/checks-1.json", 1, fixturekit.DemoStart, FinalCheckRun{Review: 1, Status: ChecksPassed, StartedAt: fixturekit.DemoStart, FinishedAt: fixturekit.DemoStart})
@@ -269,7 +269,7 @@ func TestAMemberFeedHoldsItsOwnActivityAndNoSharedEntries(t *testing.T) {
 				t.Fatal(api)
 			}
 			for _, e := range activity.Entries {
-				if e.Kind == "message" || e.Kind == "response" || e.Kind == "status" || e.Kind == "action" || e.Session != nil && e.Session.Role == trace.ChiefOfStaff {
+				if e.Kind == "message" || e.Kind == "response" || e.Kind == "status" || e.Kind == "action" || e.Session != nil && e.Session.Role == trace.Manager {
 					t.Fatalf("shared entry in member feed: %+v", e)
 				}
 			}
@@ -313,7 +313,7 @@ func TestMemberFeedChiefSessionsFollowMembership(t *testing.T) {
 			if completed {
 				finishFeedChief(t, chief, fixturekit.Stream)
 			} else {
-				_, err := chief.ClaimTurn(context.Background(), fixturekit.Stream, trace.ChiefOfStaff, "chief-token", filepath.Join(t.TempDir(), "chief"), fixturekit.DemoStart.Add(time.Minute))
+				_, err := chief.ClaimTurn(context.Background(), fixturekit.Stream, trace.Manager, "chief-token", filepath.Join(t.TempDir(), "chief"), fixturekit.DemoStart.Add(time.Minute))
 				fixturekit.Must(t, err)
 			}
 			fixturekit.QueueRoleTurn(t, chief, fixturekit.Stream, "worker", masonRole, "upload", fixturekit.DemoStart)
@@ -325,7 +325,7 @@ func TestMemberFeedChiefSessionsFollowMembership(t *testing.T) {
 			}
 			for _, kind := range []string{"message", "session"} {
 				if !slices.ContainsFunc(single.Entries, func(e FeedEntry) bool {
-					return e.Kind == kind && (e.Session == nil || e.Session.Role == trace.ChiefOfStaff)
+					return e.Kind == kind && (e.Session == nil || e.Session.Role == trace.Manager)
 				}) {
 					t.Fatalf("single-member %s missing", kind)
 				}
@@ -339,7 +339,7 @@ func TestMemberFeedChiefSessionsFollowMembership(t *testing.T) {
 			}
 			sessions := 0
 			for _, e := range multi.Entries {
-				if e.Kind == "message" || e.Session != nil && e.Session.Role == trace.ChiefOfStaff {
+				if e.Kind == "message" || e.Session != nil && e.Session.Role == trace.Manager {
 					t.Fatalf("chief leak: %+v", e)
 				}
 				if e.Session != nil {

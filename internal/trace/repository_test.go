@@ -90,7 +90,7 @@ func checkTyped[T Record](t *testing.T, r *Repository, want Record) {
 	}
 	list = slices.DeleteFunc(list, func(v T) bool {
 		a, ok := any(v).(Agent)
-		return ok && a.ID == ChiefOfStaff
+		return ok && a.ID == Manager
 	})
 	if len(list) != 1 || !reflect.DeepEqual(list[0], want) {
 		t.Fatalf("read: got %#v, want %#v", list, want)

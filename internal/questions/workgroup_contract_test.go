@@ -91,8 +91,8 @@ func TestCrossRepoContractToolRoutesNonHostRequestToProject(t *testing.T) {
 			if !strings.Contains(ask, `"question":"1"`) {
 				t.Fatalf("ask: %s", ask)
 			}
-			chiefScope := claimCrossRepoTurn(t, wg, wg.Project(), g.Members[0], trace.ChiefOfStaff, trace.ChiefOfStaff, "", "chief")
-			chiefTools, err := questions.Tools(wg, trace.ChiefOfStaff, chiefScope, func() time.Time { return start })
+			chiefScope := claimCrossRepoTurn(t, wg, wg.Project(), g.Members[0], trace.Manager, trace.Manager, "", "chief")
+			chiefTools, err := questions.Tools(wg, trace.Manager, chiefScope, func() time.Time { return start })
 			if err != nil {
 				t.Fatal(err)
 			}

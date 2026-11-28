@@ -336,7 +336,7 @@ func checkFollowupContinuation(t *testing.T, f *journey.ProductionDesignFixture,
 				t.Fatalf("factory state leaked into target repo at %s: %v", name, err)
 			}
 		}
-		if _, err := repo.Thread(m, trace.ChiefOfStaff); !errors.Is(err, os.ErrNotExist) {
+		if _, err := repo.Thread(m, trace.Manager); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("member retains an independent chief: %v", err)
 		}
 		groups, _, err := trace.Workgroups(repo)
@@ -346,7 +346,7 @@ func checkFollowupContinuation(t *testing.T, f *journey.ProductionDesignFixture,
 		}
 		target, host, _, close, err := f.S.Lifecycle().ChiefRepository(ctx, repo, m)
 		fixturekit.Must(t, err)
-		chief, err := target.Thread(host, trace.ChiefOfStaff)
+		chief, err := target.Thread(host, trace.Manager)
 		close()
 		fixturekit.Must(t, err)
 		for _, design := range f.Design.Turns {
@@ -386,7 +386,7 @@ func checkFollowupContinuation(t *testing.T, f *journey.ProductionDesignFixture,
 	if slices.ContainsFunc(listed.Workstreams, func(w api.WorkstreamStatus) bool { return w.Workstream == f.Origin }) {
 		t.Fatal("status list exposes the adopted design host as independent work")
 	}
-	if _, err := repo.Thread(f.Origin, trace.ChiefOfStaff); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo.Thread(f.Origin, trace.Manager); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("source retains an authoritative queue")
 	}
 	if f.Design.Identity.Role == trace.Designer {

@@ -12,7 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-func chiefThread(t *testing.T, r *Repository, turn string) coreadapter.Scope {
+func managerThread(t *testing.T, r *Repository, turn string) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
 	identity := Agent{Header: header("agent", "chief"), Role: StatusRole, ThreadID: "chief_thread"}
@@ -46,7 +46,7 @@ func TestSetStatusStoresWholeRevisions(t *testing.T) {
 	if got := statusOf(t, r); got.Status != nil || got.State != "" || got.OpenQuestions != 0 || got.Workstream != streamID {
 		t.Fatalf("fresh workstream: %+v", got)
 	}
-	scope := chiefThread(t, r, "turn1")
+	scope := managerThread(t, r, "turn1")
 	first := StatusContent{Goal: "Ship the importer.", Attention: "Approve the plan.", Note: "The draft is ready.", Agents: []string{"The architect is drafting."}}
 	var known []string
 	revision, err := r.SetStatus(ctx, "chief", scope, first, at.Add(time.Minute), func(_ StatusContent, k []string, _ []OwnerGate) error { known = k; return nil })
@@ -92,12 +92,12 @@ func TestSetStatusStoresWholeRevisions(t *testing.T) {
 func TestSetStatusFollowsEscalationGate(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)
-	chief := chiefThread(t, r, "statusgate")
+	manager := managerThread(t, r, "statusgate")
 	asker := askerThread(t, r, "mason_gate", "mason", "askgate")
 	if _, err := r.Ask(ctx, "mason_gate", asker, "May the upload change?", at); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.EscalateQuestions(ctx, "chief", chief, EscalationRequest{Questions: []string{"1"}, Rephrasing: "May the upload change?", Blocked: "The upload unit.", Recommendation: "No."}, at); err != nil {
+	if _, err := r.EscalateQuestions(ctx, "chief", manager, EscalationRequest{Questions: []string{"1"}, Rephrasing: "May the upload change?", Blocked: "The upload unit.", Recommendation: "No."}, at); err != nil {
 		t.Fatal(err)
 	}
 	want := []OwnerGate{{Kind: "escalation", Reference: "1"}}
@@ -114,11 +114,11 @@ func TestSetStatusFollowsEscalationGate(t *testing.T) {
 		}
 		return nil
 	}
-	if _, err := r.SetStatus(ctx, "chief", chief, content, at, check); refusalStatus(err) != "attention is required while the owner holds escalation 1" {
+	if _, err := r.SetStatus(ctx, "chief", manager, content, at, check); refusalStatus(err) != "attention is required while the owner holds escalation 1" {
 		t.Fatalf("refusal: %v", err)
 	}
 	content.Attention = "Decide whether the upload may change."
-	if _, err := r.SetStatus(ctx, "chief", chief, content, at, check); err != nil {
+	if _, err := r.SetStatus(ctx, "chief", manager, content, at, check); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.Rule(ctx, 1, "Keep the current upload.", Actor{Kind: "owner", ID: "local"}, at); err != nil {
@@ -128,7 +128,7 @@ func TestSetStatusFollowsEscalationGate(t *testing.T) {
 		t.Fatalf("ruled gates: %+v", got)
 	}
 	content.Attention = ""
-	if _, err := r.SetStatus(ctx, "chief", chief, content, at, func(_ StatusContent, _ []string, gates []OwnerGate) error {
+	if _, err := r.SetStatus(ctx, "chief", manager, content, at, func(_ StatusContent, _ []string, gates []OwnerGate) error {
 		if len(gates) != 0 {
 			t.Fatalf("ruled check gates: %+v", gates)
 		}
@@ -177,7 +177,7 @@ func TestOwnerGatesForRatificationAndContestedUnit(t *testing.T) {
 func TestSetStatusRefusals(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)
-	scope := chiefThread(t, r, "turn1")
+	scope := managerThread(t, r, "turn1")
 	valid := StatusContent{Goal: "Ship it.", Note: "Going well.", Agents: []string{}}
 	_, err := r.SetStatus(ctx, "chief", scope, valid, at, func(StatusContent, []string, []OwnerGate) error { return errors.New("goal names a commit") })
 	var rejected *StatusRejected
@@ -319,7 +319,7 @@ func TestInternalContestDoesNotRequireOwnerAttention(t *testing.T) {
 	}
 }
 
-func TestOwnerGateRecognizesChiefDecisions(t *testing.T) {
+func TestOwnerGateRecognizesManagerDecisions(t *testing.T) {
 	for _, unit := range []string{"acceptance-without-full-checks", strings.Repeat("u", 64), strings.Repeat("u", 128)} {
 		t.Run(unit, func(t *testing.T) {
 			subject := UnitSubject(unit)

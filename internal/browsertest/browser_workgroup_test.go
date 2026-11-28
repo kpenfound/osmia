@@ -60,10 +60,10 @@ func newMemberPageFixture(t *testing.T, edges, multi bool) *workgroupPageFixture
 	opts.Reconciliation.Ticks = make(chan time.Time)
 	s, c := start(t, opts)
 	live := service.InspectForTest(s).SoleRepository()
-	_, err = live.EnsureChiefOfStaff(ctx, stream, demoStart, ownerActor)
+	_, err = live.EnsureManager(ctx, stream, demoStart, ownerActor)
 	must(t, err)
-	chief := claimTurn(t, live, t.TempDir(), stream, trace.ChiefOfStaff, trace.ChiefOfStaff, "group-status", demoStart)
-	_, err = live.SetStatus(ctx, trace.ChiefOfStaff, chief, trace.StatusContent{Goal: "Ship shared uploads", Note: "The chief coordinates both repos.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	chief := claimTurn(t, live, t.TempDir(), stream, trace.Manager, trace.Manager, "group-status", demoStart)
+	_, err = live.SetStatus(ctx, trace.Manager, chief, trace.StatusContent{Goal: "Ship shared uploads", Note: "The chief coordinates both repos.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	must(t, err)
 	fixturekit.QueueRoleTurn(t, live, stream, intake.MasonAgent("upload"), "mason", "upload", demoStart)
 	_, err = live.ClaimTurn(ctx, stream, intake.MasonAgent("upload"), "group-worker-token", t.TempDir(), demoStart)
@@ -83,7 +83,7 @@ func (f *workgroupPageFixture) question(t *testing.T, n int) api.InboxEntry {
 	must(t, f.repo.CreateThread(ctx, trace.Agent{Header: h, Role: "mason", ThreadID: id}))
 	q, err := f.repo.Ask(ctx, id, claimTurn(t, f.repo, t.TempDir(), stream, id, id, id+"-turn", demoStart), fmt.Sprintf("Shared decision %d?", n), time.Now().UTC())
 	must(t, err)
-	_, err = f.repo.EscalateQuestions(ctx, trace.ChiefOfStaff, f.chief, trace.EscalationRequest{Questions: []string{q.ID}, Rephrasing: fmt.Sprintf("Shared decision %d?", n), Blocked: "Both members", Recommendation: "Keep the shared interface."}, time.Now().UTC())
+	_, err = f.repo.EscalateQuestions(ctx, trace.Manager, f.chief, trace.EscalationRequest{Questions: []string{q.ID}, Rephrasing: fmt.Sprintf("Shared decision %d?", n), Blocked: "Both members", Recommendation: "Keep the shared interface."}, time.Now().UTC())
 	must(t, err)
 	entries := entriesOf(t, f.c, service.InboxEscalation)
 	for _, e := range entries {
@@ -149,7 +149,7 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 
 	openWorkgroup(p, f.group.ID)
 	p.Eval(`window.groupEventKind = "workstream"`, nil)
-	_, statusErr := f.repo.SetStatus(context.Background(), trace.ChiefOfStaff, f.chief, trace.StatusContent{Goal: "Ship shared uploads", Note: "Both members now have a shared plan.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	_, statusErr := f.repo.SetStatus(context.Background(), trace.Manager, f.chief, trace.StatusContent{Goal: "Ship shared uploads", Note: "Both members now have a shared plan.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	must(t, statusErr)
 	p.AwaitText("#workgroup-content [data-kind=status][data-latest=true]", "Both members now have a shared plan.")
 	p.Eval(`window.groupEventKind = null`, nil)
@@ -161,7 +161,7 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 	var q trace.QueuedTurn
 	for i := 0; i < 20; i++ {
 		var err error
-		q, err = f.repo.ClaimTurn(context.Background(), stream, trace.ChiefOfStaff, fmt.Sprintf("group-reply-token-%d", i), t.TempDir(), time.Now().UTC())
+		q, err = f.repo.ClaimTurn(context.Background(), stream, trace.Manager, fmt.Sprintf("group-reply-token-%d", i), t.TempDir(), time.Now().UTC())
 		must(t, err)
 		if q.Request.Prompt == "Coordinate the whole group" {
 			break
@@ -251,7 +251,7 @@ func TestBrowserWorkgroupDecisionIdentityAndLateOutcomes(t *testing.T) {
 	}
 	p.Await("one dispatch per recorded shared answer", `outcomeRequests[`+quote(first.Answer.Path)+`] === 1 && outcomeRequests[`+quote(second.Answer.Path)+`] === 1`)
 	p.Await("no graph without edges", `!document.querySelector('#workgroup-content .workgroup-graph')`)
-	_, err := f.repo.ProposeCharter(context.Background(), trace.ChiefOfStaff, f.chief, second.Asked[0].ID, "Keep upload interfaces compatible.", func(string) int { return 2 }, time.Now().UTC())
+	_, err := f.repo.ProposeCharter(context.Background(), trace.Manager, f.chief, second.Asked[0].ID, "Keep upload interfaces compatible.", func(string) int { return 2 }, time.Now().UTC())
 	must(t, err)
 	p.AwaitText("#workgroup-content [data-proposal]", "Keep upload interfaces compatible.")
 	p.AwaitText("#workgroup-content [data-proposal] [data-group-decision-repo]", "Uploads repo")
@@ -266,7 +266,7 @@ func TestBrowserWorkgroupPhoneLayout(t *testing.T) {
 	t.Parallel()
 	f := newWorkgroupPageFixture(t, false)
 	longGoal := strings.Repeat("UnbrokenGoal", 20)
-	_, err := f.repo.SetStatus(context.Background(), trace.ChiefOfStaff, f.chief, trace.StatusContent{Goal: longGoal, Note: "The chief coordinates both repos.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	_, err := f.repo.SetStatus(context.Background(), trace.Manager, f.chief, trace.StatusContent{Goal: longGoal, Note: "The chief coordinates both repos.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	must(t, err)
 	p := openOutcomePage(t, f.s)
 	openWorkgroup(p, f.group.ID)
@@ -352,11 +352,11 @@ func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
 		must(t, m.Project.JoinCrossRepoWorkgroup(ctx, m.Workstream, g.ID, demoStart, ownerActor, "fixture"))
 	}
 	host := g.Members[0]
-	_, err = chief.EnsureChiefOfStaff(ctx, host, demoStart, ownerActor)
+	_, err = chief.EnsureManager(ctx, host, demoStart, ownerActor)
 	must(t, err)
 	claim := func(repo *trace.Repository, ws config.WorkstreamID, agent, role, turn string) coreadapter.Scope {
 		t.Helper()
-		if agent != trace.ChiefOfStaff {
+		if agent != trace.Manager {
 			must(t, repo.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: agent, Revision: 1, Project: repo.Project(), Workstream: ws, At: demoStart, Actor: ownerActor, Cause: "fixture"}, Role: role, ThreadID: agent}))
 		}
 		h := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request-" + turn, Revision: 1, Project: repo.Project(), Workstream: ws, At: demoStart, Actor: ownerActor, Cause: "fixture"}
@@ -366,8 +366,8 @@ func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
 		must(t, err)
 		return coreadapter.Scope{Project: string(repo.Project()), Workstream: string(ws), Role: role, Thread: agent, Turn: turn}
 	}
-	cs := claim(chief, host, trace.ChiefOfStaff, trace.ChiefOfStaff, "shared-question-chief")
-	_, err = chief.SetStatus(ctx, trace.ChiefOfStaff, cs, trace.StatusContent{Goal: "Coordinate two repositories", Note: "One chief owns the shared question.", Agents: []string{}}, demoStart, func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	cs := claim(chief, host, trace.Manager, trace.Manager, "shared-question-chief")
+	_, err = chief.SetStatus(ctx, trace.Manager, cs, trace.StatusContent{Goal: "Coordinate two repositories", Note: "One chief owns the shared question.", Agents: []string{}}, demoStart, func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	must(t, err)
 	qs := []string{}
 	for i, m := range members {
@@ -377,7 +377,7 @@ func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
 		must(t, err)
 		qs = append(qs, string(m.Workstream)+":"+q.ID)
 	}
-	_, err = chief.EscalateQuestions(ctx, trace.ChiefOfStaff, cs, trace.EscalationRequest{Questions: qs, Rephrasing: "May the shared interface change?", Blocked: "Both repositories", Recommendation: "Keep the interface stable."}, demoStart)
+	_, err = chief.EscalateQuestions(ctx, trace.Manager, cs, trace.EscalationRequest{Questions: qs, Rephrasing: "May the shared interface change?", Blocked: "Both repositories", Recommendation: "Keep the interface stable."}, demoStart)
 	must(t, err)
 	synthetic := chief.Project()
 	must(t, chief.Close())
@@ -447,7 +447,7 @@ func TestBrowserCrossProjectWorkgroupAppearsOnBothCardsWithProjectLabels(t *test
 	for _, m := range members {
 		must(t, m.Project.JoinCrossRepoWorkgroup(ctx, m.Workstream, g.ID, demoStart, ownerActor, "fixture"))
 	}
-	_, err = chief.EnsureChiefOfStaff(ctx, g.Members[0], demoStart, ownerActor)
+	_, err = chief.EnsureManager(ctx, g.Members[0], demoStart, ownerActor)
 	must(t, err)
 	must(t, chief.Close())
 	for _, m := range members {

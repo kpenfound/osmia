@@ -148,7 +148,7 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 						}
 					}
 				}
-				chief, err := target.Thread(host, trace.ChiefOfStaff)
+				chief, err := target.Thread(host, trace.Manager)
 				fixturekit.Must(t, err)
 				return !slices.ContainsFunc(chief.Turns, func(turn trace.QueuedTurn) bool { return turn.CompletedAt.IsZero() })
 			})
@@ -269,7 +269,7 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 				}
 				outbox, err := rightRepo.Outbox(f.Stream2)
 				fixturekit.Must(t, err)
-				chief, err := target.Thread(host, trace.ChiefOfStaff)
+				chief, err := target.Thread(host, trace.Manager)
 				fixturekit.Must(t, err)
 				for _, e := range outbox {
 					if e.Event.Operation != nil || !strings.Contains(e.Event.Body, "survivor-after-read-cleanup") {

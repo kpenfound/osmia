@@ -759,7 +759,7 @@ func (r rebaser) record(ctx context.Context, stream config.WorkstreamID, in Reba
 	if len(rebase.Conflicts) != 0 {
 		outcome, to = "-conflicted", fmt.Sprintf("conflicted-%d", in.Rebase)
 		reason += "; conflicted: " + strings.Join(rebase.Conflicts, ", ")
-		events = append(events, trace.Notice(transition+outcome, "chief", fmt.Sprintf("Unit %s conflicts with feature branch %s at %s in %s. Its mason resolves the conflict markers against the sealed spec; the unit is reviewed again before it lands.", in.Unit, featureBranch(stream), rebase.Onto, strings.Join(rebase.Conflicts, ", "))))
+		events = append(events, trace.Notice(transition+outcome, trace.ManagerKey, fmt.Sprintf("Unit %s conflicts with feature branch %s at %s in %s. Its mason resolves the conflict markers against the sealed spec; the unit is reviewed again before it lands.", in.Unit, featureBranch(stream), rebase.Onto, strings.Join(rebase.Conflicts, ", "))))
 		if drifted {
 			events = append(events, trace.UpstreamMoved(transition+outcome, stream, move, fmt.Sprintf("unit %s conflicts with the feature branch at %s in %s; its mason resolves the conflicts against the sealed spec, and the unit is reviewed again before it lands", in.Unit, rebase.Onto, strings.Join(rebase.Conflicts, ", "))))
 		}
@@ -814,7 +814,7 @@ func (r rebaser) refuseWith(ctx context.Context, stream config.WorkstreamID, in 
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: r.Header(transition+"-refused", stream, in.Unit, transition, r.s.Now()), Subject: subject, From: state.Value, To: fmt.Sprintf("refused-%d", in.Rebase), Reason: recorded}}
 	if notice != "" {
-		tx.Events = []trace.Event{trace.Notice(transition+"-refused", "chief", notice)}
+		tx.Events = []trace.Event{trace.Notice(transition+"-refused", trace.ManagerKey, notice)}
 	}
 	if _, err := r.repository.Transact(ctx, tx); err != nil {
 		return coreadapter.OperationResult{}, err

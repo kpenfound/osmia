@@ -41,7 +41,7 @@ func CharterProposalPath(question string) string { return "questions/" + questio
 func CharterProposalID(question string) string   { return "charter_" + question }
 
 // CharterProposal is the content of every revision of
-// questions/<n>/charter.json. Revision 1 is the chief of staff's proposal:
+// questions/<n>/charter.json. Revision 1 is the manager's proposal:
 // the rule text, the number the rule would take in the charter as it was
 // then, and the source ruling, its record path, revision and the owner's
 // words. The owner's decision adds Decision and Note, and a decision Jev
@@ -153,7 +153,7 @@ func charterProposals(records []Record, v *workflowView, stream config.Workstrea
 }
 
 // CharterDecision is a charter proposal the owner has decided: the proposal
-// as the chief of staff drew it, the revision that recorded the owner's
+// as the manager drew it, the revision that recorded the owner's
 // ratification or decline, and that decision with the owner's note.
 type CharterDecision struct {
 	Proposed Document
@@ -204,7 +204,7 @@ func charterProposalPath(parts []string) bool {
 	return len(parts) == 3 && parts[0] == "questions" && key(parts[1]) && parts[2] == "charter.json"
 }
 
-// ProposeCharter records the chief of staff's proposal to make the owner's
+// ProposeCharter records the manager's proposal to make the owner's
 // ruling on question id a standing charter rule: revision 1 of the
 // question's charter.json, with the rule text, the number it would take and
 // the ruling it comes from, and the proposal's move to CharterProposed, in
@@ -224,7 +224,7 @@ func (r *Repository) ProposeCharterFor(ctx context.Context, agent string, scope 
 	if err := r.ActiveTurn(scope); err != nil {
 		return CharterProposal{}, err
 	}
-	source, local, err := r.ChiefQuestionTarget(config.WorkstreamID(scope.Workstream), id)
+	source, local, err := r.ManagerQuestionTarget(config.WorkstreamID(scope.Workstream), id)
 	if err != nil {
 		return CharterProposal{}, err
 	}
@@ -239,7 +239,7 @@ func (r *Repository) ProposeCharterFor(ctx context.Context, agent string, scope 
 	}
 	var destination MemberCharter
 	if amends != "" {
-		member, _, err := r.ChiefQuestionTarget(config.WorkstreamID(scope.Workstream), id)
+		member, _, err := r.ManagerQuestionTarget(config.WorkstreamID(scope.Workstream), id)
 		if err != nil {
 			return CharterProposal{}, err
 		}
@@ -251,7 +251,7 @@ func (r *Repository) ProposeCharterFor(ctx context.Context, agent string, scope 
 	}
 
 	project := r
-	target, localID, turn, err := r.chiefQuestionScope(ctx, agent, scope, id, at)
+	target, localID, turn, err := r.managerQuestionScope(ctx, agent, scope, id, at)
 	if err != nil {
 		return CharterProposal{}, err
 	}

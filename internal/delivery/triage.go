@@ -140,10 +140,10 @@ func TriageToolOf(load func() *Controller, repository *trace.Repository, scope c
 		if err := repository.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
-		if scope.Role != trace.ChiefOfStaff {
+		if scope.Role != trace.Manager {
 			return intake.PriorityRefusal(TriageToolName + " is only available to the chief of staff")
 		}
-		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		target, stream, refusal, err := repository.ManagerMember(config.WorkstreamID(scope.Workstream), input.Workstream)
 		if err != nil {
 			return nil, err
 		}

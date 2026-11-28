@@ -521,12 +521,12 @@ func (f *HandInFixture) CheckHanded(t *testing.T, out api.HandInResponse, key, n
 	if len(notices) != 1 || notices[0].TransitionID != tr.ID || !strings.Contains(notices[0].Event.Body, "changed to handed") {
 		t.Fatalf("outbox %+v", outbox)
 	}
-	th, err := r.ChiefOfStaffThread(stream)
+	th, err := r.ManagerThread(stream)
 	fixturekit.Must(t, err)
-	if th.Identity.Role != trace.ChiefOfStaff {
+	if th.Identity.Role != trace.Manager {
 		t.Fatalf("chief of staff %+v", th)
 	}
-	if _, err := r.EnsureChiefOfStaff(ctx, stream, time.Now(), owner); err != nil {
+	if _, err := r.EnsureManager(ctx, stream, time.Now(), owner); err != nil {
 		t.Fatal(err)
 	}
 }

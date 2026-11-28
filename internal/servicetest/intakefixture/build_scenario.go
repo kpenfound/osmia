@@ -181,20 +181,20 @@ func (f *TurnScenario) ChiefRecordsAnswer(t *testing.T, repository *trace.Reposi
 	t.Helper()
 	ctx := context.Background()
 	fixturekit.Must(t, func() error {
-		_, err := repository.EnsureChiefOfStaff(ctx, stream, f.Now(), fixturekit.OwnerActor)
+		_, err := repository.EnsureManager(ctx, stream, f.Now(), fixturekit.OwnerActor)
 		return err
 	}())
 	turn := "chief-answer-" + id
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.Now(), Actor: f.ForemanActor, Cause: "test", Depth: 1},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "chief", Prompt: "Answer question " + id}
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "chief", Prompt: "Answer question " + id}
 	_, err := repository.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
 	token := "claim-" + turn
-	directory := filepath.Join(f.Root().String(), "threads", string(f.Project), string(stream), trace.ChiefOfStaff, token)
-	q, err := repository.ClaimTurn(ctx, stream, trace.ChiefOfStaff, token, directory, f.Now())
+	directory := filepath.Join(f.Root().String(), "threads", string(f.Project), string(stream), trace.Manager, token)
+	q, err := repository.ClaimTurn(ctx, stream, trace.Manager, token, directory, f.Now())
 	fixturekit.Must(t, err)
-	chiefScope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: turn}
-	tools, err := questions.Tools(repository, trace.ChiefOfStaff, chiefScope, f.Now)
+	chiefScope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: turn}
+	tools, err := questions.Tools(repository, trace.Manager, chiefScope, f.Now)
 	fixturekit.Must(t, err)
 	tools = jevfixture.AutoDecide(repository, stream, tools)
 	i := slices.IndexFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == questions.AnswerTool })
@@ -208,7 +208,7 @@ func (f *TurnScenario) ChiefRecordsAnswer(t *testing.T, repository *trace.Reposi
 	if !strings.Contains(string(out), `"recorded":true`) {
 		t.Fatalf("the chief of staff's answer to question %s: %s", id, out)
 	}
-	f.CompleteClaimedTurn(t, repository, stream, trace.ChiefOfStaff, q, &coreadapter.Outcome{Status: "done", Report: "Answered question " + id})
+	f.CompleteClaimedTurn(t, repository, stream, trace.Manager, q, &coreadapter.Outcome{Status: "done", Report: "Answered question " + id})
 }
 
 func (f *TurnScenario) CompleteClaimedTurn(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, agent string, q trace.QueuedTurn, outcome *coreadapter.Outcome) {

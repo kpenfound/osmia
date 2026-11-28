@@ -79,7 +79,7 @@ func TestHandInToSketchedPlan(t *testing.T) {
 	engine.Turns["*"] = chief.turn
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		turns := &isolation.Turns{Workspaces: intake.StagedWorkspaces{}, Views: isolation.Views{Directory: filepath.Join(root, "views")}, Engine: engine,
-			Grants: map[string]coreadapter.Capabilities{trace.ChiefOfStaff: {Tools: []string{status.ToolName}}},
+			Grants: map[string]coreadapter.Capabilities{trace.Manager: {Tools: []string{status.ToolName}}},
 			Select: func(_ context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 				workspace := filepath.Join(root, "chief", scope.Workstream, scope.Turn)
 				if err := os.MkdirAll(workspace, 0700); err != nil {
@@ -88,7 +88,7 @@ func TestHandInToSketchedPlan(t *testing.T) {
 				return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-				set, err := status.Tool(r, trace.ChiefOfStaff, scope, clock.Now)
+				set, err := status.Tool(r, trace.Manager, scope, clock.Now)
 				return []coreadapter.Tool{set}, err
 			},
 			Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}},

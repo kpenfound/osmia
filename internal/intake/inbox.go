@@ -390,7 +390,7 @@ func (s *Controller) HeldNoticesEntry(ctx context.Context, repository *trace.Rep
 			return InboxEntry{}, false, err
 		}
 	}
-	chief, err := target.ChiefOfStaffThread(stream)
+	chief, err := target.ManagerThread(stream)
 	closeTarget()
 	if errors.Is(err, os.ErrNotExist) {
 		return InboxEntry{}, false, nil

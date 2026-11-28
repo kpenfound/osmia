@@ -172,7 +172,7 @@ func TestAPlanAmendmentDecisionThatIsNotConfidentLeavesTheChiefFree(t *testing.T
 				t.Fatalf("reject: %s", out)
 			}
 			docs := k.decisions(t)
-			if len(docs) != 1 || docs[0].Actor.ID != trace.ChiefOfStaff {
+			if len(docs) != 1 || docs[0].Actor.ID != trace.Manager {
 				t.Fatalf("decision records %+v", docs)
 			}
 		})

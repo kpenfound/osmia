@@ -52,7 +52,7 @@ func (c *runtimeControls) deliveryBrief(repo *trace.Repository, scope coreadapte
 		if err := d.Decode(new(any)); err != io.EOF {
 			return nil, errors.New("tool input must be one object")
 		}
-		if scope.Role != trace.ChiefOfStaff {
+		if scope.Role != trace.Manager {
 			return refuse("%s is only available to the chief of staff", briefToolName)
 		}
 		own := config.WorkstreamID(scope.Workstream)
@@ -146,7 +146,7 @@ func (s *Service) chiefThread(ctx context.Context, repository *trace.Repository,
 	case err != nil:
 		return trace.Thread{}, false, err
 	}
-	t, err := target.ChiefOfStaffThread(stream)
+	t, err := target.ManagerThread(stream)
 	if errors.Is(err, os.ErrNotExist) {
 		return trace.Thread{}, false, nil
 	}

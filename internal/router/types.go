@@ -127,7 +127,7 @@ const (
 	// AuthorityChief is a move or ruling of the chief of staff, which works
 	// outside the loop. The exit is a pinned move for every target but an
 	// owner gate and approval, which it never authorises.
-	AuthorityChief = trace.DecidedByChief
+	AuthorityChief = trace.DecidedByManager
 )
 
 // Authority is the authority an exit carries. Only a reviewer verdict, the

@@ -172,7 +172,7 @@ func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
 		t.Fatalf("refusal reported %d times", notices)
 	}
 
-	chief := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
 	repo := mustRepo(t, f.S, f.Project)
 	_, apiFault = f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.InShedState, Note: "Start the review."}, chief, "chief-turn-1")
 	if err := asError(apiFault); !intakefixture.Failed(err, api.Conflict) || !containsMessage(err, "stays sketched") || !containsMessage(err, "last 3 drafts were refused") {

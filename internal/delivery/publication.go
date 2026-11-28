@@ -928,7 +928,7 @@ func (p *Publisher) refuse(ctx context.Context, stream config.WorkstreamID, in P
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: p.Repository.Project(), Workstream: stream, At: p.S.Now(), Actor: foremanActor, Cause: transition}
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: PublicationSubject, From: state.Value, To: fmt.Sprintf("refused-%d", in.Approval), Reason: recorded},
-		Events:     []trace.Event{trace.Notice(id, "chief", body)}}
+		Events:     []trace.Event{trace.Notice(id, trace.ManagerKey, body)}}
 	if _, err := p.Repository.Transact(ctx, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			if result, outcomeErr := p.Outcome(stream, in.Approval); outcomeErr == nil && result != nil {

@@ -20,7 +20,7 @@ func threadlessWorkstream(t *testing.T, r *Repository, id config.WorkstreamID) {
 	}
 }
 
-func chiefAgents(t *testing.T, r *Repository, stream config.WorkstreamID) []Agent {
+func managerAgents(t *testing.T, r *Repository, stream config.WorkstreamID) []Agent {
 	t.Helper()
 	agents, err := Read[Agent](r, stream)
 	if err != nil {
@@ -28,22 +28,22 @@ func chiefAgents(t *testing.T, r *Repository, stream config.WorkstreamID) []Agen
 	}
 	var out []Agent
 	for _, a := range agents {
-		if a.ID == ChiefOfStaff {
+		if a.ID == Manager {
 			out = append(out, a)
 		}
 	}
 	return out
 }
 
-func TestCreateWorkstreamCreatesOneChiefOfStaffThread(t *testing.T) {
+func TestCreateWorkstreamCreatesOneManagerThread(t *testing.T) {
 	ctx := context.Background()
 	r, root, p := create(t)
-	th, err := r.ChiefOfStaffThread(streamID)
+	th, err := r.ManagerThread(streamID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	a := th.Identity
-	if a.ID != ChiefOfStaff || a.Role != ChiefOfStaff || a.ThreadID != ChiefOfStaff || a.Workstream != streamID || !a.At.Equal(at) || a.Actor != owner || th.Status != "idle" || len(th.Turns) != 0 {
+	if a.ID != Manager || a.Role != Manager || a.ThreadID != Manager || a.Workstream != streamID || !a.At.Equal(at) || a.Actor != owner || th.Status != "idle" || len(th.Turns) != 0 {
 		t.Fatalf("thread = %+v", th)
 	}
 	if err := r.CreateWorkstream(ctx, streamID, at.Add(time.Hour), owner); !errors.Is(err, ErrConflict) {
@@ -55,23 +55,23 @@ func TestCreateWorkstreamCreatesOneChiefOfStaffThread(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	again, err := reopened.EnsureChiefOfStaff(ctx, streamID, at.Add(2*time.Hour), Actor{Kind: "service", ID: "osmia"})
+	again, err := reopened.EnsureManager(ctx, streamID, at.Add(2*time.Hour), Actor{Kind: "service", ID: "osmia"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !equalJSON(again.Identity, a) {
 		t.Fatalf("identity changed: %+v", again.Identity)
 	}
-	if got := chiefAgents(t, reopened, streamID); len(got) != 1 {
+	if got := managerAgents(t, reopened, streamID); len(got) != 1 {
 		t.Fatalf("chief-of-staff agents = %d", len(got))
 	}
 }
 
-func TestEnsureChiefOfStaffBackfillsOnce(t *testing.T) {
+func TestEnsureManagerBackfillsOnce(t *testing.T) {
 	ctx := context.Background()
 	r, root, p := create(t)
 	threadlessWorkstream(t, r, threadlessStream)
-	if _, err := r.ChiefOfStaffThread(threadlessStream); !errors.Is(err, os.ErrNotExist) {
+	if _, err := r.ManagerThread(threadlessStream); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("lookup before ensure = %v", err)
 	}
 	service := Actor{Kind: "service", ID: "osmia"}
@@ -81,7 +81,7 @@ func TestEnsureChiefOfStaffBackfillsOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = r.EnsureChiefOfStaff(ctx, threadlessStream, at.Add(time.Duration(i)*time.Second), service)
+			_, errs[i] = r.EnsureManager(ctx, threadlessStream, at.Add(time.Duration(i)*time.Second), service)
 		}()
 	}
 	wg.Wait()
@@ -96,37 +96,37 @@ func TestEnsureChiefOfStaffBackfillsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	if _, err := reopened.EnsureChiefOfStaff(ctx, threadlessStream, at.Add(time.Hour), service); err != nil {
+	if _, err := reopened.EnsureManager(ctx, threadlessStream, at.Add(time.Hour), service); err != nil {
 		t.Fatal(err)
 	}
-	th, err := reopened.ChiefOfStaffThread(threadlessStream)
+	th, err := reopened.ManagerThread(threadlessStream)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if th.Identity.Workstream != threadlessStream || th.Identity.Actor != service {
 		t.Fatalf("thread = %+v", th.Identity)
 	}
-	if got := chiefAgents(t, reopened, threadlessStream); len(got) != 1 {
+	if got := managerAgents(t, reopened, threadlessStream); len(got) != 1 {
 		t.Fatalf("chief-of-staff agents = %d", len(got))
 	}
 }
 
-func TestEnsureChiefOfStaffRefusesAnotherIdentity(t *testing.T) {
+func TestEnsureManagerRefusesAnotherIdentity(t *testing.T) {
 	for name, change := range map[string]func(*Agent){
-		"role":   func(a *Agent) { a.ThreadID = ChiefOfStaff },
-		"thread": func(a *Agent) { a.Role = ChiefOfStaff },
+		"role":   func(a *Agent) { a.ThreadID = Manager },
+		"thread": func(a *Agent) { a.Role = Manager },
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			r, _, _ := create(t)
 			threadlessWorkstream(t, r, threadlessStream)
 			a := threadAgent()
-			a.Workstream, a.ID = threadlessStream, ChiefOfStaff
+			a.Workstream, a.ID = threadlessStream, Manager
 			change(&a)
 			if err := r.CreateThread(ctx, a); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := r.EnsureChiefOfStaff(ctx, threadlessStream, at, owner); !errors.Is(err, ErrConflict) {
+			if _, err := r.EnsureManager(ctx, threadlessStream, at, owner); !errors.Is(err, ErrConflict) {
 				t.Fatalf("ensure = %v", err)
 			}
 		})

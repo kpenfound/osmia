@@ -27,7 +27,7 @@ func policySection(title string, rules ...policyRule) string {
 
 // hasPolicy reports whether a role is given an operating policy.
 func hasPolicy(role string) bool {
-	return slices.Contains([]string{trace.ChiefOfStaff, masonRole, reviewerRole, architectRole, committeeRole}, role)
+	return slices.Contains([]string{trace.Manager, masonRole, reviewerRole, architectRole, committeeRole}, role)
 }
 
 // FactoryInstructions is the operating policy of a feature workstream's turn.
@@ -56,7 +56,7 @@ func FactoryInstructionsFor(scope coreadapter.Scope, kind kindreg.Kind) string {
 	}
 	var rules []string
 	switch scope.Role {
-	case trace.ChiefOfStaff:
+	case trace.Manager:
 		rules = append(rules, chiefPolicy(units, planned)...)
 	case masonRole:
 		rules = append(rules, masonPolicy(units)...)

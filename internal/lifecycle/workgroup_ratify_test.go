@@ -459,7 +459,7 @@ func TestDraftWorkgroupRefusesReadinessWithNothingRecordedOnAnyMember(t *testing
 	if _, ok := trace.WorkgroupOf(groups2, f.Stream2); !ok {
 		t.Fatal("member2's workgroup was retracted despite the refused join")
 	}
-	if _, err := repo1.ChiefOfStaffThread(f.Stream1); err != nil {
+	if _, err := repo1.ManagerThread(f.Stream1); err != nil {
 		t.Fatalf("member1's chief thread changed: %v", err)
 	}
 	entries, err := os.ReadDir(filepath.Join(f.S.Current().Root.String(), "workgroups"))
@@ -523,7 +523,7 @@ func TestDraftWorkgroupInterruptedBetweenMembersCompletesOnRetryWithNoSecondWork
 	if joined, err := repo2.CrossRepoWorkgroupOf(f.Stream2); err != nil || joined != g.ID {
 		t.Fatalf("member2 was not joined by the retry: joined=%q err=%v", joined, err)
 	}
-	if _, err := repo2.ChiefOfStaffThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo2.ManagerThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member2 still has its own chief-of-staff thread after joining: %v", err)
 	}
 	reopened, err := trace.OpenWorkgroupTrace(f.S.Current().Root, g.ID, resolved)
@@ -582,12 +582,12 @@ func TestCrossRepoWorkgroupSharesOneChiefOfStaffAcrossARestart(t *testing.T) {
 
 	repo1, err := f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	if _, err := repo1.ChiefOfStaffThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo1.ManagerThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member1's own repository got a chief-of-staff thread of its own: %v", err)
 	}
 	repo2, err := f.S.Repository(f.Project2)
 	fixturekit.Must(t, err)
-	if _, err := repo2.ChiefOfStaffThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo2.ManagerThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member2's own repository got a chief-of-staff thread of its own: %v", err)
 	}
 
@@ -610,12 +610,12 @@ func TestCrossRepoWorkgroupSharesOneChiefOfStaffAcrossARestart(t *testing.T) {
 	checkSharedConversation(t)
 	repo1, err = f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	if _, err := repo1.ChiefOfStaffThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo1.ManagerThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member1's own repository got a chief-of-staff thread after restart: %v", err)
 	}
 	repo2, err = f.S.Repository(f.Project2)
 	fixturekit.Must(t, err)
-	if _, err := repo2.ChiefOfStaffThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo2.ManagerThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member2's own repository got a chief-of-staff thread after restart: %v", err)
 	}
 }

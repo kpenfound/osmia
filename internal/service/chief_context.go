@@ -27,7 +27,7 @@ func chiefContext(ctx context.Context, provider bundle.Provider, repository *tra
 		closeRepository()
 		return "", fmt.Errorf("escalations of workstream %s: %w", stream, err)
 	}
-	host, err := repository.ChiefOfStaffHost(stream)
+	host, err := repository.ManagerHost(stream)
 	if err != nil {
 		closeRepository()
 		return "", fmt.Errorf("chief of staff of workstream %s: %w", stream, err)
@@ -39,7 +39,7 @@ func chiefContext(ctx context.Context, provider bundle.Provider, repository *tra
 	}
 	closeRepository()
 
-	b, err := provider.Assemble(ctx, project, bundle.Scope{Role: "chief_of_staff", Workstream: stream})
+	b, err := provider.Assemble(ctx, project, bundle.Scope{Role: trace.Manager, Workstream: stream})
 	if err != nil {
 		return "", fmt.Errorf("context of workstream %s: %w", stream, err)
 	}

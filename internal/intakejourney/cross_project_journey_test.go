@@ -171,7 +171,7 @@ func (j *crossProjectJourney) cliHandIn(t *testing.T) {
 	})
 	chief, host, _, closeChief, err := j.S.ChiefRepository(context.Background(), r, j.Origin)
 	fixturekit.Must(t, err)
-	j.Before, err = chief.Thread(host, trace.ChiefOfStaff)
+	j.Before, err = chief.Thread(host, trace.Manager)
 	closeChief()
 	fixturekit.Must(t, err)
 }
@@ -246,7 +246,7 @@ func TestCrossProjectDesignJourney(t *testing.T) {
 	}
 	displayed, err = j.C.Design(ctx, j.Origin)
 	fixturekit.Must(t, err)
-	j.Before, err = r.ChiefOfStaffThread(j.Origin)
+	j.Before, err = r.ManagerThread(j.Origin)
 	fixturekit.Must(t, err)
 	j.Design, err = r.DesignerThread(j.Origin)
 	fixturekit.Must(t, err)

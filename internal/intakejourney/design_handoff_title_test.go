@@ -165,14 +165,14 @@ func (f *handoffTitleFixture) chiefThread(t *testing.T, shared bool) trace.Threa
 	r, err := f.s.Repository(f.home)
 	fixturekit.Must(t, err)
 	if !shared {
-		th, err := r.ChiefOfStaffThread(f.origin)
+		th, err := r.ManagerThread(f.origin)
 		fixturekit.Must(t, err)
 		return th
 	}
 	target, host, _, closeTarget, err := f.s.ChiefRepository(context.Background(), r, f.origin)
 	fixturekit.Must(t, err)
 	defer closeTarget()
-	th, err := target.Thread(host, trace.ChiefOfStaff)
+	th, err := target.Thread(host, trace.Manager)
 	fixturekit.Must(t, err)
 	return th
 }
@@ -203,7 +203,7 @@ func TestDesignStartDeliversOneHandoffTitleTurnToTheThreadThatContinues(t *testi
 			r, err := f.s.Repository(f.home)
 			fixturekit.Must(t, err)
 			revision := recordDesignProjects(t, r, f.origin, intakefixture.ProductionBrief, projects)
-			before, err := r.ChiefOfStaffThread(f.origin)
+			before, err := r.ManagerThread(f.origin)
 			fixturekit.Must(t, err)
 
 			f.interrupt.Store(true)
@@ -273,7 +273,7 @@ func TestDesignStartDeliversOneHandoffTitleTurnToTheThreadThatContinues(t *testi
 				}
 				return
 			}
-			if _, err := r.Thread(f.origin, trace.ChiefOfStaff); !errors.Is(err, os.ErrNotExist) {
+			if _, err := r.Thread(f.origin, trace.Manager); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("the retired local chief remains: %v", err)
 			}
 			for _, turn := range before.Turns {
@@ -289,7 +289,7 @@ func TestDesignStartDeliversOneHandoffTitleTurnToTheThreadThatContinues(t *testi
 				if st.Status == nil || st.Status.Goal != handoffTitleGoal {
 					t.Fatalf("member %s status: %+v", member.Workstream, st)
 				}
-				if _, err := repo.Thread(member.Workstream, trace.ChiefOfStaff); !errors.Is(err, os.ErrNotExist) {
+				if _, err := repo.Thread(member.Workstream, trace.Manager); !errors.Is(err, os.ErrNotExist) {
 					t.Fatalf("member %s keeps a local chief: %v", member.Workstream, err)
 				}
 			}

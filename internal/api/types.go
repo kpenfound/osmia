@@ -429,7 +429,7 @@ const BaseDecisionUpstream = "upstream"
 // staff once the workstream's own pull request merged.
 const (
 	ArchivedByOwner = "owner"
-	ArchivedByChief = "chief_of_staff"
+	ArchivedByChief = trace.Manager
 )
 
 // ArchiveResponse reports whether a workstream is archived after the

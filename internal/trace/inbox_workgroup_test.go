@@ -59,20 +59,20 @@ func TestConsolidatedEscalationPausesOnlyItsMembersWhileAThirdContinues(t *testi
 		t.Fatal(err)
 	}
 
-	chief := chiefThread(t, r, "chief_turn")
-	chiefAt := at.Add(time.Minute)
+	manager := managerThread(t, r, "chief_turn")
+	managerAt := at.Add(time.Minute)
 
-	batch, err := r.EscalateQuestions(ctx, "chief", chief, EscalationRequest{
+	batch, err := r.EscalateQuestions(ctx, "chief", manager, EscalationRequest{
 		Questions: []string{"1", string(secondStream) + ":1"}, Rephrasing: "Where does the upload index live, and does it rebuild on start?",
 		Section: "spec#3", Conflict: "The spec says the index is derived, but doesn't say whether a restart may recompute it.",
 		Blocked: "Both workstreams' upload units.", Options: []string{"Keep the index fixed at start", "Rebuild it on every start"},
 		Recommendation: "Keep it fixed at start.",
-	}, chiefAt)
+	}, managerAt)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := r.AnswerQuestion(ctx, "chief", chief, string(thirdStream)+":1", "Fixed; see the logging guide.", []string{"kb/logging.md"}, chiefAt); err != nil {
+	if _, err := r.AnswerQuestion(ctx, "chief", manager, string(thirdStream)+":1", "Fixed; see the logging guide.", []string{"kb/logging.md"}, managerAt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -113,7 +113,7 @@ func TestConsolidatedEscalationPausesOnlyItsMembersWhileAThirdContinues(t *testi
 
 	relayedText := "The index does not rebuild on start."
 	relayAt := at.Add(3 * time.Minute)
-	relayed, err := r.RelayRuling(ctx, "chief", chief, "1", relayedText, ScopeLocal, relayAt)
+	relayed, err := r.RelayRuling(ctx, "chief", manager, "1", relayedText, ScopeLocal, relayAt)
 	if err != nil {
 		t.Fatal(err)
 	}

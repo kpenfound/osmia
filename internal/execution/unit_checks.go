@@ -436,7 +436,7 @@ func (c *checkers) Incomplete(ctx context.Context, stream config.WorkstreamID, r
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: run.Unit, At: c.s.Now(), Actor: ChecksActor, Cause: CheckDocumentID(run.Unit, run.Run)}
 	_, err = c.repository.Transact(ctx, trace.Transaction{ExpectedVersion: subject.Version,
 		Transition: trace.Transition{Header: h, Subject: ChecksSubject(run.Unit), From: subject.Value, To: to, Reason: reason},
-		Events:     []trace.Event{trace.Notice(id, "chief", "Unit "+run.Unit+" is held in checking: "+reason+".")}})
+		Events:     []trace.Event{trace.Notice(id, trace.ManagerKey, "Unit "+run.Unit+" is held in checking: "+reason+".")}})
 	if errors.Is(err, trace.ErrConflict) {
 		return nil
 	}
@@ -465,7 +465,7 @@ func (c *checkers) block(ctx context.Context, stream config.WorkstreamID, unit, 
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: unit, At: c.s.Now(), Actor: ChecksActor, Cause: ReportDocument(unit)}
 	_, err = c.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: fmt.Sprintf("blocked-%d", k), Reason: reason},
-		Events:     []trace.Event{trace.Notice(id, "chief", "The unit checks are blocked: "+reason+".")}})
+		Events:     []trace.Event{trace.Notice(id, trace.ManagerKey, "The unit checks are blocked: "+reason+".")}})
 	if errors.Is(err, trace.ErrConflict) {
 		return nil
 	}

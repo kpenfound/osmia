@@ -51,7 +51,7 @@ func TestNewProjectStartRefusedAfterStartReachesTheInboxAndTheChief(t *testing.T
 		t.Fatalf("the entry's retry: %+v", entry)
 	}
 	refusalTurns := func() []trace.QueuedTurn {
-		th, err := f.homeRepository(t).Thread(stream, trace.ChiefOfStaff)
+		th, err := f.homeRepository(t).Thread(stream, trace.Manager)
 		fixturekit.Must(t, err)
 		return slices.DeleteFunc(slices.Clone(th.Turns), func(q trace.QueuedTurn) bool {
 			return !strings.HasPrefix(q.Request.TurnID, "design-project-refused-")

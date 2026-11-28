@@ -33,7 +33,7 @@ func unitProposalPolicy(repo *trace.Repository, stream config.WorkstreamID, unit
 		m := moves[i]
 		p.Records = append(p.Records, router.Entry{Kind: "earlier move", ID: docs[i].ID, Text: fmt.Sprintf("%s moved the unit from %s to %s: %s", m.By, m.From, m.To, m.Note)})
 	}
-	_, decisions, err := ChiefDecisions(repo, stream, unit)
+	_, decisions, err := ManagerDecisions(repo, stream, unit)
 	if err != nil {
 		return p, err
 	}
@@ -56,7 +56,7 @@ func unitProposalPolicy(repo *trace.Repository, stream config.WorkstreamID, unit
 	case MoveContest(contest, unit):
 		p.Stay, p.RaisedBy = true, "chief of staff"
 		p.Why = fmt.Sprintf("the chief of staff raised the contest of unit %s itself, and by default does not move it out", unit)
-	case slices.ContainsFunc(decisions, func(d ChiefContestDecision) bool { return d.Contest == contest.ID }):
+	case slices.ContainsFunc(decisions, func(d ManagerContestDecision) bool { return d.Contest == contest.ID }):
 		p.Stay, p.RaisedBy = true, "service"
 		p.Why = fmt.Sprintf("the chief of staff already ruled on contest %s of unit %s, and by default rules a contest once", contest.ID, unit)
 	default:

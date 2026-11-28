@@ -525,7 +525,7 @@ func (c *Controls) ChangeControl(repository *trace.Repository, scope coreadapter
 		schema = `{"type":"object","properties":{"id":{"type":"string"},"revision":{"type":"integer"},"decision":{"type":"string","enum":["approve","reject"]},"pull_requests":{"type":"string","enum":["close","draft"]}},"required":["id","revision","decision"],"additionalProperties":false}`
 	}
 	return coreadapter.Tool{Name: name, Effect: coreadapter.ToolMemory, Description: "Record the owner's amend or cancel request, or the owner's decision on the one impact summary. Cancel asks whether open PRs are closed or left as drafts. Never publish or merge.", InputSchema: json.RawMessage(schema), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
-		_, owner, err := repository.OwnerTurn(trace.ChiefOfStaff, scope)
+		_, owner, err := repository.OwnerTurn(trace.Manager, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -635,7 +635,7 @@ func ChangeIdle(repo *trace.Repository, stream config.WorkstreamID) (bool, error
 		return false, err
 	}
 	for _, t := range threads {
-		if t.Identity.Role != trace.ChiefOfStaff && t.Active != "" {
+		if t.Identity.Role != trace.Manager && t.Active != "" {
 			for _, q := range t.Turns {
 				if q.Request.TurnID != t.Active {
 					continue
@@ -697,11 +697,11 @@ func ChangeRepositoryHeld(repo *trace.Repository, stream config.WorkstreamID, op
 	return true, nil
 }
 func (s *Controller) ChangeNotice(ctx context.Context, repo *trace.Repository, c WorkgroupChange) error {
-	_, err := repo.EnsureChiefOfStaff(ctx, c.Host, s.Now(), serviceActor)
+	_, err := repo.EnsureManager(ctx, c.Host, s.Now(), serviceActor)
 	if err != nil {
 		return err
 	}
-	th, err := repo.Thread(c.Host, trace.ChiefOfStaff)
+	th, err := repo.Thread(c.Host, trace.Manager)
 	if err != nil {
 		return err
 	}
@@ -713,11 +713,11 @@ func (s *Controller) ChangeNotice(ctx context.Context, repo *trace.Repository, c
 	if c.Request.Kind == "cancel" {
 		body += "\n\nAt cancel time choose whether open PRs are closed or left as drafts. Merged work is untouched. Dependents shown as cancelled stop in the same operation."
 	}
-	profile, _, err := s.RoleExecution(s.Current(), trace.ChiefOfStaff)
+	profile, _, err := s.RoleExecution(s.Current(), trace.Manager)
 	if err != nil {
 		return err
 	}
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + id, Revision: 1, Project: repo.Project(), Workstream: c.Host, At: s.Now(), Actor: amendmentActor, Cause: WorkgroupChangeDocument(c.ID)}, AgentID: trace.ChiefOfStaff, ThreadID: th.Identity.ThreadID, TurnID: id, Profile: profile, SystemPrompt: "The impact summary is already visible as one action in this conversation. Acknowledge it briefly; do not repeat the table or approval question.", Prompt: body})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + id, Revision: 1, Project: repo.Project(), Workstream: c.Host, At: s.Now(), Actor: amendmentActor, Cause: WorkgroupChangeDocument(c.ID)}, AgentID: trace.Manager, ThreadID: th.Identity.ThreadID, TurnID: id, Profile: profile, SystemPrompt: "The impact summary is already visible as one action in this conversation. Acknowledge it briefly; do not repeat the table or approval question.", Prompt: body})
 	return err
 }
 

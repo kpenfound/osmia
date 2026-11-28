@@ -74,7 +74,7 @@ func TestNotifyReadsTheServiceInbox(t *testing.T) {
 	}
 	_, err := repository.Ask(ctx, fixturekit.DemoAgent, claim(fixturekit.DemoAgent, fixturekit.DemoThread, "build"), "Where does state live?", at)
 	fixturekit.Must(t, err)
-	_, err = repository.EscalateQuestions(ctx, trace.ChiefOfStaff, claim(trace.ChiefOfStaff, trace.ChiefOfStaff, "events"),
+	_, err = repository.EscalateQuestions(ctx, trace.Manager, claim(trace.Manager, trace.Manager, "events"),
 		trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "Where should state live?", Blocked: "The unit.", Options: []string{"Files"}, Recommendation: "In files."}, at)
 	fixturekit.Must(t, err)
 	n.pass(ctx)

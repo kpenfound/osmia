@@ -16,7 +16,7 @@ import (
 )
 
 func memberSchema(scope coreadapter.Scope, properties string) json.RawMessage {
-	if scope.Role == trace.ChiefOfStaff {
+	if scope.Role == trace.Manager {
 		properties += `,"workstream":{"type":"string"}`
 	}
 	return json.RawMessage(`{"type":"object","properties":{` + properties + `},"additionalProperties":false}`)
@@ -24,10 +24,10 @@ func memberSchema(scope coreadapter.Scope, properties string) json.RawMessage {
 
 func chiefMember(r *trace.Repository, scope coreadapter.Scope, named config.WorkstreamID) (*trace.Repository, config.WorkstreamID, string, error) {
 	own := config.WorkstreamID(scope.Workstream)
-	if named != "" && named != own && scope.Role != trace.ChiefOfStaff {
+	if named != "" && named != own && scope.Role != trace.Manager {
 		return nil, "", "only the chief of staff names another workstream; omit workstream to read your own", nil
 	}
-	return r.ChiefMember(own, named)
+	return r.ManagerMember(own, named)
 }
 
 func factoryContext(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
@@ -35,7 +35,7 @@ func factoryContext(r *trace.Repository, scope coreadapter.Scope) coreadapter.To
 		"Call it with no path to list every document with its latest revision. A folder path such as discoveries lists the documents under it, and a document path returns its text. " +
 		"revision reads an earlier revision of one document, which is how you compare evidence across rounds. start (a one-based line) and lines (default 200, maximum 1000) select part of the text. A long excerpt returns next_offset; pass it as offset with the same path, revision, start and lines to read on. " +
 		"An unknown path or revision returns an error that says how to correct the call."
-	if scope.Role == trace.ChiefOfStaff {
+	if scope.Role == trace.Manager {
 		description += " workstream: a member workstream ID of your workgroup whose records to read. Omit it for this conversation's own workstream."
 	}
 	return coreadapter.Tool{Name: factoryContextTool, Effect: coreadapter.ToolRead,

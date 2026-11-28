@@ -25,7 +25,7 @@ func TestConversationQueueSkipsUnreadableWorkstream(t *testing.T) {
 	profile, err := cfg.NamedProfile("default")
 	fixturekit.Must(t, err)
 	ctx := context.Background()
-	q, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_scan", Project: repo.Project(), Workstream: fixturekit.Stream, At: opts.Reconciliation.Now(), Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "message_scan", Profile: profile, Prompt: "Hello"})
+	q, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_scan", Project: repo.Project(), Workstream: fixturekit.Stream, At: opts.Reconciliation.Now(), Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "message_scan", Profile: profile, Prompt: "Hello"})
 	fixturekit.Must(t, err)
 	p := &conversationPath{s: &Service{options: opts}, repository: repo}
 	fixturekit.Must(t, p.queue(ctx, repo))
@@ -43,12 +43,12 @@ func TestConversationQueueSkipsUnreadableWorkstream(t *testing.T) {
 
 func TestConversationRecoveryOrdersPendingHooksByThreadSequence(t *testing.T) {
 	t.Parallel()
-	th := trace.Thread{Identity: trace.Agent{Header: trace.Header{ID: trace.ChiefOfStaff}}, Turns: []trace.QueuedTurn{
+	th := trace.Thread{Identity: trace.Agent{Header: trace.Header{ID: trace.Manager}}, Turns: []trace.QueuedTurn{
 		{Request: trace.TurnRequest{TurnID: "earlier"}, CompletedAt: fixturekit.DemoStart},
 		{Request: trace.TurnRequest{TurnID: "later"}},
 	}}
 	operation := func(turn string) trace.OperationRecord {
-		op, err := thread.TurnOperation(fixturekit.Project, turn, thread.TurnInput{Workstream: fixturekit.Stream, Agent: trace.ChiefOfStaff, Turn: turn})
+		op, err := thread.TurnOperation(fixturekit.Project, turn, thread.TurnInput{Workstream: fixturekit.Stream, Agent: trace.Manager, Turn: turn})
 		fixturekit.Must(t, err)
 		return trace.OperationRecord{Operation: op}
 	}
@@ -105,7 +105,7 @@ func TestConversationScanAfterDrainPublishesNothing(t *testing.T) {
 	profile, err := cfg.NamedProfile("default")
 	fixturekit.Must(t, err)
 	ctx := context.Background()
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_drain", Project: repo.Project(), Workstream: fixturekit.Stream, At: opts.Reconciliation.Now(), Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "message_drain", Profile: profile, Prompt: "Hello"})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_drain", Project: repo.Project(), Workstream: fixturekit.Stream, At: opts.Reconciliation.Now(), Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "message_drain", Profile: profile, Prompt: "Hello"})
 	fixturekit.Must(t, err)
 	p := &conversationPath{s: &Service{options: opts}, repository: repo, drain: make(chan struct{})}
 	p.Quiesce()

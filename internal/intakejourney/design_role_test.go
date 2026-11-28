@@ -61,7 +61,7 @@ func TestADesignTurnRunsOnTheDesignerRoleAndItsOwnThreadWithOnlyTheDesignTools(t
 	fixturekit.Must(t, err)
 	stream := opened.Design.Workstream
 	repository := s.Sole().Repository
-	if chief, err := repository.ChiefOfStaffThread(stream); err != nil || len(chief.Turns) != 0 {
+	if chief, err := repository.ManagerThread(stream); err != nil || len(chief.Turns) != 0 {
 		t.Fatalf("a new design session's chief-of-staff thread holds turns: %+v %v", chief.Turns, err)
 	}
 	if th, err := repository.DesignerThread(stream); err != nil || th.Identity.Role != trace.Designer || th.Identity.ThreadID != trace.Designer {
@@ -109,7 +109,7 @@ func TestADesignTurnRunsOnTheDesignerRoleAndItsOwnThreadWithOnlyTheDesignTools(t
 	if len(th.Turns) != 1 || th.Turns[0].Request.AgentID != trace.Designer || th.Turns[0].Request.Profile.Name != "design" || th.Turns[0].Request.Profile.Model != "design-model" {
 		t.Fatalf("design thread turns: %+v", th.Turns)
 	}
-	if chief, err := repository.ChiefOfStaffThread(stream); err != nil || len(chief.Turns) != 0 {
+	if chief, err := repository.ManagerThread(stream); err != nil || len(chief.Turns) != 0 {
 		t.Fatalf("a design turn reached the chief-of-staff thread: %+v %v", chief.Turns, err)
 	}
 }
@@ -184,7 +184,7 @@ func TestADesignSessionOpenedBeforeTheDesignerRoleKeepsItsMessagesAndMovesItsNex
 	}
 	design, err := repository.DesignerThread(stream)
 	fixturekit.Must(t, err)
-	chief, err := repository.ChiefOfStaffThread(stream)
+	chief, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	if len(design.Turns) != 1 || len(chief.Turns) != 1 {
 		t.Fatalf("the new turn is on thread %d turns, the chief's has %d, want 1 and 1", len(design.Turns), len(chief.Turns))
@@ -218,13 +218,13 @@ func TestStartingAfterDesignGivesTheChiefANewThreadAndCarriesTheKindThrough(t *t
 	if kind, err := repository.Kind(stream); err != nil || kind != "hill-climb" {
 		t.Fatalf("the kind Start handed in: %q %v", kind, err)
 	}
-	chief, err := repository.ChiefOfStaffThread(stream)
+	chief, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
-	if chief.Identity.Role != trace.ChiefOfStaff {
+	if chief.Identity.Role != trace.Manager {
 		t.Fatalf("chief thread: %+v", chief.Identity)
 	}
 	for _, q := range chief.Turns {
-		if q.Request.AgentID != trace.ChiefOfStaff || q.Request.Prompt == "Draft it" || q.Request.SystemPrompt == intake.DesignRolePrompt {
+		if q.Request.AgentID != trace.Manager || q.Request.Prompt == "Draft it" || q.Request.SystemPrompt == intake.DesignRolePrompt {
 			t.Fatalf("the design conversation reached the chief's thread: %+v", q.Request)
 		}
 	}
@@ -259,7 +259,7 @@ func TestADesignTurnWithoutADesignerRoleRunsOnTheDefaultProfileWhicheverManagerK
 			if len(th.Turns) != 1 || th.Turns[0].Request.Profile.Name != "default" || th.Turns[0].Request.Profile.Model == "chief-model" {
 				t.Fatalf("the design turn's profile: %+v", th.Turns)
 			}
-			if manager, err := s.Sole().Repository.ChiefOfStaffThread(stream); err != nil || len(manager.Turns) != 0 {
+			if manager, err := s.Sole().Repository.ManagerThread(stream); err != nil || len(manager.Turns) != 0 {
 				t.Fatalf("the design turn reached the manager's thread: %+v %v", manager.Turns, err)
 			}
 		})
@@ -303,7 +303,7 @@ func TestStartingFromASessionOpenedBeforeTheDesignerRoleNeverResumesItsBackendSe
 		return err == nil
 	})
 	s.Until(t, "the chief of staff answered after Start", func() bool {
-		chief, err := repository.ChiefOfStaffThread(stream)
+		chief, err := repository.ManagerThread(stream)
 		fixturekit.Must(t, err)
 		return slices.ContainsFunc(chief.Turns, func(q trace.QueuedTurn) bool {
 			return q.Request.Prompt == "What is next?" && q.Response != nil && !q.CompletedAt.IsZero()
@@ -314,7 +314,7 @@ func TestStartingFromASessionOpenedBeforeTheDesignerRoleNeverResumesItsBackendSe
 	if len(resumed) > 0 || len(replayed) > 0 {
 		t.Fatalf("a chief turn after Start resumed the design session's backend session %v or replayed its conversation %v", resumed, replayed)
 	}
-	chief, err := repository.ChiefOfStaffThread(stream)
+	chief, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	if chief.Epoch == 0 {
 		t.Fatalf("the chief's thread keeps the design conversation in its current run: %+v", chief.Identity)

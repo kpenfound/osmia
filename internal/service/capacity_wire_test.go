@@ -19,14 +19,14 @@ func TestCapacityToolAndStatusSerializeUnboundedPools(t *testing.T) {
 	ctx := context.Background()
 	repo, err := s.repository(fixturekit.Project)
 	fixturekit.Must(t, err)
-	_, err = repo.EnsureChiefOfStaff(ctx, fixturekit.Stream, fixturekit.DemoStart, ownerActor)
+	_, err = repo.EnsureManager(ctx, fixturekit.Stream, fixturekit.DemoStart, ownerActor)
 	fixturekit.Must(t, err)
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_capacity", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "capacity", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Read the capacity"}
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_capacity", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "capacity", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Read the capacity"}
 	_, err = repo.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
-	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "claim", "/owned/capacity", fixturekit.DemoStart)
+	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.Manager, "claim", "/owned/capacity", fixturekit.DemoStart)
 	fixturekit.Must(t, err)
-	scope := coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(fixturekit.Stream), Thread: trace.ChiefOfStaff, Turn: "capacity", Role: trace.ChiefOfStaff}
+	scope := coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(fixturekit.Stream), Thread: trace.Manager, Turn: "capacity", Role: trace.Manager}
 	controls := &runtimeControls{}
 	controls.service.Store(s)
 

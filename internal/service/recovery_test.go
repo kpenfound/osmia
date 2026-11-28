@@ -27,14 +27,14 @@ func TestStartupRecoversClaimedAndUnclaimedSessionsForEveryRole(t *testing.T) {
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, ownerActor))
 	roles := []struct{ agent, role string }{
-		{trace.ChiefOfStaff, trace.ChiefOfStaff}, {"recovery_mason", masonRole}, {"recovery_reviewer", reviewerRole},
+		{trace.Manager, trace.Manager}, {"recovery_mason", masonRole}, {"recovery_reviewer", reviewerRole},
 		{"recovery_architect", architectRole}, {"recovery_committee", committeeRole},
 		{driftMasonAgent, masonRole}, {driftReviewerAgent, reviewerRole}, {"undispatched_reviewer", reviewerRole},
 		{"final_committee", committeeRole},
 	}
 	for i, item := range roles {
 		agent, role := item.agent, item.role
-		if role != trace.ChiefOfStaff {
+		if role != trace.Manager {
 			id := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, Revision: 1, ID: agent, Project: cfg.Project.ID, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "workstream_created"}, Role: role, ThreadID: agent}
 			fixturekit.Must(t, repo.CreateThread(ctx, id))
 		}
@@ -57,7 +57,7 @@ func TestStartupRecoversClaimedAndUnclaimedSessionsForEveryRole(t *testing.T) {
 	repo, err = trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	defer repo.Close()
-	fixturekit.Must(t, repo.AbandonTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "turn_"+trace.ChiefOfStaff, fixturekit.DemoStart.Add(1)))
+	fixturekit.Must(t, repo.AbandonTurn(ctx, fixturekit.Stream, trace.Manager, "turn_"+trace.Manager, fixturekit.DemoStart.Add(1)))
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{fixturekit.Stream}}})
 	fixturekit.Must(t, err)
 	defer store.Close()
@@ -83,7 +83,7 @@ func TestStartupRecoversClaimedAndUnclaimedSessionsForEveryRole(t *testing.T) {
 		if th.Turns[0].Status() != "interrupted" || th.Turns[0].Response == nil || th.Turns[0].Response.Failure == "" {
 			t.Fatalf("%s interruption: %+v", role, th)
 		}
-		if role == trace.ChiefOfStaff {
+		if role == trace.Manager {
 			if len(th.Turns) != 2 || !strings.Contains(th.Turns[1].Request.Prompt, "service stopped") || th.Turns[1].Request.Cause != th.Turns[0].Response.ID {
 				t.Fatalf("chief continuation: %+v", th)
 			}
@@ -92,7 +92,7 @@ func TestStartupRecoversClaimedAndUnclaimedSessionsForEveryRole(t *testing.T) {
 		}
 	}
 	fixturekit.Must(t, s.recoverSessions(ctx, cfg, repo))
-	chief, err := repo.ChiefOfStaffThread(fixturekit.Stream)
+	chief, err := repo.ManagerThread(fixturekit.Stream)
 	fixturekit.Must(t, err)
 	if len(chief.Turns) != 2 {
 		t.Fatalf("repeated startup queued another chief turn: %+v", chief.Turns)
@@ -109,10 +109,10 @@ func TestServiceStartRunsChiefInterruptionTurn(t *testing.T) {
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, ownerActor))
 	const turn = "owner_message"
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, Revision: 1, ID: "request_owner_message", Project: cfg.Project.ID, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "codex", Model: "test"}, Prompt: "Remember this request"})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, Revision: 1, ID: "request_owner_message", Project: cfg.Project.ID, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "codex", Model: "test"}, Prompt: "Remember this request"})
 	fixturekit.Must(t, err)
-	dir := filepath.Join(cfg.Root.String(), "threads", string(cfg.Project.ID), string(fixturekit.Stream), trace.ChiefOfStaff, turn)
-	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "old_claim", dir, fixturekit.DemoStart)
+	dir := filepath.Join(cfg.Root.String(), "threads", string(cfg.Project.ID), string(fixturekit.Stream), trace.Manager, turn)
+	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.Manager, "old_claim", dir, fixturekit.DemoStart)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.Close())
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart.Add(time.Minute)}
@@ -132,7 +132,7 @@ func TestServiceStartRunsChiefInterruptionTurn(t *testing.T) {
 	defer s.Close()
 	select {
 	case call := <-calls:
-		if call.Scope.Role != trace.ChiefOfStaff || !strings.Contains(call.Prompt, "service stopped") || !strings.Contains(call.Prompt, "Remember this request") {
+		if call.Scope.Role != trace.Manager || !strings.Contains(call.Prompt, "service stopped") || !strings.Contains(call.Prompt, "Remember this request") {
 			t.Fatalf("chief recovery call: %+v", call)
 		}
 	case <-time.After(fixturekit.DemoTimeout):

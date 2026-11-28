@@ -42,7 +42,7 @@ func TestAChiefMoveReturnsAReopenedWorkstreamToDelivered(t *testing.T) {
 		t.Fatalf("the chief's move: %s", out)
 	}
 	moved := lastOn(t, p.Repository, p.Stream, trace.FeatureSubject)
-	if moved.To != intake.DeliveredState || moved.DecidedBy != trace.DecidedByChief || moved.Judgment != "" || moved.Departed() {
+	if moved.To != intake.DeliveredState || moved.DecidedBy != trace.DecidedByManager || moved.Judgment != "" || moved.Departed() {
 		t.Fatalf("the transition %+v", moved)
 	}
 	if n := len(jev.TransitionRequests()); n != 0 {

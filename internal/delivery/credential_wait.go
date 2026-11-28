@@ -45,7 +45,7 @@ func (a *FinalReviewer) missingCredential(ctx context.Context, stream config.Wor
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: a.S.Now(), Actor: FinalReviewActor, Cause: report.Operation}
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: "noticed", Reason: "the service holds no GitHub credential"},
-		Events:     []trace.Event{trace.Notice(id, "chief", body)}}
+		Events:     []trace.Event{trace.Notice(id, trace.ManagerKey, body)}}
 	if _, terr := a.Repository.Transact(ctx, tx); terr != nil && !errors.Is(terr, trace.ErrConflict) {
 		return errors.Join(err, terr)
 	}

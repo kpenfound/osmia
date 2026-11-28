@@ -311,7 +311,7 @@ func (m *masons) Classify(ctx context.Context, stream config.WorkstreamID, unit 
 			reason += fmt.Sprintf("; clean-turn bound exhausted (%d/%d), unit contested", attempts, m.cfg.Mason.MaxCleanTurns)
 		}
 		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.Now(), Actor: masonActor, Cause: last.Response.ID}
-		_, err = m.repository.Transact(ctx, trace.Transaction{ExpectedVersion: 0, Transition: trace.Transition{Header: h, Subject: subject, From: "", To: "recorded", Reason: reason}, Events: []trace.Event{trace.Notice(id, "chief", reason)}})
+		_, err = m.repository.Transact(ctx, trace.Transaction{ExpectedVersion: 0, Transition: trace.Transition{Header: h, Subject: subject, From: "", To: "recorded", Reason: reason}, Events: []trace.Event{trace.Notice(id, trace.ManagerKey, reason)}})
 		if err != nil && !errors.Is(err, trace.ErrConflict) {
 			return false, false, err
 		}
@@ -830,7 +830,7 @@ func (m *masons) block(ctx context.Context, stream config.WorkstreamID, unit, ca
 	id := fmt.Sprintf("%s-%d", subject, k)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.Now(), Actor: masonActor, Cause: cause}
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: fmt.Sprintf("blocked-%d", k), Reason: reason},
-		Events: []trace.Event{trace.Notice(id, "chief", "The mason controller is blocked: "+reason+". It tries again on every pass.")}}
+		Events: []trace.Event{trace.Notice(id, trace.ManagerKey, "The mason controller is blocked: "+reason+". It tries again on every pass.")}}
 	if _, err := m.repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
 		return err
 	}

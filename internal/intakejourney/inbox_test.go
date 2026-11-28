@@ -447,7 +447,7 @@ func TestInboxLeavesOutAbandonedWorkstreams(t *testing.T) {
 		fixturekit.Must(t, repo.CreateThread(ctx, identity))
 		_, err := repo.Ask(ctx, fixturekit.DemoAgent, fixturekit.ClaimTurn(t, repo, home, ws, fixturekit.DemoAgent, fixturekit.DemoThread, "build", clock.Now()), "Where does state live?", clock.Now())
 		fixturekit.Must(t, err)
-		_, err = repo.EscalateQuestions(ctx, trace.ChiefOfStaff, fixturekit.ClaimTurn(t, repo, home, ws, trace.ChiefOfStaff, trace.ChiefOfStaff, "events", clock.Now()),
+		_, err = repo.EscalateQuestions(ctx, trace.Manager, fixturekit.ClaimTurn(t, repo, home, ws, trace.Manager, trace.Manager, "events", clock.Now()),
 			trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "Where should state live?", Blocked: "The unit.", Recommendation: "In files."}, clock.Now())
 		fixturekit.Must(t, err)
 	}
@@ -535,7 +535,7 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 	fixturekit.Must(t, repository.CreateThread(ctx, trace.Agent{Header: header(escalating, "osmia.trace.agent", fixturekit.DemoAgent, at, intake.OwnerActor), Role: fixturekit.DemoRole, ThreadID: fixturekit.DemoThread}))
 	_, err := repository.Ask(ctx, fixturekit.DemoAgent, claim(escalating, fixturekit.DemoAgent, fixturekit.DemoThread, "build"), "Where does state live?", tick(1))
 	fixturekit.Must(t, err)
-	_, err = repository.EscalateQuestions(ctx, trace.ChiefOfStaff, claim(escalating, trace.ChiefOfStaff, trace.ChiefOfStaff, "events"),
+	_, err = repository.EscalateQuestions(ctx, trace.Manager, claim(escalating, trace.Manager, trace.Manager, "events"),
 		trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "Where should state live?", Blocked: "The unit.", Options: []string{"Files", "A database"}, Recommendation: "In files."}, tick(1))
 	fixturekit.Must(t, err)
 

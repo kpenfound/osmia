@@ -272,7 +272,7 @@ func TestFailedChangeSettlesItsRequesterAndTellsTheChief(t *testing.T) {
 	groups, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.S.Now(), intake.ServiceActor, "fixture")
 	fixturekit.Must(t, err)
 	g, _ := trace.WorkgroupOf(groups, stream)
-	_, err = repo.EnsureChiefOfStaff(ctx, stream, f.S.Now(), intake.ServiceActor)
+	_, err = repo.EnsureManager(ctx, stream, f.S.Now(), intake.ServiceActor)
 	fixturekit.Must(t, err)
 	st, err := repo.Workflow(stream, trace.UnitSubject("resume"))
 	fixturekit.Must(t, err)

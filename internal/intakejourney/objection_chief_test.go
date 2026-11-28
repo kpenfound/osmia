@@ -89,7 +89,7 @@ func TestChiefOfStaffDecidesObjectionsBeforeTheOwnerSeesThem(t *testing.T) {
 	for _, e := range packet.Dissent {
 		byID[e.ID] = e
 	}
-	if e := byID[veto]; e.Blocking || e.Disposition != shed.Dismissed || e.By != shed.ChiefOfStaff || e.Note != dismissal || e.Escalated {
+	if e := byID[veto]; e.Blocking || e.Disposition != shed.Dismissed || e.By != trace.Manager || e.Note != dismissal || e.Escalated {
 		t.Fatalf("the dismissed veto in the packet %+v", e)
 	}
 	if e := byID[advice]; e.Blocking || e.Disposition != "" || e.By != "" || !e.Escalated || e.Escalation != escalation {
@@ -101,8 +101,8 @@ func TestChiefOfStaffDecidesObjectionsBeforeTheOwnerSeesThem(t *testing.T) {
 	if entries := f.InboxEntries(t, stream, api.InboxRatification); len(entries) != 1 || !slices.Equal(entries[0].Options, []string{"ratify"}) || entries[0].Recommendation != ratifiable {
 		t.Fatalf("inbox entries once every objection is decided %+v", entries)
 	}
-	docs := f.Documents(t, stream, shed.ChiefDocumentID(1))
-	if len(docs) != 2 || docs[1].Path != shed.ChiefPath(1) || docs[1].Actor != intake.ChiefActor {
+	docs := f.Documents(t, stream, shed.ManagerDocumentID(1))
+	if len(docs) != 2 || docs[1].Path != shed.ManagerPath(1) || docs[1].Actor != intake.ChiefActor {
 		t.Fatalf("the chief of staff's decision documents %+v", docs)
 	}
 	actions, err := service.ChiefActions(f.Repository(), stream)
@@ -178,9 +178,9 @@ func TestAConfidentObjectionPickBindsTheChiefsDecision(t *testing.T) {
 	if out := intakefixture.Handle(t, again, `{"objection":"`+veto+`","decision":"dismiss","note":"`+dismissal+`"}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("dismissing as picked: %s", out)
 	}
-	rounds, err := shed.AllChiefDecisions(f.Repository(), stream)
+	rounds, err := shed.AllManagerDecisions(f.Repository(), stream)
 	fixturekit.Must(t, err)
-	var recorded shed.ChiefDecision
+	var recorded shed.ManagerDecision
 	for _, r := range rounds {
 		for _, d := range r.Decisions {
 			if d.Objection == veto {
@@ -289,13 +289,13 @@ func TestAnObjectionDecisionIsEnteredAsTheChiefMadeIt(t *testing.T) {
 		t.Fatalf("dismissing: %s", out)
 	}
 	moved := f.ObjectionTransition(t, stream, veto)
-	if moved.To != "dismissed" || moved.DecidedBy != trace.DecidedByChief || moved.Departed() || moved.Judgment != "" {
+	if moved.To != "dismissed" || moved.DecidedBy != trace.DecidedByManager || moved.Departed() || moved.Judgment != "" {
 		t.Fatalf("the dismissal %+v", moved)
 	}
 	if out := intakefixture.Handle(t, tool, `{"objection":"`+advice+`","decision":"escalate","note":"The plan builds uploads before the index."}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("escalating: %s", out)
 	}
-	if moved := f.ObjectionTransition(t, stream, advice); moved.To != "escalated" || moved.DecidedBy != trace.DecidedByChief {
+	if moved := f.ObjectionTransition(t, stream, advice); moved.To != "escalated" || moved.DecidedBy != trace.DecidedByManager {
 		t.Fatalf("the escalation %+v", moved)
 	}
 	if n := judged.Load(); n != 0 {

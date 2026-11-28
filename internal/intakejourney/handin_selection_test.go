@@ -62,7 +62,7 @@ func handInProduction(t *testing.T, f *journey.ProductionDesignFixture, req api.
 	fixturekit.Must(t, err)
 	f.Handed, err = trace.Get[trace.Document](repo, f.Origin, intake.HandedDocument, 1)
 	fixturekit.Must(t, err)
-	f.Before, err = repo.ChiefOfStaffThread(f.Origin)
+	f.Before, err = repo.ManagerThread(f.Origin)
 	fixturekit.Must(t, err)
 	return req
 }
@@ -307,7 +307,7 @@ func TestHandInRecordedSingleSelectionKeepsOrdinaryPacket(t *testing.T) {
 				}
 				chief, host, _, closeChief, err := f.S.ChiefRepository(context.Background(), repo, f.Stream1)
 				fixturekit.Must(t, err)
-				thread, err := chief.Thread(host, trace.ChiefOfStaff)
+				thread, err := chief.Thread(host, trace.Manager)
 				closeChief()
 				fixturekit.Must(t, err)
 				if !intakefixture.EqualJSONTest(thread.Identity, f.Before.Identity) {

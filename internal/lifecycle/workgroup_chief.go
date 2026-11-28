@@ -45,7 +45,7 @@ func (s *Controller) chiefRepository(ctx context.Context, repository *trace.Repo
 		if pending != "" {
 			return nil, "", "", noop, fmt.Errorf("%w: member %s transfer to %s", errWorkgroupJoining, stream, pending)
 		}
-		host, err = repository.ChiefOfStaffHost(stream)
+		host, err = repository.ManagerHost(stream)
 		return repository, host, host, noop, err
 	}
 	var g trace.Workgroup
@@ -78,7 +78,7 @@ func (s *Controller) chiefRepository(ctx context.Context, repository *trace.Repo
 		break
 	}
 	wt.Observe(s.ObserveSharedConversation)
-	host, err = wt.ChiefOfStaffHost(stream)
+	host, err = wt.ManagerHost(stream)
 	if err != nil {
 		wt.Close()
 		return nil, "", "", noop, err

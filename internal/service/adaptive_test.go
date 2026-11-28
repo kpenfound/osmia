@@ -41,7 +41,7 @@ func TestChiefDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
 				if api != nil {
 					t.Fatal(api.Message)
 				}
-				if out.Decision.Actor != trace.ChiefOfStaff {
+				if out.Decision.Actor != trace.Manager {
 					t.Fatalf("wrong actor: %+v", out.Decision)
 				}
 				f.awaitAmendment(t, stream, amendmentRuled)
@@ -72,7 +72,7 @@ func TestChiefDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
 func TestDiscoveryBlocksCompletionUntilAssignedWorkLands(t *testing.T) {
 	t.Parallel()
 	c := newContestFixture(t, "discovered-work")
-	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
+	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.Manager, Thread: trace.Manager, Turn: "events_1"}
 	tool := recordDiscovery(c.repo, scope, c.f.s.now)
 	raw, err := tool.Handle(context.Background(), json.RawMessage(`{"key":"repair-fake","description":"Update the dependent fake for the new protocol","criterion":"spec#1"}`))
 	fixturekit.Must(t, err)
@@ -207,7 +207,7 @@ func TestAssignmentContextAndDependenciesFollowCurrentPlan(t *testing.T) {
 }
 
 func factoryContextScope(c *contestFixture) coreadapter.Scope {
-	return coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
+	return coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.Manager, Thread: trace.Manager, Turn: "events_1"}
 }
 
 func currentSpecDocument(t *testing.T, c *contestFixture) trace.Document {
@@ -313,7 +313,7 @@ func TestFactoryContextListsFolders(t *testing.T) {
 		recorded = append(recorded, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: c.repo.Project(), Workstream: c.stream, At: c.f.clock.Now(), Actor: chiefActor, Cause: "fixture"}, Path: "discoveries/" + id + ".json", Content: "{}"})
 	}
 	fixturekit.Must(t, c.repo.RecordDocuments(context.Background(), recorded))
-	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
+	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.Manager, Thread: trace.Manager, Turn: "events_1"}
 	tool := factoryContext(c.repo, scope)
 	for _, path := range []string{"discoveries", "discoveries/"} {
 		input, _ := json.Marshal(map[string]any{"path": path})
@@ -344,7 +344,7 @@ func TestFactoryContextReadsCompleteCheckOutput(t *testing.T) {
 	path := "units/resume/checks-99-output.txt"
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "unit-resume-checks-99-output", Revision: 1, Project: c.repo.Project(), Workstream: c.stream, At: c.f.clock.Now(), Actor: execution.ChecksActor, Cause: "fixture"}, Path: path, Content: captured}
 	fixturekit.Must(t, c.repo.RecordDocuments(context.Background(), []trace.Document{doc}))
-	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
+	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.Manager, Thread: trace.Manager, Turn: "events_1"}
 	tool := factoryContext(c.repo, scope)
 	var recovered strings.Builder
 	offset := 0
@@ -374,7 +374,7 @@ func TestFactoryContextReadsCompleteCheckOutput(t *testing.T) {
 func TestChiefInspectsMasonCandidateAndCommissionsWork(t *testing.T) {
 	t.Parallel()
 	c := newContestFixture(t, "chief-engineering-tools")
-	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
+	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.Manager, Thread: trace.Manager, Turn: "events_1"}
 	raw, err := inspectCode(c.f.s.about(c.repo), c.repo, scope, c.f.clock.Now).Handle(context.Background(), json.RawMessage(`{"unit":"resume","path":"`+fixturekit.MasonWrote+`"}`))
 	fixturekit.Must(t, err)
 	var evidence struct {
@@ -398,7 +398,7 @@ func TestChiefInspectsMasonCandidateAndCommissionsWork(t *testing.T) {
 	if captured.Commit == evidence.Commit || captured.Content != "captured after the report\n" {
 		t.Fatalf("captured inspection reused stale report: %s", latest)
 	}
-	tools, err := questions.Tools(c.repo, trace.ChiefOfStaff, scope, c.f.clock.Now)
+	tools, err := questions.Tools(c.repo, trace.Manager, scope, c.f.clock.Now)
 	fixturekit.Must(t, err)
 	for _, tool := range tools {
 		if tool.Name != questions.RouteAmendmentTool {

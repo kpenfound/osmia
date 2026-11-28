@@ -21,7 +21,7 @@ func (f *pageFixture) sendAndAnswer(t *testing.T, p *page, ws config.WorkstreamI
 	list, err := f.c.Conversation(ctx, ws)
 	must(t, err)
 	turn := list.Entries[len(list.Entries)-1].Turn
-	_, err = service.InspectForTest(f.s).SoleRepository().ClaimTurn(ctx, ws, trace.ChiefOfStaff, "token_"+turn, t.TempDir(), time.Now().UTC())
+	_, err = service.InspectForTest(f.s).SoleRepository().ClaimTurn(ctx, ws, trace.Manager, "token_"+turn, t.TempDir(), time.Now().UTC())
 	must(t, err)
 	f.answerChief(t, ws, turn, reply)
 }

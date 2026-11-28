@@ -892,7 +892,7 @@ func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(c
 }
 
 func (s *Service) holds(project config.ProjectID, repository *trace.Repository, c scheduler.Candidate) (bool, error) {
-	if !trace.ChiefLike(c.Thread.Identity.Role) {
+	if !trace.ManagerLike(c.Thread.Identity.Role) {
 		if held, err := changeHeld(repository, c.Workstream); err != nil || held {
 			return true, err
 		}
@@ -912,7 +912,7 @@ func (s *Service) holds(project config.ProjectID, repository *trace.Repository, 
 			return held, err
 		}
 	}
-	if !trace.ChiefLike(c.Thread.Identity.Role) {
+	if !trace.ManagerLike(c.Thread.Identity.Role) {
 		if waiting, err := baseWaiting(repository, c.Workstream); err != nil || waiting {
 			return waiting, err
 		}
@@ -938,7 +938,7 @@ func (s *Service) priorities() []runtime.Priority {
 func (s *Service) chiefEventsProfile(cfg *config.Config) func() (coreadapter.Profile, error) {
 	return func() (coreadapter.Profile, error) {
 		st, _ := s.effective()
-		if name := cfg.Roles[config.ManagerRole].EventsProfile; name != "" && st.Profiles[trace.ChiefOfStaff] == "" {
+		if name := cfg.Roles[config.ManagerRole].EventsProfile; name != "" && st.Profiles[trace.Manager] == "" {
 			return cfg.NamedProfile(name)
 		}
 		_, profile, err := s.chiefOverride(cfg)
@@ -948,7 +948,7 @@ func (s *Service) chiefEventsProfile(cfg *config.Config) func() (coreadapter.Pro
 
 func (s *Service) chiefOverride(cfg *config.Config) (string, coreadapter.Profile, error) {
 	st, _ := s.effective()
-	name := st.Profiles[trace.ChiefOfStaff]
+	name := st.Profiles[trace.Manager]
 	if name == "" {
 		name = cfg.Roles[config.ManagerRole].Profile
 	}
@@ -996,7 +996,7 @@ func EnsureChiefsOfStaff(ctx context.Context, repository *trace.Repository, at t
 		} else if pending != "" {
 			continue
 		}
-		if _, err := repository.EnsureChiefOfStaff(ctx, stream, at, serviceActor); err != nil {
+		if _, err := repository.EnsureManager(ctx, stream, at, serviceActor); err != nil {
 			return fmt.Errorf("workstream %s chief-of-staff thread: %w", stream, err)
 		}
 	}
@@ -1296,7 +1296,7 @@ func operationClass(op coreadapter.Operation) trace.OperationClass {
 		switch op.Action {
 		case thread.TurnAction:
 			in, err := thread.DecodeTurn(op)
-			if err == nil && (trace.ChiefLike(in.Agent) || in.Agent == SessionAgentID) {
+			if err == nil && (trace.ManagerLike(in.Agent) || in.Agent == SessionAgentID) {
 				return trace.ConversationOperation
 			}
 			return trace.WorkerOperation

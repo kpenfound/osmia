@@ -205,7 +205,7 @@ func (c *runtimeControls) capacity(repo *trace.Repository, scope coreadapter.Sco
 		if input == nil || len(input) != 0 {
 			return nil, errors.New("capacity accepts an empty object")
 		}
-		if _, _, err := repo.OwnerTurn(trace.ChiefOfStaff, scope); err != nil {
+		if _, _, err := repo.OwnerTurn(trace.Manager, scope); err != nil {
 			return nil, err
 		}
 		if err := ctx.Err(); err != nil {

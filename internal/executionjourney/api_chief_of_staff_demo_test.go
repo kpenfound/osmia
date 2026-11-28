@@ -134,7 +134,7 @@ func newChiefFixture(t *testing.T) *chiefFixture {
 		turns.Workspaces, turns.Capture = intake.StagedWorkspaces{}, nil
 		selectChief := turns.Select
 		turns.Select = func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
-			if scope.Role == trace.ChiefOfStaff {
+			if scope.Role == trace.Manager {
 				return selectChief(ctx, scope)
 			}
 			workspace := filepath.Join(cfg.Root.String(), "workers", scope.Thread)
@@ -144,7 +144,7 @@ func newChiefFixture(t *testing.T) *chiefFixture {
 		}
 		chief := turns.Scoped
 		turns.Scoped = func(ctx context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-			if scope.Role == trace.ChiefOfStaff {
+			if scope.Role == trace.Manager {
 				return chief(ctx, scope)
 			}
 			return questions.Tools(r, chiefDemoAgents[scope.Thread], scope, clock.Now)
@@ -385,7 +385,7 @@ func (f *chiefFixture) turnDone(agent, turn, status string) bool {
 }
 
 func (f *chiefFixture) ownerDone(entry api.ConversationEntry) bool {
-	chief, err := f.repo.ChiefOfStaffThread(fixturekit.Stream)
+	chief, err := f.repo.ManagerThread(fixturekit.Stream)
 	fixturekit.Must(f.t, err)
 	return f.turnDone(chief.Identity.ID, entry.Turn, "idle")
 }
@@ -579,7 +579,7 @@ func checkEventTurns(t *testing.T, repo *trace.Repository, want int) {
 	for _, th := range threads {
 		for _, q := range th.Turns {
 			if strings.HasPrefix(q.Request.TurnID, "events_") {
-				if th.Identity.Role != trace.ChiefOfStaff {
+				if th.Identity.Role != trace.Manager {
 					t.Fatalf("%s received event turn %s", th.Identity.ID, q.Request.TurnID)
 				}
 				eventTurns++

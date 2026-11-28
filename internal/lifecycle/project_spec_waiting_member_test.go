@@ -62,7 +62,7 @@ func TestAWaitingMemberNamesTheMemberWhoseDraftingStopped(t *testing.T) {
 		return state.Value == intake.DraftExhausted && feature.Value == intake.SketchedState
 	})
 
-	chief := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
 	want := "member " + string(f.Stream2) + " is handed: its drafting stopped after 3 refused drafts"
 	for i, to := range []string{intake.InShedState, intake.SketchedState} {
 		_, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo1, f.Stream1, api.WorkstreamMoveRequest{To: to, Note: "Start the review."}, chief, "chief-turn-"+string(rune('1'+i)))

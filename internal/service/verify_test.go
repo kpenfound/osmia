@@ -373,16 +373,16 @@ func TestVerifyRestoreLeavesFinishedCallsOfEarlierTurnsAlone(t *testing.T) {
 	}
 }
 
-func TestVerifyIsOfferedOnlyToTheChiefReviewersAndTheFinalReviewerOfAProjectWithTheSetting(t *testing.T) {
+func TestVerifyIsOfferedOnlyToTheManagerReviewersAndTheFinalReviewerOfAProjectWithTheSetting(t *testing.T) {
 	f, stream, repository := newReviewFixture(t, "verify-offered")
 	scopes := map[string]coreadapter.Scope{
-		"chief":         {Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "turn"},
+		"manager":       {Project: string(f.project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: "turn"},
 		"unit reviewer": {Project: string(f.project), Workstream: string(stream), Role: reviewerRole, Thread: reviewerAgent("resume"), Unit: "resume", Turn: "turn"},
 		"drift review":  {Project: string(f.project), Workstream: string(stream), Role: reviewerRole, Thread: driftReviewerAgent, Turn: "turn"},
 		"mason":         {Project: string(f.project), Workstream: string(stream), Role: masonRole, Thread: masonAgent("resume"), Unit: "resume", Turn: "turn"},
 		"session":       {Project: string(f.project), Workstream: string(stream), Role: sessionRole, Thread: "session", Turn: "turn"},
 	}
-	want := map[string]bool{"chief": true, "unit reviewer": true}
+	want := map[string]bool{"manager": true, "unit reviewer": true}
 	bound, err := Enforce(f.s.options, Enforcement{}).Threads(repository, f.s.cfg)
 	fixturekit.Must(t, err)
 	turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*verdictTurns).Turns.(*reportingTurns).Turns.(*retriedTurns).Turns.(*isolation.Turns)
@@ -405,8 +405,8 @@ func TestVerifyIsOfferedOnlyToTheChiefReviewersAndTheFinalReviewerOfAProjectWith
 			if slices.Contains(names, verifytool.ToolName) != (enabled && want[name]) {
 				t.Errorf("%s with setting %v: view tools %v", name, enabled, names)
 			}
-			if name == "chief" && !slices.Contains(names, "preview") {
-				t.Errorf("chief view tools %v lose preview with setting %v", names, enabled)
+			if name == "manager" && !slices.Contains(names, "preview") {
+				t.Errorf("manager view tools %v lose preview with setting %v", names, enabled)
 			}
 		}
 	}
@@ -523,17 +523,17 @@ func TestVerifyResultsLeaveTheUnitsReviewStateAlone(t *testing.T) {
 	}
 }
 
-func TestAnEnforcedChiefTurnHoldsVerifyOnlyWithTheSettingAndKeepsPreview(t *testing.T) {
-	f, stream, repository := newReviewFixture(t, "chief-verify")
+func TestAnEnforcedManagerTurnHoldsVerifyOnlyWithTheSettingAndKeepsPreview(t *testing.T) {
+	f, stream, repository := newReviewFixture(t, "manager-verify")
 	for _, enabled := range []bool{false, true} {
 		f.s.cfg.Project.Verification = verification.Setting{}
 		if enabled {
 			f.s.cfg.Project.Verification = verification.Setting{Call: []string{"lever"}}
 		}
 		turns, engine, hosts := enforcedTurns(t, f, repository)
-		got := runEnforced(t, turns, engine, hosts, coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: fmt.Sprintf("turn-%v", enabled)}, "claude")
+		got := runEnforced(t, turns, engine, hosts, coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: fmt.Sprintf("turn-%v", enabled)}, "claude")
 		if slices.Contains(got.MCP, verifytool.ToolName) != enabled || !slices.Contains(got.MCP, "preview") {
-			t.Fatalf("setting %v: chief tools %v", enabled, got.MCP)
+			t.Fatalf("setting %v: manager tools %v", enabled, got.MCP)
 		}
 		want := ChiefOrdinaryToolsOf("feature")
 		if enabled {
@@ -543,7 +543,7 @@ func TestAnEnforcedChiefTurnHoldsVerifyOnlyWithTheSettingAndKeepsPreview(t *test
 		slices.Sort(names)
 		slices.Sort(want)
 		if !slices.Equal(names, want) {
-			t.Fatalf("setting %v: chief tools %v, want %v", enabled, names, want)
+			t.Fatalf("setting %v: manager tools %v, want %v", enabled, names, want)
 		}
 	}
 }

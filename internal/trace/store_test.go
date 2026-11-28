@@ -324,10 +324,10 @@ func TestCommitsReportWorkflowChanges(t *testing.T) {
 	}
 
 	observed = nil
-	if err := r.RetractChiefOfStaff(ctx, streamID); err != nil {
+	if err := r.RetractManager(ctx, streamID); err != nil {
 		t.Fatal(err)
 	}
-	if len(observed) != 1 || observed[0].Workflow == nil || !slices.Equal(observed[0].Workflow.Threads, []string{ChiefOfStaff}) || observed[0].Workflow.Deliveries || !slices.Contains(observed[0].Paths, workflow) {
+	if len(observed) != 1 || observed[0].Workflow == nil || !slices.Equal(observed[0].Workflow.Threads, []string{Manager}) || observed[0].Workflow.Deliveries || !slices.Contains(observed[0].Paths, workflow) {
 		t.Fatalf("chief-of-staff thread change: %+v", observed)
 	}
 

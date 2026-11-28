@@ -10,13 +10,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const chiefName = "chief"
-
-// ChiefOfStaff is who disposed of an objection the chief of staff dismissed
-// on the owner's behalf.
-const ChiefOfStaff = "chief_of_staff"
-
-// Decide is what the chief of staff decided about one committee objection.
+// Decide is what the manager decided about one committee objection.
 type Decide string
 
 const (
@@ -27,34 +21,40 @@ const (
 	Escalate Decide = "escalate"
 )
 
-// ChiefDecision is the chief of staff's decision on one committee objection,
+// ManagerDecision is the manager's decision on one committee objection,
 // with its note and the turn that decided.
-type ChiefDecision struct {
+type ManagerDecision struct {
 	Objection string `json:"objection"`
 	Decision  Decide `json:"decision"`
 	Note      string `json:"note"`
 	Turn      string `json:"turn,omitempty"`
-	// DecidedBy is empty for the chief of staff's own decision, or
+	// DecidedBy is empty for the manager's own decision, or
 	// trace.DecidedByJev with the Jev judgment it comes from.
 	DecidedBy string `json:"decided_by,omitempty"`
 	Judgment  string `json:"judgment,omitempty"`
 }
 
-// ChiefDecisions is what the chief of staff decided during one round, against
+// ManagerDecisions is what the manager decided during one round, against
 // the revision the documents were at.
-type ChiefDecisions struct {
-	Version   int             `json:"version"`
-	Round     int             `json:"round"`
-	Revision  Pin             `json:"revision"`
-	Decisions []ChiefDecision `json:"decisions"`
+type ManagerDecisions struct {
+	Version   int               `json:"version"`
+	Round     int               `json:"round"`
+	Revision  Pin               `json:"revision"`
+	Decisions []ManagerDecision `json:"decisions"`
 }
 
-// ChiefPath is the workstream path of the chief of staff's decisions of a
-// round, and ChiefDocumentID its trace record ID.
-func ChiefPath(round int) string       { return roundPath(round, chiefName) }
-func ChiefDocumentID(round int) string { return roundDocumentID(round, chiefName) }
+// ManagerPath is the workstream path of the manager's decisions of a
+// round, and ManagerDocumentID its trace record ID.
+func ManagerPath(round int) string       { return roundPath(round, trace.ManagerKey) }
+func ManagerDocumentID(round int) string { return roundDocumentID(round, trace.ManagerKey) }
 
-func (c ChiefDecisions) check() error {
+// IsManagerPath reports whether path is the workstream path of the manager's
+// decisions of some round.
+func IsManagerPath(path string) bool {
+	return strings.HasPrefix(path, "shed/") && strings.HasSuffix(path, "/"+trace.ManagerKey+".json")
+}
+
+func (c ManagerDecisions) check() error {
 	switch {
 	case c.Version != Version:
 		return fmt.Errorf("unsupported chief of staff decisions version %d", c.Version)
@@ -82,23 +82,23 @@ func (c ChiefDecisions) check() error {
 	return nil
 }
 
-// EncodeChiefDecisions returns the file content of valid decisions.
-func EncodeChiefDecisions(c ChiefDecisions) ([]byte, error) {
+// EncodeManagerDecisions returns the file content of valid decisions.
+func EncodeManagerDecisions(c ManagerDecisions) ([]byte, error) {
 	if err := c.check(); err != nil {
 		return nil, err
 	}
 	if c.Decisions == nil {
-		c.Decisions = []ChiefDecision{}
+		c.Decisions = []ManagerDecision{}
 	}
 	return encodeFile(c)
 }
 
-// ParseChiefDecisions reads a decisions file's content, refusing unknown
+// ParseManagerDecisions reads a decisions file's content, refusing unknown
 // fields and invalid decisions.
-func ParseChiefDecisions(data []byte) (ChiefDecisions, error) {
-	var c ChiefDecisions
+func ParseManagerDecisions(data []byte) (ManagerDecisions, error) {
+	var c ManagerDecisions
 	if err := decodeFile(data, &c, "chief of staff decisions"); err != nil {
-		return ChiefDecisions{}, err
+		return ManagerDecisions{}, err
 	}
 	if len(c.Decisions) == 0 {
 		c.Decisions = nil
@@ -106,32 +106,32 @@ func ParseChiefDecisions(data []byte) (ChiefDecisions, error) {
 	return c, c.check()
 }
 
-// AllChiefDecisions returns the chief of staff's decisions of the workstream,
+// AllManagerDecisions returns the manager's decisions of the workstream,
 // ordered by the round they were made in. A decisions file whose content
 // disagrees with its path is an error.
-func AllChiefDecisions(repository *trace.Repository, stream config.WorkstreamID) ([]ChiefDecisions, error) {
-	latest, err := shedFiles(repository, stream, chiefName)
+func AllManagerDecisions(repository *trace.Repository, stream config.WorkstreamID) ([]ManagerDecisions, error) {
+	latest, err := shedFiles(repository, stream, trace.ManagerKey)
 	if err != nil {
 		return nil, err
 	}
-	var out []ChiefDecisions
+	var out []ManagerDecisions
 	for path, d := range latest {
-		c, err := ParseChiefDecisions([]byte(d.Content))
+		c, err := ParseManagerDecisions([]byte(d.Content))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
-		if ChiefPath(c.Round) != path {
+		if ManagerPath(c.Round) != path {
 			return nil, fmt.Errorf("%s: records the decisions of round %d", path, c.Round)
 		}
 		out = append(out, c)
 	}
-	slices.SortFunc(out, func(a, b ChiefDecisions) int { return a.Round - b.Round })
+	slices.SortFunc(out, func(a, b ManagerDecisions) int { return a.Round - b.Round })
 	return out, nil
 }
 
 // Undecided returns the committee objections of a dissent record that still
-// need the chief of staff's decision before the owner sees the record: those
-// neither the owner nor the chief of staff disposed of and the chief of staff
+// need the manager's decision before the owner sees the record: those
+// neither the owner nor the manager disposed of and the manager
 // did not escalate. The owner's own objections are the owner's.
 func Undecided(entries []Entry) []Entry {
 	return slices.DeleteFunc(slices.Clone(entries), func(e Entry) bool {
@@ -140,7 +140,7 @@ func Undecided(entries []Entry) []Entry {
 }
 
 // ForOwner returns the entries of a dissent record the owner is shown: every
-// entry but those the chief of staff dismissed.
+// entry but those the manager dismissed.
 func ForOwner(entries []Entry) []Entry {
-	return slices.DeleteFunc(slices.Clone(entries), func(e Entry) bool { return e.By == ChiefOfStaff })
+	return slices.DeleteFunc(slices.Clone(entries), func(e Entry) bool { return e.By == trace.Manager })
 }

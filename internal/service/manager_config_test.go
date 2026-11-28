@@ -31,12 +31,12 @@ func TestManagerSettingsGovernTheManagersTurnsAndCapacityUnderEitherKeyForm(t *t
 			s, _ := start(t, opts)
 			cfg := s.current()
 
-			profile, settings, err := s.roleExecution(cfg, trace.ChiefOfStaff)
+			profile, settings, err := s.roleExecution(cfg, trace.Manager)
 			fixturekit.Must(t, err)
 			if profile.Name != "other" || settings.Mode != "container" || settings.Image != "manager-image" || len(settings.Skills) != 1 {
 				t.Fatalf("manager turn settings: %+v %+v", profile, settings)
 			}
-			if selected := cfg.RoleExecution(trace.ConfigRole(trace.ChiefOfStaff)); selected.Mode != "container" || selected.Image != "manager-image" {
+			if selected := cfg.RoleExecution(trace.ConfigRole(trace.Manager)); selected.Mode != "container" || selected.Image != "manager-image" {
 				t.Fatalf("selected execution %+v", selected)
 			}
 			if _, name, err := s.chiefOverride(cfg); err != nil || name.Name != "other" {
@@ -46,7 +46,7 @@ func TestManagerSettingsGovernTheManagersTurnsAndCapacityUnderEitherKeyForm(t *t
 				t.Fatalf("events profile %q", got)
 			}
 			state, _ := s.effective()
-			if got := s.effectiveProfiles(state)[trace.ChiefOfStaff]; got.Name != "other" || got.Source != "configuration" {
+			if got := s.effectiveProfiles(state)[trace.Manager]; got.Name != "other" || got.Source != "configuration" {
 				t.Fatalf("effective profile %+v", got)
 			}
 			for _, role := range s.capacityStatus(nil).Roles {

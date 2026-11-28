@@ -172,7 +172,7 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	if target == nil {
 		return nil
 	}
-	chief, err := target.ChiefOfStaffThread(stream)
+	chief, err := target.ManagerThread(stream)
 	closeTarget()
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

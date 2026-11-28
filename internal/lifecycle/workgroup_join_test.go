@@ -124,7 +124,7 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 	if _, ok := trace.WorkgroupOf(groups, f.Stream1); ok || pointer == "" {
 		t.Fatalf("transfer has no unique shared route: pointer=%s groups=%+v", pointer, groups)
 	}
-	if _, err := repo.ChiefOfStaffThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo.ManagerThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("local chief remains: %v", err)
 	}
 	_, err = repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "join-notice", Revision: 1, Project: f.Project, Workstream: f.Stream1, At: fixturekit.DemoStart.Add(-time.Hour), Actor: intake.OwnerActor, Cause: "owner"}, Subject: "join-notice", To: "recorded", Reason: "Observe member transfer"}, Events: []trace.Event{{ID: "join-notice", Kind: "notice", Body: "Member transfer remains pending."}}})
@@ -158,7 +158,7 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 	awaitProjectSpec(f, t)
 	authority, err := trace.OpenWorkgroupAuthority(f.S.Current().Root, id)
 	fixturekit.Must(t, err)
-	shared, err := authority.ChiefOfStaffThread(f.Stream1)
+	shared, err := authority.ManagerThread(f.Stream1)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, authority.Close())
 	f.Stop(t)
@@ -182,7 +182,7 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 		}
 		target, _, _, close, err := f.S.Lifecycle().ChiefRepository(context.Background(), r, member.stream)
 		fixturekit.Must(t, err)
-		chief, err := target.ChiefOfStaffThread(member.stream)
+		chief, err := target.ManagerThread(member.stream)
 		close()
 		fixturekit.Must(t, err)
 		if chief.Identity != shared.Identity {
@@ -232,13 +232,13 @@ func TestDraftWorkgroupResumesAuthenticatedRetractedMemberAcrossRestart(t *testi
 	fixturekit.Must(t, err)
 	authority, g, err := trace.CreateWorkgroupTrace(ctx, f.S.Current().Root, []trace.CrossRepoMember{{Workstream: f.Stream1, Project: repo1}, {Workstream: f.Stream2, Project: repo2}}, f.Clock.Now(), intake.OwnerActor, "draft-workgroup")
 	fixturekit.Must(t, err)
-	original, err := authority.ChiefOfStaffThread(g.Members[0])
+	original, err := authority.ManagerThread(g.Members[0])
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, authority.Close())
 	observe := observeJoinPasses(f.S)
 	gate.Armed.Store(true)
 	gate.Await(t)
-	fixturekit.Must(t, repo1.RetractChiefOfStaff(ctx, f.Stream1))
+	fixturekit.Must(t, repo1.RetractManager(ctx, f.Stream1))
 	fixturekit.Must(t, repo1.RetractWorkgroup(ctx, f.Stream1, f.Clock.Now(), intake.OwnerActor, "draft-workgroup"))
 	gate.Release()
 	observe(t)
@@ -263,7 +263,7 @@ func TestDraftWorkgroupResumesAuthenticatedRetractedMemberAcrossRestart(t *testi
 	}
 	target, _, _, close, err := f.S.Lifecycle().ChiefRepository(ctx, repo1, f.Stream1)
 	fixturekit.Must(t, err)
-	chief, err := target.ChiefOfStaffThread(f.Stream1)
+	chief, err := target.ManagerThread(f.Stream1)
 	close()
 	fixturekit.Must(t, err)
 	if chief.Identity != original.Identity {

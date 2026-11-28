@@ -157,7 +157,7 @@ func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheCh
 	if designThread.Identity.Role != trace.Designer || designThread.Identity.ThreadID != trace.Designer || len(designThread.Turns) != len(steps) {
 		t.Fatalf("the design thread: %+v with %d turns, want %d", designThread.Identity, len(designThread.Turns), len(steps))
 	}
-	if chief, err := repo.ChiefOfStaffThread(stream); err != nil || len(chief.Turns) != 0 {
+	if chief, err := repo.ManagerThread(stream); err != nil || len(chief.Turns) != 0 {
 		t.Fatalf("a design turn reached the chief of staff's thread: %+v %v", chief.Turns, err)
 	}
 	var first fixturekit.LoggedTurn
@@ -193,7 +193,7 @@ func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheCh
 		t.Fatal(err)
 	}
 	s.Until(t, "the chief of staff to settle the hand-off turn", func() bool {
-		th, err := repo.ChiefOfStaffThread(stream)
+		th, err := repo.ManagerThread(stream)
 		fixturekit.Must(t, err)
 		return slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool {
 			return strings.Contains(q.Request.Prompt, intake.HandoffTitleOpening) && q.Response != nil && !q.CompletedAt.IsZero()
@@ -211,9 +211,9 @@ func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheCh
 			t.Fatalf("the handed document lacks %q:\n%s", want, handed.Content)
 		}
 	}
-	chief, err := repo.ChiefOfStaffThread(stream)
+	chief, err := repo.ManagerThread(stream)
 	fixturekit.Must(t, err)
-	if chief.Identity.Role != trace.ChiefOfStaff || chief.Identity.ThreadID != trace.ChiefOfStaff || chief.Identity.ID == designThread.Identity.ID {
+	if chief.Identity.Role != trace.Manager || chief.Identity.ThreadID != trace.Manager || chief.Identity.ID == designThread.Identity.ID {
 		t.Fatalf("the chief's thread %+v is not its own, apart from the design thread %+v", chief.Identity, designThread.Identity)
 	}
 	opening := chief.Turns[0].Request
@@ -223,7 +223,7 @@ func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheCh
 			t.Fatalf("the chief's first turn is not seeded from the brief and the transcript, it lacks %q:\n%s", want, opening.Prompt)
 		}
 	}
-	if opening.AgentID != trace.ChiefOfStaff || opening.SystemPrompt == intake.DesignRolePrompt {
+	if opening.AgentID != trace.Manager || opening.SystemPrompt == intake.DesignRolePrompt {
 		t.Fatalf("the chief's first turn: agent %q, designer prompt %v", opening.AgentID, opening.SystemPrompt == intake.DesignRolePrompt)
 	}
 	for _, q := range chief.Turns {

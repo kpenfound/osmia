@@ -72,9 +72,9 @@ func fileChiefAmendment(t *testing.T, f *journey.ArchitectFixture, repo *trace.R
 	if !found {
 		t.Fatal("the workstream has no seal")
 	}
-	chief := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
 	header := trace.Header{Schema: "osmia.trace.amendment", Version: trace.Version, ID: id, Revision: 1, Project: f.Project, Workstream: stream, At: f.Clock.Now(), Actor: chief, Cause: "fixture"}
-	fixturekit.Must(t, repo.Append(ctx, trace.Amendment{Header: header, Requester: chief, Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1",
+	fixturekit.Must(t, repo.Append(ctx, trace.Amendment{Header: header, Requester: chief, Role: trace.Manager, Thread: trace.Manager, Turn: "events_1",
 		Citations: []string{"spec#1"}, Change: "Move a footprint to the new directory", Reason: "The directory landed upstream", Seal: sealed.Seal, SealRevision: doc.Revision, SpecHash: sealed.SpecHash}))
 	header.Schema, header.ID = "osmia.trace.transition", "amendment_"+id+"_filed"
 	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: 0, Transition: trace.Transition{Header: header, Subject: intake.AmendmentSubject(id), To: "filed", Reason: "filed"}})

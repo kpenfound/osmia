@@ -30,7 +30,7 @@ func askAs(t *testing.T, f fixture, agent, role, turn, text string) string {
 
 func rawChief(t *testing.T, f fixture, turn string) map[string]coreadapter.Tool {
 	t.Helper()
-	scope := f.turn(t, "chief-"+turn, trace.ChiefOfStaff, turn)
+	scope := f.turn(t, "chief-"+turn, trace.Manager, turn)
 	list, err := questions.Tools(f.repo, "chief-"+turn, scope, func() time.Time { return start })
 	if err != nil {
 		t.Fatal(err)
@@ -218,7 +218,7 @@ func TestARefusedAmendmentRoutingGoesToTheOwnerWithJevsJudgment(t *testing.T) {
 func TestRelayingAnOwnersRulingNeedsNoDecideResult(t *testing.T) {
 	f := setup(t)
 	id := askAs(t, f, "mason1", "mason", "build1", "Where does state live?")
-	scope := f.turn(t, "chief", trace.ChiefOfStaff, "chief1")
+	scope := f.turn(t, "chief", trace.Manager, "chief1")
 	if _, err := f.repo.EscalateQuestions(context.Background(), "chief", scope, trace.EscalationRequest{Questions: []string{id}, Rephrasing: "Where does state live?", Blocked: "The unit.", Recommendation: "Files."}, start); err != nil {
 		t.Fatal(err)
 	}

@@ -302,7 +302,7 @@ func (s *Controller) StalledExit(repo *trace.Repository, stream config.Workstrea
 			return WorkstreamMoveDocument(s.nextMove(repo, stream)) + "-" + t.Name
 		},
 		Enter: func(context.Context, router.Plan) (router.Effect, error) {
-			return router.Effect{Events: []trace.Event{trace.Notice(id+"-"+in.Cause, "chief", in.Notice)}, Reason: in.Reason}, nil
+			return router.Effect{Events: []trace.Event{trace.Notice(id+"-"+in.Cause, trace.ManagerKey, in.Notice)}, Reason: in.Reason}, nil
 		},
 		Prereq: router.Prerequisites{
 			Other: func(ctx context.Context, t router.Target) (string, error) {

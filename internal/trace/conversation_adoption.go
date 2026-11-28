@@ -22,7 +22,7 @@ type ConversationOrigin struct {
 }
 
 // conversationImport lists the records a design start imported into a
-// workgroup trace before the chief of staff began a thread of its own at
+// workgroup trace before the manager began a thread of its own at
 // Start. Such traces still hold them, and reading them keeps working.
 type conversationImport struct {
 	Origin  ConversationOrigin `json:"origin"`
@@ -128,9 +128,9 @@ func (r *Repository) RetireDesignConversation(ctx context.Context, stream config
 	if err != nil {
 		return err
 	}
-	if _, ok := log.Threads[ChiefOfStaff]; !ok {
+	if _, ok := log.Threads[Manager]; !ok {
 		return nil
 	}
-	delete(log.Threads, ChiefOfStaff)
+	delete(log.Threads, Manager)
 	return source.saveThread(ctx, stream, log)
 }

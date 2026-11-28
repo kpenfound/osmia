@@ -98,7 +98,7 @@ func (c *runtimeControls) decide(repository *trace.Repository, scope coreadapter
 		if subject == "" {
 			return refuse("a subject is required")
 		}
-		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		target, stream, refusal, err := repository.ManagerMember(config.WorkstreamID(scope.Workstream), input.Workstream)
 		if err != nil {
 			return nil, err
 		}
@@ -343,7 +343,7 @@ func (s *Service) objectionSubject(ctx context.Context, repository *trace.Reposi
 				sources = append(sources, jev.Source{Kind: "packet", ID: shed.PacketDocumentID(packet.Round), Revision: doc.Revision})
 			}
 			b.add("Charter", s.charterSection(ctx, repository), decideCharter)
-			return b.String(), append([]jev.Source{{Kind: "objection", ID: entry.ID}, {Kind: "chief-decisions", ID: shed.ChiefDocumentID(round)}}, sources...), nil
+			return b.String(), append([]jev.Source{{Kind: "objection", ID: entry.ID}, {Kind: "chief-decisions", ID: shed.ManagerDocumentID(round)}}, sources...), nil
 		}}, "", nil
 }
 

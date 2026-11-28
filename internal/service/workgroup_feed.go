@@ -179,7 +179,7 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 		for _, m := range a.members {
 			repos[m.Workstream] = m.Project.Project()
 		}
-		thread, err := a.chief.ChiefOfStaffThread(a.host)
+		thread, err := a.chief.ManagerThread(a.host)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return WorkgroupFeedResponse{}, err
 		}
@@ -322,7 +322,7 @@ func (s *Service) workgroupMemberSummary(m trace.CrossRepoMember) (WorkgroupMemb
 			summary.Units[u.State]++
 		}
 		for _, a := range w.Agents {
-			if !trace.ChiefLike(a.Role) && (a.State == "running" || a.State == "captured") {
+			if !trace.ManagerLike(a.Role) && (a.State == "running" || a.State == "captured") {
 				summary.Running = true
 			}
 		}

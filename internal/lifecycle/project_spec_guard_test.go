@@ -561,7 +561,7 @@ func TestProjectSpecContractGuardRedraftStopsRetryingAndTheChiefAsksAgain(t *tes
 		})
 		return err
 	})
-	chief := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
 	out, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, mustRepo(t, f.S, f.Project2), f.Stream2, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, chief, "chief-turn-1")
 	if apiFault != nil {
 		t.Fatal(apiFault)

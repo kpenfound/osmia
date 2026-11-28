@@ -348,7 +348,7 @@ func TestDesignStartExcludesConversationHomeAndContinuesSharedChief(t *testing.T
 	origin := opened.Design.Workstream
 	r, err := s.Repository(home)
 	fixturekit.Must(t, err)
-	_, err = r.ChiefOfStaffThread(origin)
+	_, err = r.ManagerThread(origin)
 	fixturekit.Must(t, err)
 	revision := recordDesignProjects(t, r, origin, intakefixture.ProductionBrief, []config.ProjectID{other})
 	engine.Mu.Lock()
@@ -376,14 +376,14 @@ func TestDesignStartExcludesConversationHomeAndContinuesSharedChief(t *testing.T
 	}
 	chief, host, _, close, err := s.ChiefRepository(ctx, r, origin)
 	fixturekit.Must(t, err)
-	after, err := chief.Thread(host, trace.ChiefOfStaff)
+	after, err := chief.Thread(host, trace.Manager)
 	close()
 	fixturekit.Must(t, err)
-	if after.Identity.Role != trace.ChiefOfStaff {
+	if after.Identity.Role != trace.Manager {
 		t.Fatalf("the shared chief's thread: %+v", after.Identity)
 	}
 	for _, q := range after.Turns {
-		if q.Request.AgentID != trace.ChiefOfStaff || q.Request.SystemPrompt == intake.DesignRolePrompt {
+		if q.Request.AgentID != trace.Manager || q.Request.SystemPrompt == intake.DesignRolePrompt {
 			t.Fatalf("a design turn reached the shared chief's thread: %+v", q.Request)
 		}
 	}

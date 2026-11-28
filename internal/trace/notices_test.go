@@ -9,24 +9,24 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-func TestNotifyIsDurableIdempotentAndBoundToActiveChief(t *testing.T) {
+func TestNotifyIsDurableIdempotentAndBoundToActiveManager(t *testing.T) {
 	ctx := context.Background()
 	r, root, p := create(t)
-	_, err := r.EnsureChiefOfStaff(ctx, streamID, at, owner)
+	_, err := r.EnsureManager(ctx, streamID, at, owner)
 	if err != nil {
 		t.Fatal(err)
 	}
 	h := header("turn-request", "request_notice")
 	h.Actor = owner
-	_, err = r.EnqueueTurn(ctx, TurnRequest{Header: h, AgentID: ChiefOfStaff, ThreadID: ChiefOfStaff, TurnID: "notice", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Notify the project"})
+	_, err = r.EnqueueTurn(ctx, TurnRequest{Header: h, AgentID: Manager, ThreadID: Manager, TurnID: "notice", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Notify the project"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = r.ClaimTurn(ctx, streamID, ChiefOfStaff, "claim", "/owned/notice", at)
+	_, err = r.ClaimTurn(ctx, streamID, Manager, "claim", "/owned/notice", at)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Thread: ChiefOfStaff, Turn: "notice", Role: ChiefOfStaff}
+	scope := coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Thread: Manager, Turn: "notice", Role: Manager}
 	tool := r.NotifyTool(scope, func() time.Time { return at })
 	input := json.RawMessage(`{"text":"Recheck the owner ruling before implementing."}`)
 	first, err := tool.Handle(ctx, input)
@@ -41,7 +41,7 @@ func TestNotifyIsDurableIdempotentAndBoundToActiveChief(t *testing.T) {
 	if err := json.Unmarshal(first, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc.Actor.Kind != "agent" || doc.Actor.ID != ChiefOfStaff || doc.Workstream != "" || doc.Cause != "request_notice" {
+	if doc.Actor.Kind != "agent" || doc.Actor.ID != Manager || doc.Workstream != "" || doc.Cause != "request_notice" {
 		t.Fatalf("notice provenance: %+v", doc)
 	}
 	other := scope

@@ -658,7 +658,7 @@ func TestThreadsListsSnapshotsByAgent(t *testing.T) {
 			t.Fatalf("thread %s: %+v, want %+v (%v)", th.Identity.ID, th, one, err)
 		}
 	}
-	if want := []string{"alpha", ChiefOfStaff, "mason", "zeta"}; !reflect.DeepEqual(ids, want) {
+	if want := []string{"alpha", Manager, "mason", "zeta"}; !reflect.DeepEqual(ids, want) {
 		t.Fatalf("threads %v, want %v", ids, want)
 	}
 	if th := threads[2]; th.Status != "interrupted" || th.Active != "one" {
