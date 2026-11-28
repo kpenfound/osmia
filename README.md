@@ -42,7 +42,7 @@ behavior and feature dependencies; the guides describe implemented behavior.
    branch and opens the pull request as a draft when the work is assembled,
    Dagger Cloud's checks run on it, and you mark it ready for review.
 
-The chief of staff answers what it can, resolves contested units it is
+The manager answers what it can, resolves contested units it is
 confident about and moves units the state machine leaves stuck; the
 intent questions, spec amendments and explicitly escalated blockers come to one owner inbox. The factory revises engineering assignments and tracks necessary discovered work within your approved intent. The trace
 keeps the documents, decisions and turns through restarts. See the

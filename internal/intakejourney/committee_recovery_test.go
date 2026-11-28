@@ -209,8 +209,8 @@ func TestTheManagerWithdrawsAnAmendmentWhoseDebateCannotFinish(t *testing.T) {
 		Detail   string `json:"detail"`
 	}
 	fixturekit.Must(t, json.Unmarshal(out, &result))
-	if !result.Recorded || result.State != intake.AmendmentRejected || !strings.Contains(result.Detail, "the chief of staff withdrew amendment 1") {
-		t.Fatalf("chief withdrawal: %s", out)
+	if !result.Recorded || result.State != intake.AmendmentRejected || !strings.Contains(result.Detail, "the manager withdrew amendment 1") {
+		t.Fatalf("manager withdrawal: %s", out)
 	}
 	docs, err := trace.Read[trace.Document](repo, stream)
 	fixturekit.Must(t, err)

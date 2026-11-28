@@ -7,7 +7,7 @@ approved. Follow the steps in order.
 
 - One-repo projects with their own charter and clone,
   settings and entity map.
-- Feature workgroups with one shared chief of staff, optional project design
+- Feature workgroups with one shared manager, optional project design
   chat, cross-repo contracts and merge dependencies.
 - Git worktrees, or Jujutsu workspaces on your clone's Git store: the service
   builds each workstream's feature branch in them and pushes it to your repository or fork
@@ -78,7 +78,7 @@ webhook = "https://ntfy.sh/your-private-topic"
   offline](configuration.md#validating-a-configuration-offline)).
 - **Profiles and roles.** A profile names an `agent` (`claude`, `codex` or
   `opencode`) and a `model`, and optionally `effort`, `fallback`, `timeout` and
-  `max_turns`. Every role (`architect`, `committee`, `chief_of_staff`,
+  `max_turns`. Every role (`architect`, `committee`, `manager`,
   `foreman`, `mason`, `reviewer`) uses the profile named `default`
   unless you bind it in a `[roles.<role>]` table with `profile = "<name>"`,
   and, if you want confinement, `sandbox`. Keys and defaults are in the
@@ -190,7 +190,7 @@ Save and quit. The command records your edit as the next charter revision and
 prints its number; there is nothing further to ratify, and `osmia status` then
 shows `Charter: 2 rules, revision 2`. To write the charter from a file
 instead, use `osmia edit charter p_… --from charter.md`; **Project management** on a project card or in the Settings view
-opens the same revision-pinned charter editor and shows its rule count. Rules later proposed by the chief of
+opens the same revision-pinned charter editor and shows its rule count. Rules later proposed by the manager of
 staff are decided with `osmia charter`. See [charter](charter.md) for the
 format.
 
@@ -211,7 +211,7 @@ hand it in with the project ID:
 osmia handin p_… design.md
 ```
 
-The command creates a one-member workgroup with the document as its brief and prints its workstream ID (`w_…`). Add `--with <other-project-id>` for each additional project. The positional project is home for the shared chief and conversation. Paused projects are allowed. Go allocates one member per project without an architect selection turn. Several projects share one workgroup spec, graph and ratification. The web hand-in form offers the same selection through a multi-select of active projects.
+The command creates a one-member workgroup with the document as its brief and prints its workstream ID (`w_…`). Add `--with <other-project-id>` for each additional project. The positional project is home for the shared manager and conversation. Paused projects are allowed. Go allocates one member per project without an architect selection turn. Several projects share one workgroup spec, graph and ratification. The web hand-in form offers the same selection through a multi-select of active projects.
 
 The project set stays fixed until ratification; changing it requires abandoning and handing in again. Add `--skip-debate` for small work: the committee does not debate it and the draft waits for your ratification. Follow progress with `osmia status <workstream-id>`, or on the page.
 
@@ -224,12 +224,12 @@ osmia design read w_…
 osmia design start w_…
 ```
 
-The design agent can read any active project's committed source, with exactly `file_read`, `read_repo`, `draft_brief` and `set_title`, and no write, VCS or credential access. Once it understands what the session is about it titles the session with `set_title`, and it retitles it when the subject changes; the title starts no work and leaves the brief and its revision alone. When you start work from the design, the chief of staff gets one turn that titles the started work from the handed brief through its status goal. It arrives on a new chief-of-staff thread that opens from the handed brief and the design transcript: the session's own project's chief thread when it is the only one selected, and the workgroup's shared chief thread otherwise. The design conversation's own thread is not continued. Ask it to add or remove projects from the brief. An inferred change needs your agreement first. It asks material readiness questions with recommendations and records other assumptions for you to override.
+The design agent can read any active project's committed source, with exactly `file_read`, `read_repo`, `draft_brief` and `set_title`, and no write, VCS or credential access. Once it understands what the session is about it titles the session with `set_title`, and it retitles it when the subject changes; the title starts no work and leaves the brief and its revision alone. When you start work from the design, the manager gets one turn that titles the started work from the handed brief through its status goal. It arrives on a new manager thread that opens from the handed brief and the design transcript: the session's own project's manager thread when it is the only one selected, and the workgroup's shared manager thread otherwise. The design conversation's own thread is not continued. Ask it to add or remove projects from the brief. An inferred change needs your agreement first. It asks material readiness questions with recommendations and records other assumptions for you to override.
 
-`design read` prints the session's title when one is set, then the latest brief revision and project list. `design start` reads them, prints the list it is starting with and sends that revision. On the web, the read-only Brief panel above Start shows project names with home marked and collapsed brief text, updating live. Start sends its displayed revision; a stale brief returns a conflict and starts nothing. The brief, revision and list stay bound through recovery. The conversation stays at the session's project even if the brief excludes it; the shared chief then opens a new thread from the brief and the design transcript. See [design sessions](cli.md#design-sessions).
+`design read` prints the session's title when one is set, then the latest brief revision and project list. `design start` reads them, prints the list it is starting with and sends that revision. On the web, the read-only Brief panel above Start shows project names with home marked and collapsed brief text, updating live. Start sends its displayed revision; a stale brief returns a conflict and starts nothing. The brief, revision and list stay bound through recovery. The conversation stays at the session's project even if the brief excludes it; the shared manager then opens a new thread from the brief and the design transcript. See [design sessions](cli.md#design-sessions).
 
 The architect drafts a spec and a plan of units, the committee debates them in
-the shed, and the chief of staff presents them to you. From then on Osmia stops
+the shed, and the manager presents them to you. From then on Osmia stops
 at every decision that is yours and waits. Each is an **inbox entry**, and you
 can answer it from either place:
 
@@ -256,7 +256,7 @@ The decisions, in the order a workstream meets them:
 | Ratify the spec and plan (or rule on an objection, or ask for a redraft) | ratification card | `osmia ratify <workstream-id>`, `osmia shed …` |
 | A question a worker escalated | escalation card: answer, accept the recommendation or use an option | `osmia answer <number> "ruling"` or `--accept` |
 | An amendment to the sealed spec or plan | amendment card | `osmia amendment <workstream-id> <n> approve\|reject\|round\|overrule [note]` |
-| A contested unit the chief of staff raised to you | contested card, with its findings | `osmia contested <workstream-id> <unit> review\|revise "note"` |
+| A contested unit the manager raised to you | contested card, with its findings | `osmia contested <workstream-id> <unit> review\|revise "note"` |
 | Mark the pull request ready for review | delivery card | `osmia delivery <workstream-id>`, then `osmia approve <workstream-id>` |
 | Whether to wait for missing Cloud check results | checks card | `osmia checks <workstream-id> keep-waiting\|continue` |
 
@@ -271,14 +271,14 @@ longer after each failure, up to five minutes apart.
 
 Ratifying seals the spec and plan: the service fetches upstream, creates the
 feature branch in a worktree or Jujutsu workspace of your clone, and masons
-build the units, each reviewed and landed in order. You can talk to the workgroup's shared chief of staff
+build the units, each reviewed and landed in order. You can talk to the workgroup's shared manager
 meanwhile with `osmia send <workstream-id> "…"` or on the page, and hold work
-with `osmia pause`. The conversation also shows what the chief of staff did on
+with `osmia pause`. The conversation also shows what the manager did on
 your behalf, such as resolving a contested unit or moving a stuck one. You can
 move a stuck unit yourself with
 `osmia move <workstream-id> <unit> <state> "note"`.
 
-When every unit has landed and the final review is done, the chief of staff
+When every unit has landed and the final review is done, the manager
 writes a short **delivery brief** for that review, and the workstream's
 delivery entry opens once it is recorded. The brief answers one question:
 does what was built match what you asked for? It says how the approved intent
@@ -289,11 +289,11 @@ tests, files or commits. When the change needs something done to deploy it
 (a new secret or setting, a migration, a manual step, a breaking change for
 callers), the brief also carries a separate **Before you ship** list, and
 those items go into the pull request description too. The delivery entry waits
-for the brief only while the chief of staff's turn for the review is still
+for the brief only while the manager's turn for the review is still
 running; if that turn ends without one, the entry opens anyway and says "No
-brief was recorded for this review", and the chief of staff can still record
+brief was recorded for this review", and the manager can still record
 the brief until you approve. Reply in the workstream's conversation to push
-back: the chief of staff sends the work back to building, and after the new
+back: the manager sends the work back to building, and after the new
 final review it writes a new brief.
 
 When every unit has landed the service does not wait for you: it rebases the
@@ -304,9 +304,9 @@ Cloud then runs the project's checks on the pull request. The service waits 2
 minutes after the push and reads the pushed commit's commit statuses (`load`,
 then **Run Dagger Checks**); a failed check is rerun once, and only a result
 posted after the rerun counts. The final review reads the branch against that
-result. Blocking findings the chief of staff triages as needing code become one
+result. Blocking findings the manager triages as needing code become one
 plan revision, and its commit is pushed to the same pull request and checked
-again. If Dagger Cloud posts no `load` status, the chief of staff investigates
+again. If Dagger Cloud posts no `load` status, the manager investigates
 and may ask you whether to keep waiting or to continue without check results
 for that push (`osmia checks`). See
 [the running guide](running.md#draft-pull-request-and-cloud-checks).
@@ -314,7 +314,7 @@ for that push (`osmia checks`). See
 Read the brief, the final report's findings, the check result and the drafted
 pull request description under **What will be published**, which is read only.
 Approving a report with blocking findings accepts them as they are (the button
-then starts with **Accept findings and**); otherwise the chief of staff plans
+then starts with **Accept findings and**); otherwise the manager plans
 the work that resolves them and a new final review follows. **Mark ready for
 review** with one click on the page, or with
 `osmia approve <workstream-id> [description-file]`, which can still supply an
@@ -337,7 +337,7 @@ only release signal. Expected waits appear in status without an inbox entry or
 notification.
 
 Resolution retires each member's own documents and workspaces from active
-context. The shared workgroup spec stays active for the chief and unresolved
+context. The shared workgroup spec stays active for the manager and unresolved
 members until all members resolve (merged or cancelled). Trace history at both
 levels is retained until archive. The same lifetime applies to one-member
 workgroups. A ready or closed-without-merge PR remains unresolved; archive and

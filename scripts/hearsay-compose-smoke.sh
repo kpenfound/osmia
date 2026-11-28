@@ -14,7 +14,7 @@
 #      distiller, assert-worker, api),
 #   4. runs TestHearsaySmokeRun (internal/service/hearsay_smoke_test.go) in a
 #      container on that network: the service's publisher pass posts a sealed
-#      spec, an owner ruling and a chief assumption, and Osmia's own read tools
+#      spec, an owner ruling and a manager assumption, and Osmia's own read tools
 #      and bundle provider read them back as each class agent acting for the
 #      owner, and as an outsider.
 #

@@ -26,7 +26,7 @@ one SQLite database, `trace.db`, in its own directory.
 
 | Path | What it answers |
 |---|---|
-| `runtime.json` | Pauses with their sources, archived workstreams (title, outcome, archive time, delivery link, `resolution_evidence`, and `actor` when the chief of staff archived it because its pull request merged), profile overrides |
+| `runtime.json` | Pauses with their sources, archived workstreams (title, outcome, archive time, delivery link, `resolution_evidence`, and `actor` when the manager archived it because its pull request merged), profile overrides |
 | `projects/<p>/config.toml` | The project's clone path, base branch and landing style |
 | `projects/<p>/trace.db` | The project's charter, entity map and lasting decisions |
 | `workstreams/<p>/<w>/trace.db` | The workstream's complete trace |
@@ -49,13 +49,13 @@ The records you will read most, by `schema`:
 | `osmia.trace.transition` | Every transition: `subject`, `from`, `to`, `reason`, `actor`, `cause`, `at`, `unit`. A transition the router chose also has `decided_by` (`code`, `jev`, `fallback`, `owner`, `jev_gate` or `reviewer`), `default_to` (the state the default would have entered) and, when a Jev judgment is behind it, `judgment`; a transition made outside the router has none of the three |
 | `osmia.trace.cost` | One cost record per session: `$.entry.Scope` (`Role`, `Unit`, `Thread`, `Turn`), `$.entry.At`, `$.entry.Usage` (`CostUSD`, `Turns`) |
 | `osmia.trace.turn-request`, `osmia.trace.turn-response` | Each turn's request (`agent_id`, `actor`, `cause`, `prompt`, `profile`) and response (`result.FinalResponse`, `result.Outcome`) |
-| `osmia.trace.status` | The chief of staff's status revisions: `goal`, `note`, `agents` |
+| `osmia.trace.status` | The manager's status revisions: `goal`, `note`, `agents` |
 | `osmia.trace.document` | Every document revision: `$.path` names the document and `$.content` holds it. The latest revision of a document is its row with the highest `seq`. `tools/<id>.json` is one audit record per tool call (`scope.Role`, `scope.Turn`, `name`); `units/<u>/` holds `report.json`, `review.json`, `rebase.json`, `landing.json` and `checks-<n>.json`; `drift/rebase.json` is the latest drift rebase record: outcome, conflicts, candidate, review count, verdict |
 
 Here `<p>` is the one-repo project's ID; its charter, entity map and settings are its
 own. For a cross-project workgroup also inspect
 `workgroups/<group-id>/trace.db`: the authoritative workgroup spec, membership, original
-shared chief conversation, consolidated questions and approved change journals
+shared manager conversation, consolidated questions and approved change journals
 are there, outside member traces. Member roles' asking-turn links lead back to
 their own traces. A published `delivered` workflow state is not itself a merge;
 use a merged outcome matching the current publication's PR or an owner merge
@@ -139,10 +139,10 @@ sqlite3 -readonly $W "
   | sed -E 's/[0-9]+/N/g' | sort | uniq -c | sort -nr | head
 ```
 
-The second command shows what woke the chief of staff. Notices from a loop
+The second command shows what woke the manager. Notices from a loop
 reach it on every pass, so its turn count is often the largest cost of one.
 
-Read the chief's latest status note too. It often states what is wrong. That
+Read the manager's latest status note too. It often states what is wrong. That
 is a lead to confirm, not a conclusion.
 
 ## 5. Explain why it does not progress
@@ -222,7 +222,7 @@ what they achieve.
 
 1. Spend by role across every workstream. A role that coordinates should not
    cost more than the roles that do the work.
-2. What triggers each role's turns. For the chief of staff, sort turns by
+2. What triggers each role's turns. For the manager, sort turns by
    requester (`.actor.id` of its turn requests) and sort the notices in its
    event prompts by kind.
 3. What those turns did. Count the tool calls in `tools/` per turn. A turn

@@ -1767,8 +1767,8 @@ With the setting present:
   lever invocations it verified with;
 - the service reruns up to five of them on the captured candidate and shows the
   results in the unit review bundle as service-recorded evidence;
-- unit reviewers, the final reviewer and the chief of staff are offered
-  `verify`, which runs the lever on the service; masons never are;
+- unit reviewers, the final reviewer and the manager are offered `verify`,
+  which runs the lever on the service; masons never are;
 - the final reviewer gets the regression sweep, and the trace and telemetry
   record [verification measures](telemetry.md#verification-measures).
 

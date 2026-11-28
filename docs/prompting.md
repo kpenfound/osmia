@@ -69,8 +69,8 @@ per-model variant. Put model-specific advice by role, where it belongs to the
 work:
 
 - the architect is told to finish the whole task;
-- the designer and the chief are told how to write a short report that stands
-  alone, and the chief how to give progress updates;
+- the designer and the manager are told how to write a short report that stands
+  alone, and the manager how to give progress updates;
 - no role is asked to write out its reasoning in a reply;
 - a mason is not told it owns the code.
 

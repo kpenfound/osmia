@@ -237,7 +237,7 @@ func (s *Controller) RecordAmendmentDecisionBy(ctx context.Context, project conf
 		return AmendmentResponse{}, &APIError{Code: Validation, Message: "an amendment decision is approve, reject, round, overrule or withdraw"}
 	}
 	if decision == AmendmentWithdraw && judgment != "" {
-		return AmendmentResponse{}, &APIError{Code: Validation, Message: "Jev decides presented amendments; withdraw is the owner's or the chief of staff's"}
+		return AmendmentResponse{}, &APIError{Code: Validation, Message: "Jev decides presented amendments; withdraw is the owner's or the manager's"}
 	}
 	if req.Packet < 1 && decision != AmendmentWithdraw {
 		return AmendmentResponse{}, &APIError{Code: Validation, Message: "name the revision of the amendment's packet the decision is on; read it with osmia amendment"}
@@ -383,7 +383,7 @@ func (s *Controller) withdrawAmendment(ctx context.Context, project config.Proje
 	}
 	who := "the owner"
 	if actor.Kind != "owner" {
-		who = "the chief of staff"
+		who = "the manager"
 	}
 	reason := fmt.Sprintf("%s withdrew amendment %s while it was %s; the sealed spec and plan stay in force", who, id, FeatureState(c.State.Value))
 	if note != "" {

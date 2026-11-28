@@ -5,9 +5,9 @@ does two independent things:
 
 - **It pushes decisions.** Hearsay becomes the record of how decisions are made
   about each project Osmia runs: changes to a project's shape, feature
-  decisions, the charter and the chief of staff's judgment calls. The service
+  decisions, the charter and the manager's judgment calls. The service
   posts them to Hearsay's `work` push source. Factory internals stay in Osmia.
-- **It reads.** Role turns and the chief's watch read Hearsay's decision log,
+- **It reads.** Role turns and the manager's watch read Hearsay's decision log,
   spec documents and the rest of its context through the read API.
 
 No project design, merge dependency, amend or cancel depends on Hearsay being
@@ -30,15 +30,15 @@ Hearsay `work` sources and the publisher agent that posts to them:
 
 | Source | Holds | Authority |
 |---|---|---|
-| **work source** | `project`, `workstream` and `update` records, plus what the chief of staff, a committee or Jev decided | Documents and decisions are **inferred** |
+| **work source** | `project`, `workstream` and `update` records, plus what the manager, a committee or Jev decided | Documents and decisions are **inferred** |
 | **owner source** | `document` and `decision` records the owner stands behind, for the projects and workstreams the work source holds | Documents and decisions are **ratified** |
 
 **Authority comes from the source, never from the author.** Everything the owner
 decides goes to the owner source, with the owner named as `author` through the
-publisher agent, which Hearsay lists as an `attributor`. Everything the chief,
+publisher agent, which Hearsay lists as an `attributor`. Everything the manager,
 or a committee decides goes to the work source and stays
 inferred, even when it names the owner or says `decider: owner`. A decision Jev
-made is never the owner's: it goes to the work source with no author. A chief's
+made is never the owner's: it goes to the work source with no author. A manager's
 relay of a ruling is never posted as a ruling: the ruling is posted once, from
 the gate that decided it, to the owner source when the owner decided and to the
 work source when Jev did. Hearsay never reads the author, the
@@ -63,25 +63,25 @@ live Hearsay code entity.
 | Record | Kind | Source |
 |---|---|---|
 | Every charter revision, as a revision of one project document | `document` | owner |
-| A charter proposal: the rule the chief drew from a ruling, and whether the owner ratified or declined it, with the owner's note | `decision` | owner |
+| A charter proposal: the rule the manager drew from a ruling, and whether the owner ratified or declined it, with the owner's note | `decision` | owner |
 
 **Feature decisions, per workstream**
 
 | Record | Kind | Source |
 |---|---|---|
 | The workstream: what the owner asked for, its core state (`proposed`, `started`, `blocked`, `completed` or `abandoned`), Osmia's own state as `status`, the pull request URL and whether it merged, and the reason for a cancellation or abandonment. A workgroup member's description names the workgroup and the other members. The pull request body is not sent | `workstream` | work |
-| Each spec sealed by the owner's ratification or by an amendment the owner or the chief of staff decided, as one revision of the workstream's spec document (`<workstream id>-spec`). An amendment produces a new seal and so a new revision | `document` | owner |
+| Each spec sealed by the owner's ratification or by an amendment the owner or the manager decided, as one revision of the workstream's spec document (`<workstream id>-spec`). An amendment produces a new seal and so a new revision | `document` | owner |
 | Each spec sealed by Jev's ratification or by an amendment Jev decided, as one revision of the workstream's Jev spec document (`<workstream id>-jev-spec`), with no author ([Jev's decisions](#jevs-decisions)) | `document` | work |
 | An owner ruling on an escalated question, with the question and its escalation: the passage in tension, the conflict and the options | `decision` | owner |
 | An amendment the owner decided, with the change, the reason and who decided | `decision` | owner |
 | A final-review finding the owner accepted at delivery instead of having it fixed | `decision` | owner |
-| A plan-only amendment, decided by the chief of staff | `decision` | work |
+| A plan-only amendment, decided by the manager | `decision` | work |
 | A ruling, an answer, an amendment decision or a discovery disposition that Jev decided ([Jev's decisions](#jevs-decisions)) | `decision` | work |
 
-**Chief of staff decisions** (all `decision`, work source, inferred)
+**manager decisions** (all `decision`, work source, inferred)
 
-- Logged assumptions: the judgment calls the chief made without asking.
-- The chief's answers to agents' questions about intent or scope. An answer that
+- Logged assumptions: the judgment calls the manager made without asking.
+- The manager's answers to agents' questions about intent or scope. An answer that
   cites code counts as engineering and is not sent.
 - Scope calls: a discovery declined or deferred, and a final-review follow-up
   pushed to later, each with its reason.
@@ -107,20 +107,20 @@ replaced by a hash of the same inputs.
 
 - **Owner rulings.** Only the owner's own ruling, the first revision of the
   question's ruling, is posted, on the owner source. A ruling Jev made is posted
-  on the work source instead ([Jev's decisions](#jevs-decisions)). The question is the chief
+  on the work source instead ([Jev's decisions](#jevs-decisions)). The question is the manager
   of staff's rephrasing the owner read, and the context carries the passage in
   tension, the conflict, what was blocked and the options put to the owner. The
-  chief of staff's relay of the ruling to the askers is a later revision and is
+  manager's relay of the ruling to the askers is a later revision and is
   never posted, as a ruling or in any other form.
 - **Jev decisions.** [See below](#jevs-decisions).
-- **Chief answers.** An answer the chief of staff gave from the record is posted
+- **Manager answers.** An answer the manager gave from the record is posted
   on the work source with its citations. An answer that cites a recorded code
   inspection (`inspection#…`) came from reading code and is not posted.
 - **Amendments.** Only a final decision on an amendment is posted: approved
   (also when the owner overruled objections) or rejected. A request that is not
   decided yet, a debate round and a service retirement are not. The owner's
-  decisions, including the chief of staff relaying one, go to the owner source;
-  a plan-only revision the chief of staff decided, and any amendment Jev
+  decisions, including the manager relaying one, go to the owner source;
+  a plan-only revision the manager decided, and any amendment Jev
   decided, goes to the work source. A
   later approved amendment citing the same criteria revisits the earlier one and
   names it in `supersedes`.
@@ -128,15 +128,15 @@ replaced by a hash of the same inputs.
   project spec is posted on the owner source, at the project, once on each member
   project under the same id.
 - **Charter proposals.** Once the owner ratifies or declines a proposal, it is
-  posted on the owner source at the project, with the rule the chief drew, the
+  posted on the owner source at the project, with the rule the manager drew, the
   owner's ruling it came from and the owner's note. Recording the ratified rule
   in the charter posts nothing more.
-- **Scope calls.** A discovery the chief of staff declined, or kept as an
+- **Scope calls.** A discovery the manager declined, or kept as an
   optional suggestion, is posted with its reason, one decision per revision. A
-  discovery the chief of staff later assigns or reopens revisits the earlier call
+  discovery the manager later assigns or reopens revisits the earlier call
   and names it in `supersedes`. A gap a final review found after the units
   serving the criterion had merged, repaired by a follow-up unit instead of by
-  reopening them, is posted as the chief of staff's call. Follow-ups that an
+  reopening them, is posted as the manager's call. Follow-ups that an
   amendment or a dependency update caused are not.
 - **Accepted findings.** Each blocking finding the owner accepted by approving
   delivery is posted on the owner source, with the final review it came from.
@@ -150,7 +150,7 @@ supersedes, and not while that one was refused.
 
 ### Jev's decisions
 
-Jev decides the owner's gates when it is confident and some of the chief of
+Jev decides the owner's gates when it is confident and some of the manager of
 staff's own decisions ([how Jev decides](design.md)). A record Jev wrote carries
 `jev` as its decider and the judgment record it comes from, and the trace
 guarantees that only Jev's own actor writes such a record. The publisher reads
@@ -160,7 +160,7 @@ decision it is. These are the kinds the publisher posts for Jev:
 | Jev decided | Posted as | Record id |
 |---|---|---|
 | A ruling on an escalated question | `decision`, with the question, the passage in tension, the conflict and the options | `<workstream id>-jev-ruling-<question>` |
-| An answer the chief of staff gave from the record, bound by Jev's pick | `decision` | `<workstream id>-jev-answer-<question>` |
+| An answer the manager gave from the record, bound by Jev's pick | `decision` | `<workstream id>-jev-answer-<question>` |
 | An amendment, approved or declined | `decision` | `<workstream id>-jev-amendment-<amendment>` |
 | A discovery disposition that is a scope call (declined or kept as a suggestion), or that revisits one | `decision`, one per revision | `<workstream id>-jev-discovery-<discovery hash>-<revision>` |
 | A departure from the state machine's default: a transition Jev entered instead of the default | `decision`, one per departure | `<workstream id>-jev-route-<transition id>` |
@@ -175,7 +175,8 @@ Every one of them:
   these stay inferred.
 - **Carries `decider: chief_of_staff`.** Hearsay accepts only `owner`,
   `chief_of_staff` and `committee`, and answers 400 to anything else, so `jev`
-  is not a decider it takes. Jev is named in the text instead: the rationale of
+  is not a decider it takes. `chief_of_staff` is the manager's stored name, so the
+  manager's decisions keep it here. Jev is named in the text instead: the rationale of
   a decision begins "Decided by Jev, the decision maker for the owner, with
   judgment `<judgment id>`; the owner did not decide it", and the document of a
   Jev-sealed spec is named "Spec ratified by Jev".
@@ -184,7 +185,7 @@ Every one of them:
   with a 409, and an owner ruling is `<workstream id>-ruling-<question>` on the
   owner source. A Jev-sealed spec is a revision of `<workstream id>-jev-spec`
   on the work source, never of `<workstream id>-spec`.
-- **Is posted once.** The chief of staff's relay of a Jev ruling to the askers
+- **Is posted once.** The manager's relay of a Jev ruling to the askers
   is a later revision of the ruling and is never posted, as it is not for an
   owner ruling.
 
@@ -201,13 +202,13 @@ Jev's.
 
 A seal belongs to whoever decided what produced it. A seal an amendment
 produced belongs to whoever decided that amendment; a plan-only amendment the
-chief of staff decided leaves the spec with whoever ratified the seal before
+manager decided leaves the spec with whoever ratified the seal before
 it; any other seal belongs to whoever ratified its round. Seals the owner
 ratified, or that an amendment the owner decided produced, stay on the owner
 source with the owner as author.
 
 A final-review follow-up unit records no decider, so none is Jev's and they are
-posted as the chief of staff's. Contest resolutions, objection
+posted as the manager's. Contest resolutions, objection
 decisions, ratification decisions and final-review triage are not posted for
 anyone, Jev included; only the spec a ratification sealed is.
 
@@ -228,7 +229,7 @@ owners change nothing posted, and a re-seed that records no revision posts nothi
 - Plans and footprints, unit landings, mason reports and per-unit review
   findings.
 - Engineering answers that came from reading code.
-- The chief's fixes to a stuck workstream (`move_workstream` and similar).
+- The manager's fixes to a stuck workstream (`move_workstream` and similar).
 - Private role notes (`notes/`), CODEOWNERS handles, entity owners, runtime
   settings and cursors, including the publisher's digests. The records kept
   across cleanup and removal hold only what the passes post.
@@ -415,9 +416,9 @@ the observer class and no write tool.
 External context is labelled separately from the local context, which
 every turn still receives word for word.
 
-The chief of staff's watch reads the project's default entity with the
+The manager's watch reads the project's default entity with the
 orchestrator identity. Each watch commits its cursor together with deduplicated
-event handles and chief notices. A watch cannot change feature state or restart
+event handles and manager notices. A watch cannot change feature state or restart
 delivered work. An outage retains the cursor and uses local context, and a
 changed endpoint, principal, agent configuration or entity starts a separate
 cursor.
@@ -478,6 +479,6 @@ the connectors listener in Osmia, and reload. See
 
 `scripts/hearsay-compose-smoke.sh` runs Hearsay under Compose with the
 configuration `osmia project memory` generates, lets the publisher post a
-sealed spec, an owner ruling and a chief logged assumption for a project
+sealed spec, an owner ruling and a manager logged assumption for a project
 without the repo opt-in, and reads them back as each class agent acting for the
 owner and as an outsider. See [the Compose smoke run](hearsay-compose-smoke.md).

@@ -19,7 +19,7 @@ flowchart LR
     Trace --> API
 ```
 
-A project is exactly one repo with its own charter, settings, entity map and dedicated project trace. The service re-seeds the entity map by itself from the upstream default branch when an architect draft starts, before the owner's plan edit, a ratification or an amendment draft is validated, and again before a sealing resolves footprints, and records a revision only when the map changes; no agent writes it. Each workstream has its own complete trace, branch and PR. A cross-project workgroup's separate trace under `workgroups/<group-id>/` owns its workgroup spec, fixed membership, shared chief and decisions. Direct single-project groups keep their chief in the workstream trace. A design session can start members in other projects while its conversation stays at the session's project; the workgroup adopts that thread even for one selected member.
+A project is exactly one repo with its own charter, settings, entity map and dedicated project trace. The service re-seeds the entity map by itself from the upstream default branch when an architect draft starts, before the owner's plan edit, a ratification or an amendment draft is validated, and again before a sealing resolves footprints, and records a revision only when the map changes; no agent writes it. Each workstream has its own complete trace, branch and PR. A cross-project workgroup's separate trace under `workgroups/<group-id>/` owns its workgroup spec, fixed membership, shared manager and decisions. Direct single-project groups keep their manager in the workstream trace. A design session can start members in other projects while its conversation stays at the session's project; the workgroup adopts that thread even for one selected member.
 
 Nothing is authoritative in two places, and every trace stays
 outside target clones. Each trace is one SQLite database, `trace.db`, in its
@@ -29,7 +29,7 @@ as files. Every write is one database transaction. Go reads current state on eac
 an event wakes a pass early but does not carry the state transition.
 
 One owner start hands the design brief to production drafting and allocation;
-the chief of staff opens a new thread from the brief and the attached design transcript, and the design conversation's own thread, which belongs to the designer role, is not continued. For several
+the manager opens a new thread from the brief and the attached design transcript, and the design conversation's own thread, which belongs to the designer role, is not continued. For several
 selected projects, one ratification pins the workgroup spec and all member revisions. Until every pinned member seal
 completes, no member has effective group approval or can build or release a
 contract edge. Restart reconciles the same durable decision, without another
@@ -38,7 +38,7 @@ gate. Every PR still needs its own delivery approval and owner signing.
 Ordinary file, issue and stdin hand-ins use an owner-selected ordered project list, with the first project home. A single project uses ordinary drafting and ratification. Several projects use the shared allocation and join path and all-member packet without an architect selection turn. Design start pins the brief text, revision and ordered list durably, preserving the same member identities through recovery. Each member's charter governs its slice and units; the shared spec and contracts satisfy every member's charter.
 
 Repo/member bindings preserve shared authority when a terminal member is
-archived (by the owner, or by the chief of staff when its pull request merged) and legitimately cleanup-deleted. Archive identity, verified
+archived (by the owner, or by the manager when its pull request merged) and legitimately cleanup-deleted. Archive identity, verified
 resolution and cleanup intent keep survivor reads, conversation, dispatch,
 events, questions and group journals usable without reviving a retired trace.
 Unknown or corrupt live history yields errors or recoverable holds. Pending
@@ -46,7 +46,7 @@ approved effects retain their original pins; unavailable history never grants
 completion. Archive does not establish merge or release dependencies.
 
 Resolution retires a member's own documents and workspaces from active state.
-The workgroup spec remains active for the shared chief and unresolved members
+The workgroup spec remains active for the shared manager and unresolved members
 until all members resolve (merged or cancelled). A ready but unmerged PR keeps
 its member unresolved. Traces and decisions remain until archive.
 The same snapshot-based predicate governs live resolution, archive pins and
@@ -207,7 +207,7 @@ behaviour; this section locates it.
 - **Hard prerequisites** filter the targets when the exit is built and are
   checked again against current state each time a target is applied, whoever
   chose it (a Jev pick, a degraded default, a pick recovered after a restart, a
-  chief of staff's move, a pinned decision, a card), because a budget or an operation
+  manager's move, a pinned decision, a card), because a budget or an operation
   can change without the subject's state version changing. They are: a
   candidate exists, for the targets that need one; no landing, rebase or
   publication is in flight; `merged` only after a landing; budgets and the loop
@@ -216,11 +216,11 @@ behaviour; this section locates it.
   decision; and an owner gate (ratification, delivery approval and publication,
   abandonment, a unit approved without independent review, an intent change)
   only on an exit that carries an owner decision or one of Jev's existing gate
-  decisions. A chief of staff's move and a `decide-transition` answer carry
-  neither; a chief move is otherwise a pinned move, entered as the chief made it
-  with `chief_of_staff` as its `decided_by`. A
+  decisions. A manager's move and a `decide-transition` answer carry
+  neither; a manager move is otherwise a pinned move, entered as the manager made it
+  with `chief_of_staff`, the manager's stored name, as its stored `decided_by`. A
   target that has become illegal records `Refuse`, commits nothing, runs no
-  effect and leaves the subject held with one notice for the chief of staff.
+  effect and leaves the subject held with one notice for the manager.
   The checks depend on the target and never on how it was reached: a pinned
   decision and a default that carries its own entry effects meet the budget and
   loop-guard limits like a Jev pick, and only the landing or rebase whose
@@ -242,10 +242,10 @@ behaviour; this section locates it.
   redraft, a reopen, another debate round, a return to delivered and a dropped
   dependency need `[jev] decision_threshold`. Orderings that disagree, or a
   best target under its bar while the default does not fit, hold the subject and
-  tell the chief of staff once; a way forward that would change intent goes to
+  tell the manager once; a way forward that would change intent goes to
   the owner.
 - **Soft policies** (`mason.max_clean_turns`, the review send-back count,
-  `maxFinalRounds`, dependency waits and the chief of staff's own rules for
+  `maxFinalRounds`, dependency waits and the manager's own rules for
   contests and `move_workstream`) set the default and no longer stop the
   router; Jev may depart from them at the target's bar.
 - **Degraded mode.** A request that times out, is cooled down, fails or is too
@@ -318,7 +318,7 @@ OpenCode `websearch` and `webfetch`) to a turn's native tools; the service runs
 no search or fetch of its own and keeps no record of web reads. Only the
 planning roles hold it: the design session, the exploratory session, the
 architect on every turn path (including a workgroup's project-spec draft and
-delta amendment turns), the ordinary chief of staff and the committee in plan
+delta amendment turns), the ordinary manager and the committee in plan
 and amendment debate rounds (including a workgroup's delta review). Masons, reviewers, final reviewers and the
 foreman never do, whatever a service grant
 says, and no configuration key changes that. A role that holds it keeps its
@@ -346,7 +346,7 @@ service builds a labelled current turn context block for each turn when it
 runs and puts it at the head of the turn's own prompt, never in the durable
 request, so the owned log that replay renders holds no stale copies. The block
 holds the operating policy, the unit assignment, the web guidance and the
-request's `Context`: the project context a chief-of-staff turn was accepted
+request's `Context`: the project context a manager turn was accepted
 with, and a design session's workstream kinds, brief state and catalog. The
 read-only view's location and the notice that web tools are unavailable lead
 the prompt the same way.

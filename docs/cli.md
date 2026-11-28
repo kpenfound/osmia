@@ -1,8 +1,8 @@
 # Command line
 
-A project is exactly one repo with its own charter, settings and entities. A feature request runs as a workgroup across an owner-selected set of projects with one shared chief of staff, one workgroup spec and one ratification. Each member has its own workstream, branch and pull request. The web project pane shows the group under every member's project, labelled by project name, with exploratory sessions outside workgroups.
+A project is exactly one repo with its own charter, settings and entities. A feature request runs as a workgroup across an owner-selected set of projects with one shared manager, one workgroup spec and one ratification. Each member has its own workstream, branch and pull request. The web project pane shows the group under every member's project, labelled by project name, with exploratory sessions outside workgroups.
 
-The shared design's displayed name is **workgroup spec**. Stored paths such as `project-specs.json`, API fields such as `project_spec` and `project_spec_revision`, and the flag `--project-spec-revision` keep their names.
+The shared design's displayed name is **workgroup spec**. Stored paths such as `project-specs.json`, API fields such as `project_spec` and `project_spec_revision`, and the flag `--project-spec-revision` keep their names. The manager role follows the same rule: its stored identity and thread directories stay `chief_of_staff`, and its saved decision documents keep their `chief` keys (the shed `chief.json` and the contest `chief-…` paths and IDs). They are stored names, not display names. Role and decider values in the CLI's output say `manager`.
 
 [Getting started](getting-started.md) walks through installing, configuring and
 running `osmia` for the first time. To build from source instead, use
@@ -74,7 +74,7 @@ osmia status --json
 
 ## Project previews
 
-Ask the chief in the workstream conversation to show the built work. The chief
+Ask the manager in the workstream conversation to show the built work. The manager
 uses `inspect_code` at the member's committed feature head or unit candidate to
 choose a Dagger Service and HTTP port, then supplies `call` and `port` to its
 `preview` tool. The service captures one path and places an image in the feed.
@@ -85,7 +85,7 @@ The argument list passes through unchanged without shell parsing. CLI options,
 provider schemes, client environment names, escaping paths and symlinks, and
 host-writing or interactive chain steps return limitations. Assignment values,
 quote removal, comma-separated elements and whitespace are checked as Dagger
-reads them. The checks fail closed; the chief can use module defaults or
+reads them. The checks fail closed; the manager can use module defaults or
 explain a refused value. The capture accepts only a verified engine Service ID.
 
 Previews need no per-project setup. `osmia feed` renders an image as `[image: URL]`, or an archived member's
@@ -97,7 +97,7 @@ placeholder after its image bytes have been removed.
 
 Use `design send` and `design read` to discuss intent. The agent asks material readiness questions with recommended answers and collapses other assumptions on the web page. A direct owner request to add or remove a project confirms that change. An inferred change is raised as a readiness question and applied only after agreement. Optional `draft_brief.projects` replaces the list; omitting it keeps the current list. It must be nonempty, unique and active. Paused projects are allowed; the session's project can be removed while another remains.
 
-The agent titles the session with `set_title` once its context is clear, and replaces the title when the subject changes materially. A title is one non-empty line of at most 200 characters under the status goal's identifier rules (no Osmia, backend or session IDs, hashes, model names, URLs, paths or branch names); a refused title records nothing and the turn continues. The latest title is the design's `title` in `design list`, `design read` and the status entry of the session, and a session without one is shown by its workstream ID. A title starts no work and does not change the brief, its revision or a pinned Start. `osmia design list` appends the title to each titled session's line. When Start completes, the chief of staff gets one turn that titles the started work from the handed brief: it sets the work's status goal, which is the title the started workstream or workgroup shows from then on. That turn goes to the chief thread that continues the conversation: the session's own thread when its project is the sole selected project, and otherwise the workgroup's shared chief thread, whether several projects were selected or only one other project. A restarted or retried start does not send it twice, and it does not wait for `events.progress_window`.
+The agent titles the session with `set_title` once its context is clear, and replaces the title when the subject changes materially. A title is one non-empty line of at most 200 characters under the status goal's identifier rules (no Osmia, backend or session IDs, hashes, model names, URLs, paths or branch names); a refused title records nothing and the turn continues. The latest title is the design's `title` in `design list`, `design read` and the status entry of the session, and a session without one is shown by its workstream ID. A title starts no work and does not change the brief, its revision or a pinned Start. `osmia design list` appends the title to each titled session's line. When Start completes, the manager gets one turn that titles the started work from the handed brief: it sets the work's status goal, which is the title the started workstream or workgroup shows from then on. That turn goes to the manager thread that continues the conversation: the session's own thread when its project is the sole selected project, and otherwise the workgroup's shared manager thread, whether several projects were selected or only one other project. A restarted or retried start does not send it twice, and it does not wait for `events.progress_window`.
 
 `osmia design read <design-id>` prints `Title: …` when a title is set, then `Brief revision: N`, then `Projects:` with the ordered project IDs and `(home)` beside the session's project when listed, followed by brief text and the conversation. With `--json` it returns `design` (including `brief_revision`, `brief`, `projects` and, when set, `title`) and the conversation fields (`workstream` and `entries`) at the top level.
 
@@ -105,7 +105,7 @@ The agent titles the session with `set_title` once its context is clear, and rep
 
 The web's read-only **Brief** panel above Start shows the latest revision and project names with home marked; brief text is collapsed by default. It refreshes when a brief is recorded. The project list is not editable there: request changes in the conversation. Start sends the displayed revision, surfaces a conflict and refreshes the panel when the brief changed.
 
-Start records the brief's ordered list as the owner's decision and allocates one member per project without an architect selection turn. The handed text, revision and list are durably bound through crashes and retries; recovery completes the exact start once or leaves it safely retryable with nothing allocated. The brief wins over its reference transcript. The conversation and shared chief stay at the session's project even when it is not a member. The shared chief opens a new thread from the brief and the design transcript; the design agent's thread is not continued. The original design ID continues to work for conversation, packet and ratification. One ratification approves the workgroup spec, graph and every slice; all members wait for seal completion. Project membership stays fixed until ratification; to change it, abandon and hand in again. Afterwards amend/cancel retain their existing behavior. Every member keeps its own delivery approval.
+Start records the brief's ordered list as the owner's decision and allocates one member per project without an architect selection turn. The handed text, revision and list are durably bound through crashes and retries; recovery completes the exact start once or leaves it safely retryable with nothing allocated. The brief wins over its reference transcript. The conversation and shared manager stay at the session's project even when it is not a member. The shared manager opens a new thread from the brief and the design transcript; the design agent's thread is not continued. The original design ID continues to work for conversation, packet and ratification. One ratification approves the workgroup spec, graph and every slice; all members wait for seal completion. Project membership stays fixed until ratification; to change it, abandon and hand in again. Afterwards amend/cancel retain their existing behavior. Every member keeps its own delivery approval.
 
 **Open a design session** uses `POST /v1/design`; the design read is `GET /v1/design/{workstream}`. All design commands support `--json`.
 
@@ -185,7 +185,7 @@ retried without recording an outcome; closed without merge remains unresolved.
 
 On member resolution (merged or cancelled), its own slice, spec, plan and
 workspaces leave active state and bundles. The workgroup spec remains active
-for the shared chief and all unresolved members until every member resolves,
+for the shared manager and all unresolved members until every member resolves,
 including a dependent waiting on or repairing after a merge. At both levels,
 trace history is retained until archive. Archiving and eligible cleanup
 of one terminal member preserve the survivor's original conversation and
@@ -202,7 +202,7 @@ propose them.
 
 ## Amend and cancel
 
-Send an amend or cancel request to the shared chief in any member's conversation,
+Send an amend or cancel request to the shared manager in any member's conversation,
 including the original continued design chat:
 
 ```sh
@@ -211,7 +211,7 @@ osmia send <workstream-id> "Cancel this workstream; show the dependent impact."
 osmia conversation <workstream-id>
 ```
 
-The committee debates only the amendment delta. The chief presents one impact
+The committee debates only the amendment delta. The manager presents one impact
 summary; approve or reject it in the same chat. This is the amend's only owner
 approval prompt; later approvals to mark a pull request ready remain per workstream.
 
@@ -240,7 +240,7 @@ These conversation controls do not introduce a separate `cancel` command.
 
 ## Projects and workgroups
 
-Existing non-session workstreams belong to workgroups through their existing chief threads; exploratory sessions keep their separate kind and thread. See [configuration](configuration.md#workgroups-at-startup).
+Existing non-session workstreams belong to workgroups through their existing manager threads; exploratory sessions keep their separate kind and thread. See [configuration](configuration.md#workgroups-at-startup).
 
 Use `project add` for each repo and hand-in project lists for coordinated work.
 
@@ -251,7 +251,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   `stop` requests local shutdown over the Unix socket. SIGINT and
   SIGTERM drain requests and release ownership and the socket. A live owner is
   refused; a provably stale socket is recovered automatically. The service
-  runs the architect, committee and chief-of-staff turns in each role's
+  runs the architect, committee and manager turns in each role's
   configured sandbox. A startup failure prints no detail; run `doctor`.
 - `client --server URL --slots N [--dir PATH]` runs model sessions on this
   machine for the server at URL, which is the server's tailnet API. It runs on
@@ -307,8 +307,8 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   costs no attempt names a provider for), the
   capacity (`Capacity (per workstream <n>):`, then
   `<role>: <used> of <limit> slot(s) in use`, with `, <n> waiting` appended when work
-  waits, for mason, reviewer, committee, checks and chief (the factory-wide
-  `capacity.manager` pool of background chief-of-staff turns, whose waiting
+  waits, for mason, reviewer, committee, checks and manager (the factory-wide
+  `capacity.manager` pool of background manager turns, whose waiting
   entries are the queued turns, oldest first), and `<role>: <used> in use, unbounded (no factory-wide
   limit; at most one turn per workstream)` for the architect, which
   no configuration setting limits, each followed by `Waiting: <workstream> turn <turn> of <agent>
@@ -338,7 +338,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   drift rebase (`Drift: rebase <n> <outcome> at <time>`) once it has one, a
   `hill-climb` workstream's one-line climb summary (`Progress: 14 attempts ·
   attempt 15 measuring · best −18.4%`), and the
-  chief of staff's goal and attention (`Attention: none` when nothing needs
+  manager's goal and attention (`Attention: none` when nothing needs
   you), or `no status yet`. The overview leaves archived workstreams out;
   `osmia status <workstream-id>` still shows an archived one. Open owner gates
   appear under the workstream even before a status is written. Write the charter with
@@ -350,7 +350,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   once the workstream is building, and for a landed unit its commit on the
   feature branch, the reviewed candidate and base with the approval that
   landed it, and the criteria it meets, then the full status (goal, attention, note, one line per active
-  agent, and when it was written), or `Status: none yet` before the chief of
+  agent, and when it was written), or `Status: none yet` before the manager of
   staff writes one. `Live agents:` below the narrative lines shows each active
   or parked turn's role, optional unit, state, RFC 3339 start time, elapsed
   seconds, effective profile, optional attempt number and `resume` or `replay`
@@ -371,17 +371,17 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   transition on which Jev departed from the default state, and after no other:
   a followed default, a fallback, a move an owner or one of Jev's gate decisions
   authorised and a reviewer's verdict print nothing extra.
-- `send <workstream-id> <message>` sends a message to the workstream's shared workgroup chief
+- `send <workstream-id> <message>` sends a message to the workstream's shared workgroup manager
   of staff. The message is one argument; quote it. The service records it
   before answering, and the output names the message's turn ID and its state
-  (`queued`). The chief of staff answers it as its next turn, after any turn
+  (`queued`). The manager answers it as its next turn, after any turn
   already running. A message to an abandoned workstream is recorded but never
   answered; the next service start completes it as cancelled and
   `conversation` lists it as `failed`. An empty message, or a workstream the active project does
   not hold, fails with `validation` (exit 4); with no project configured it
   fails with `no_project` (exit 4).
 - `conversation <workstream-id>` lists the owner's messages to its
-  workgroup's shared chief of staff and its final responses, oldest first. Each
+  workgroup's shared manager and its final responses, oldest first. Each
   entry shows when it was sent or answered, who wrote it, its turn ID and the
   turn's state (`queued`, `running`, `done` or `failed`), then its text
   indented. It fails like `send`.
@@ -391,13 +391,13 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   **Mark ready for review** decisions, **Checks missing** questions, final
   reviews whose pull request checks did not complete, failing publications,
   parked bases, notices held from
-  the chief of staff and loop guard pauses. The service retires undecided
+  the manager and loop guard pauses. The service retires undecided
   amendments when the sealed spec or plan moves past their filing seal; the
   owner receives no card for them, even before the retirement pass runs.
   Questions escalated together are one entry, headed by its inbox number, when
   it was escalated, its workstream and batch; any other entry is headed by its
   kind, when it opened, its workstream and its unit or amendment. Each shows
-  the question (the chief of staff's rephrasing of an escalation, the
+  the question (the manager's rephrasing of an escalation, the
   service's statement of any other decision), what is blocked, the options
   (`none until what blocks it is resolved` for a ratification packet an
   objection blocks), the recommendation when there is one and each escalated question as its asker
@@ -420,15 +420,15 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   held drift rebase, whose conflict resolution review
   sent back `shed.max_bounces` times, or whose drift mason or reviewer turn
   failed or ended without a verdict, is answered with `rebase`, which
-  asks for another, or by asking the chief of staff with `send` to hand it
+  asks for another, or by asking the manager with `send` to hand it
   back with a note its drift mason and reviewer receive; it leaves the inbox
   once either is recorded.
   A parked base is a workstream whose base workstream, or an ancestor of it,
-  was abandoned or lost its branch; nothing of it runs but the chief of staff
+  was abandoned or lost its branch; nothing of it runs but the manager
   and the check of its base. When its own base was abandoned it is answered
   with `upstream`; otherwise it leaves the inbox once the base is available
   again, or you abandon the workstream.
-  Notices are held once the chief of staff's turns delivering them failed five
+  Notices are held once the manager's turns delivering them failed five
   times in a row; `send` a message once the cause is fixed, and they follow
   its answer. A loop guard pause, set when a workstream ran
   `loop.max_sessions` sessions without progress, is answered with `resume`. Decided entries, superseded packet revisions and entries of an
@@ -440,7 +440,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   contested unit or an escalated objection reaches its gate, the service asks
   Jev once, in a worker of its own, with what the card shows and only the
   options that need none of your words: `ratify`; `approve` or `reject`; one of
-  the options the chief of staff wrote; `review`; `dismissed` or `overruled`.
+  the options the manager wrote; `review`; `dismissed` or `overruled`.
   When Jev's confidence reaches `jev.decision_threshold` its pick is recorded as
   the decision, with Jev as its actor and a link to its judgment, the flow
   continues as if you had chosen it and the entry never reaches the inbox.
@@ -448,7 +448,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   records a decision; they leave out a gate while its judgment is pending. When
   Jev answers below the threshold, defers or falls back, the entry reaches you
   as usual and is not judged again; its recommendation is Jev's pick with its
-  confidence (the entry's `jev` field) when Jev gave one, and the chief of
+  confidence (the entry's `jev` field) when Jev gave one, and the manager of
   staff's when it did not. A confident pick the service cannot carry out, such
   as a ratification of a plan that stopped validating, also leaves the entry
   with you, showing Jev's judgment. Your own decisions (the delivery card,
@@ -456,10 +456,10 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   change, a presented cancellation and your own objections) are sent to Jev the
   same way and are binding at `jev.owner_threshold` instead; `charter` and
   `delivery` label a decision Jev made "decided by Jev". An option that needs
-  words is sent only when the chief of staff already wrote them.
+  words is sent only when the manager already wrote them.
 - `answer <inbox-number> <ruling>` records your ruling on an inbox entry. The
   ruling is one argument; quote it. The service records it before answering;
-  the chief of staff then rephrases it for every asker of the entry, whose
+  the manager then rephrases it for every asker of the entry, whose
   threads resume with it as their next turn. The number is the one `inbox`
   shows; it stays the entry's number for the life of the project. A number
   that is not a positive integer is a usage error (exit 2). An empty ruling or
@@ -480,7 +480,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   nothing. A number that is not a positive integer, or a ruling given as well,
   is a usage error (exit 2). The inbox JSON response includes
   `quick_reply` for clients to inspect before offering acceptance.
-- `charter` lists the charter rules the chief of staff proposed from your
+- `charter` lists the charter rules the manager proposed from your
   rulings that wait for your decision, oldest first: the workstream and
   question, the rule and the number it would take, the ruling it comes from
   and your words in it. `charter <workstream-id> <question>` shows one
@@ -495,11 +495,11 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   argument; quote it. Deciding again the same way prints the recorded
   decision; deciding the other way fails with `conflict` (exit 5), as does a
   proposal of an abandoned workstream. An unknown proposal fails with
-  `not_found` (exit 4). You can also tell the workstream's chief of staff your
+  `not_found` (exit 4). You can also tell the workstream's manager your
   decision with `send`.
 - `contested <workstream-id> <unit> <review|revise> <note>` records your
   direction for a contested unit shown by `status`. Quote the required note.
-  The workstream's chief of staff rules on a contest first when it is
+  The workstream's manager rules on a contest first when it is
   confident, and raises the rest to your inbox with its findings; you can
   rule on any contested unit yourself.
   `review` requests another reviewer verdict on the same candidate; `revise`
@@ -530,11 +530,11 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   carries. A workstream whose pull request is merged or closed, or whose merge
   you recorded with `merged`, does not reopen. A move the workstream's state
   refuses, or one made while its publication is in flight, fails with
-  `conflict` (exit 5). The chief of staff proposes a move to `building` or
+  `conflict` (exit 5). The manager proposes a move to `building` or
   `assembled`, and the router commits it by default. A redraft (`sketched`),
   another round (`in-shed`) and a return to `delivered` leave the workstream
   where it is by default, and Jev may depart from that. A proposal for a
-  gate (`ratified`, `abandoned`) waits on a card for you; the chief tells you
+  gate (`ratified`, `abandoned`) waits on a card for you; the manager tells you
   what it did or points to the card. After three final reviews with blocking findings,
   the default is that reopening is yours to decide: a proposal to reopen leaves
   the workstream where it is and tells you, unless Jev departs from that default
@@ -553,7 +553,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   `ready` kicks it) or to `planned` (while one has not). A unit the foreman is
   landing or rebasing fails with `conflict` (exit 5), as does a started unit
   moved to `ready` or `planned`, an unstarted one moved to a state of started
-  work, or a merged unit; an unknown unit fails with `not_found` (exit 4). The chief of staff
+  work, or a merged unit; an unknown unit fails with `not_found` (exit 4). The manager
   moves units on your behalf too, within the limit it shares with its
   contested rulings, and moves a unit when you ask it to with `send`.
 - `abandon <workstream-id> <reason>` abandons a workstream of the active
@@ -589,7 +589,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   stays delivered. `project rebase` asks the same of every eligible
   workstream of a project.
 - `checks <workstream-id> keep-waiting|continue` answers the `Checks missing`
-  inbox entry the chief of staff opened when a push's Dagger Cloud check
+  inbox entry the manager opened when a push's Dagger Cloud check
   results did not appear (or the project has no Cloud Checks). `keep-waiting`
   leaves the watch of the pull request's statuses running and records no
   result. `continue` lets the final review of that pushed commit start
@@ -597,10 +597,10 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   and that you chose to continue. The answer applies to the push the entry
   names only: when a later push supersedes it the entry closes, and the
   command fails with `conflict` (exit 5) instead of applying to the new push.
-  Only you can give the answer; the chief of staff cannot.
+  Only you can give the answer; the manager cannot.
 - `recover <workstream-id> [unit-id] [--json]` approves the move of the
   `Approve this recovery move` inbox entry of that workstream (of that unit,
-  when the workstream has several): a stall that neither Jev nor the chief of
+  when the workstream has several): a stall that neither Jev nor the manager of
   staff cleared, or a move that belongs to you. The entry shows the exact
   move (the subject, the state and version it was read at, the target and
   why), and the command submits that move and nothing else. The router
@@ -629,11 +629,11 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   exists, its delivery link (the pull request URL, or the recorded upstream
   commit for an owner-recorded merge); `status <workstream-id>` marks it
   `archived=true` and names who archived it, `archived_by=owner` or
-  `archived_by=chief_of_staff`. The chief of staff archives a delivered
+  `archived_by=manager`. The manager archives a delivered
   workstream by itself when its own pull request merges, so you rarely need
   to; the owner's archive stays available for every terminal workstream, and an
-  archive that exists is never replaced, so `archive` on a workstream the chief
-  of staff archived changes nothing and reports the chief of staff. The service
+  archive that exists is never replaced, so `archive` on a workstream the manager
+  of staff archived changes nothing and reports the manager. The service
   then deletes the workstream's own independent
   storage, its dedicated trace repository and its temporary workspaces,
   including handed inputs, decisions, turns and complete check output, from
@@ -717,7 +717,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   (exit 4).
 - `amendment <workstream-id> <n>` shows amendment `n` of a building or
   assembled workstream: its state, the debate round it reached, the packet the
-  chief of staff presented (when available) with its revision, and the latest
+  manager presented (when available) with its revision, and the latest
   decision with its actor, labelled `(decided by Jev)` when Jev made it.
   `amendment <workstream-id> <n> <approve|reject|round|overrule|withdraw> [note]`
   decides it. Cards recommend `approve` or `do not approve yet` using these
@@ -728,7 +728,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   veto, size or acceptance objection stands. `overrule` approves over the
   objections that stand and records them. `reject` leaves the sealed spec and
   plan in force. `round` asks the committee for one more bounded debate round,
-  up to `shed.max_rounds` rounds in all, after which the chief of staff
+  up to `shed.max_rounds` rounds in all, after which the manager
   presents the amendment again. The requester receives your ruling as its next
   turn and the unit it parked resumes its stage. The note is optional and is
   one argument; quote it. Deciding the same packet revision again the same way
@@ -740,23 +740,23 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   sealed spec and plan in force and delivers the ruling to the requester like
   a rejection. A presented amendment is rejected instead. An
   unknown amendment fails with `not_found` (exit 4). You can also tell the
-  workstream's chief of staff your decision with `send`.
+  workstream's manager your decision with `send`.
   While building or assembled, the service retires every undecided amendment
   whose sealed spec or plan no longer matches its filing seal, including one
   still being drafted or debated. The owner receives no card and makes no
   decision. The recorded rejection names the service, its reason and the
   replacing seal. The requester receives one ruling and its waiting unit
-  resumes; the chief of staff is notified that the change can be filed again
+  resumes; the manager is notified that the change can be filed again
   against the current seal if still needed. Retirement changes no sealed
   documents and survives restarts without another decision or ruling.
   Approval and overrule of a stale request are refused. An upstream base
   move alone retires nothing; current-seal options and gates stay in force.
 - `delivery <workstream-id>` shows an assembled workstream's final report and
   the **Mark ready for review** decision about its draft pull request.
-  It starts with the chief of staff's delivery brief for that review: the
+  It starts with the manager's delivery brief for that review: the
   brief's text, each **Before you ship** item and a link (the image's path on
   the service) per screenshot, or "No brief was recorded for this review", or a
-  line saying the chief of staff is still writing it. The `brief` field of
+  line saying the manager is still writing it. The `brief` field of
   `--json` carries the same with a `state` of `waiting`, `recorded` or
   `none_recorded`, and `feed` lists the brief as its own `brief` entry. Then it
   shows the report's summary, blocking then advisory findings, a `Checks:` line
@@ -1024,7 +1024,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   input, or a URL of another shape, fails with `validation` (exit 4); an issue
   the service cannot fetch fails with `internal` (exit 5). A refused hand-in
   creates nothing. Repeat `--with <project-id>` to add members in argument order;
-  the positional project is home for the shared chief and conversation. The API
+  the positional project is home for the shared manager and conversation. The API
   accepts an ordered `projects` list, with `project` as a one-element shorthand.
   The web form offers a multi-select of every active project. Go refuses empty
   or duplicate lists and inactive projects; paused projects are allowed. A single-project hand-in keeps ordinary drafting and ratification.
@@ -1035,11 +1035,11 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   its own charter; the workgroup spec and contracts obey all member charters.
   Use `<project>/charter#n` for another project's rule and `charter#n` for the
   member's own. Charter conflicts go to the owner and cannot be dismissed by
-  the chief; amendments are decided in the project whose rule they change.
+  the manager; amendments are decided in the project whose rule they change.
   The project set is fixed until ratification. To choose a different set,
   abandon and hand in again; afterwards amend/cancel behave as usual. Every
   member gets the immutable input, and the original conversation continues as
-  the one shared chief thread. Allocation and join recover without duplicate
+  the one shared manager thread. Allocation and join recover without duplicate
   members. `--base` must name a workstream in a selected project and applies
   only to that project's member.
 
@@ -1069,7 +1069,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
 - `priority set <workstream-id>...` stores the ordered list of the project the
   workstreams belong to; while several projects are active the project is
   found from the first workstream.
-  The chief of staff sets the same list when you ask it to in a message.
+  The manager sets the same list when you ask it to in a message.
   `priority clear` removes that preference; while several projects are active
   it fails with `validation` (exit 4) and lists the active project IDs. Both,
   and `pause`/`resume` of a workstream, need an active project and say so
@@ -1240,7 +1240,7 @@ Project and workstream arguments are persistent IDs (`p_` or `w_` followed by
 32 lowercase hexadecimal digits), not display names. Workstream IDs must be known
 to the service's record repository. The standalone entry point does not
 discover workstreams. The runtime commands store controls. A pause holds new
-worker turns in its scope while chief-of-staff turns still run; priority orders
+worker turns in its scope while manager turns still run; priority orders
 which workstream starts units and takes freed turn slots first.
 
 ## Output and exit codes
@@ -1366,7 +1366,7 @@ estimates the memory the sandboxes could hold at once: each of the mason,
 reviewer and committee pools counts `capacity.masons`, `capacity.reviewers` or
 `capacity.committee` sandboxes of its role's `memory`, and the architect
 counts once, since it has no factory-wide limit and runs one
-turn per workstream (the chief of staff and foreman count once each too, when
+turn per workstream (the manager and foreman count once each too, when
 they use `sbx`). A role without `memory` counts at `sbx`'s default, half the
 host's memory between 512 MiB and 32 GiB. Only `sbx` roles count. When the
 total exceeds the host's memory the check is a warning, never a failure, whose
