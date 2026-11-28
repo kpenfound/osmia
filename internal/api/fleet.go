@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // ClientProtocolVersion is the version of the client protocol. The server and
@@ -280,6 +281,10 @@ type TurnOffer struct {
 	// from it.
 	ReturnView bool `json:"return_view,omitempty"`
 }
+
+// ShownRole is the offered role as the client's logs name it: the stored name
+// of the manager reads as its display name. Role is not changed.
+func (o TurnOffer) ShownRole() string { return trace.DisplayRole(o.Role) }
 
 // TurnCancel asks a client to cancel a turn it runs or was offered.
 type TurnCancel struct {

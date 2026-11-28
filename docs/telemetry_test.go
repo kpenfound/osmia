@@ -54,7 +54,7 @@ func TestTelemetryPageListsWhatTheCodeSends(t *testing.T) {
 	documented(t, "slot outcome", slotspans.Released, slotspans.Granted, slotspans.Canceled, slotspans.Removed, slotspans.Blocked, slotspans.Abandoned, slotspans.Interrupted)
 	documented(t, "wait reason", slotspans.ReasonCapacity, slotspans.ReasonWorkstreamCap, slotspans.ReasonClient, slotspans.ReasonNoClient)
 	documented(t, "factory outcome", "reloaded", "shutdown", "replaced")
-	documented(t, "decided by value", trace.DecidedByCode, trace.DecidedByJev, trace.DecidedByFallback, trace.DecidedByOwner, trace.DecidedByJevGate, trace.DecidedByReviewer)
+	documented(t, "decided by value", trace.DecidedByCode, trace.DecidedByJev, trace.DecidedByFallback, trace.DecidedByOwner, trace.DecidedByJevGate, trace.ManagerDisplay, trace.DecidedByReviewer)
 	documented(t, "route outcome", recordspans.RouteOutcomes...)
 	documented(t, "confidence band", recordspans.ConfidenceBands...)
 	documented(t, "route trigger", recordspans.RouteTriggers...)

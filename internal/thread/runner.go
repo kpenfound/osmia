@@ -89,7 +89,7 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 			return trace.QueuedTurn{}, err
 		}
 		if !r.AdmitRole(thread.Identity.Role) {
-			return trace.QueuedTurn{}, fmt.Errorf("provider usage limit pauses role %s", thread.Identity.Role)
+			return trace.QueuedTurn{}, fmt.Errorf("provider usage limit pauses role %s", trace.DisplayRole(thread.Identity.Role))
 		}
 	}
 	q, err := r.Store.ClaimTurn(ctx, stream, agent, rand.Text(), prepared.SessionDirectory, r.Now())

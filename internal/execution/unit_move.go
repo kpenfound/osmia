@@ -285,7 +285,7 @@ func approvalRecord(repo *trace.Repository, stream config.WorkstreamID, unit str
 			latest = d
 		}
 	}
-	result := UnitReviewResult{Identity: identity, Turn: move, Verdict: UnitVerdict{Decision: "satisfactory", Summary: fmt.Sprintf("The %s approved candidate %s by moving the unit to approved: %s", by, identity.Candidate.Revision, note), Findings: []ReviewFinding{}}}
+	result := UnitReviewResult{Identity: identity, Turn: move, Verdict: UnitVerdict{Decision: "satisfactory", Summary: fmt.Sprintf("The %s approved candidate %s by moving the unit to approved: %s", trace.DisplayRuler(by), identity.Candidate.Revision, note), Findings: []ReviewFinding{}}}
 	var prior UnitReviewResult
 	if latest.Revision > 0 && json.Unmarshal([]byte(latest.Content), &prior) == nil {
 		result.Bounces = prior.Bounces

@@ -24,6 +24,7 @@ import (
 	"github.com/kpenfound/osmia/internal/doctor"
 	"github.com/kpenfound/osmia/internal/fleet"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // snapshot is every file and directory under dir with its content and whether
@@ -254,7 +255,7 @@ func TestAViewOfTraceDocumentsIsUnpackedFromItsArchive(t *testing.T) {
 	put(t, documents, "units/a.md", "a\n")
 	r.srv.register("turn-docs", "token-docs", documents)
 	offer := r.offer("turn-docs", func(o *api.TurnOffer) {
-		o.Role, o.View, o.ToolToken, o.Capabilities, o.ReturnView = "chief_of_staff", api.TurnView{Kind: api.ViewArchive}, "token-docs", coreadapter.Capabilities{Tools: []string{"file_read"}}, false
+		o.Role, o.View, o.ToolToken, o.Capabilities, o.ReturnView = trace.Manager, api.TurnView{Kind: api.ViewArchive}, "token-docs", coreadapter.Capabilities{Tools: []string{"file_read"}}, false
 	})
 	view, err := c.buildView(context.Background(), offer, "token-docs", filepath.Join(c.dir, "turns", "turn-docs", "views"))
 	must(t, err)
@@ -447,6 +448,36 @@ func TestTheFirstInterruptDrainsTheClient(t *testing.T) {
 	}
 	if len(r.srv.resultsOf("turn-b")) != 0 {
 		t.Fatal("a turn offered during the drain ran")
+	}
+}
+
+func TestTheClientLogsAManagerTurnsRoleAsManager(t *testing.T) {
+	r := newRig(t, fleet.Options{})
+	release, started := make(chan struct{}), make(chan struct{}, 1)
+	r.engine.script = func(ctx context.Context, turn *enforcertest.Turn) (*agent.Result, error) {
+		started <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return finished(turn)
+	}
+	r.start()
+	r.waitConnected()
+	if claim := r.give(r.offer("turn-a", func(o *api.TurnOffer) { o.Role = trace.Manager })); !claim.Accepted {
+		t.Fatalf("claim: %+v", claim)
+	}
+	<-started
+	r.interrupts <- struct{}{}
+	waitFor(t, "the drain to list the running turn", func() bool { return strings.Contains(r.logs.String(), "waiting for a running turn") })
+	close(release)
+	if err := r.waitExit(); err != nil {
+		t.Fatal(err)
+	}
+	logs := r.logs.String()
+	if !strings.Contains(logs, "role=manager") || !strings.Contains(logs, "turn-a (manager, ") || strings.Contains(logs, trace.Manager) {
+		t.Fatalf("the client's log names the manager turn's role:\n%s", logs)
 	}
 }
 

@@ -113,6 +113,36 @@ func RoundRecords(records []shed.Record, round int) []shed.Record {
 	return out
 }
 
+type amendmentPacket struct {
+	Round          int             `json:"round"`
+	Request        trace.Amendment `json:"request"`
+	Spec           string          `json:"spec"`
+	Plan           string          `json:"plan"`
+	Affected       json.RawMessage `json:"affected"`
+	Dissent        []shed.Entry    `json:"dissent"`
+	Reply          json.RawMessage `json:"reply"`
+	Recommendation string          `json:"recommendation"`
+}
+
+func shownPacket(content string) json.RawMessage {
+	stored := json.RawMessage(content)
+	var packet amendmentPacket
+	if json.Unmarshal(stored, &packet) != nil {
+		return stored
+	}
+	r := &packet.Request
+	if !slices.Contains([]string{r.Role, r.Thread, r.Requester.ID, r.Actor.ID}, trace.Manager) {
+		return stored
+	}
+	r.Role, r.Thread = trace.DisplayRole(r.Role), trace.DisplayRole(r.Thread)
+	r.Requester, r.Actor = r.Requester.Display(), r.Actor.Display()
+	shown, err := json.MarshalIndent(packet, "", "  ")
+	if err != nil {
+		return stored
+	}
+	return shown
+}
+
 func AmendmentDissent(records []shed.Record) []shed.Entry {
 	return shed.DissentRecord(records, nil, nil)
 }
@@ -746,16 +776,7 @@ func (a AmendmentDebate) Present(ctx context.Context, stream config.WorkstreamID
 	}
 	dissent := AmendmentDissent(records)
 	recommendation := AmendmentRecommendation(dissent, records, round < a.S.Current().Shed.MaxRounds)
-	packet := struct {
-		Round          int             `json:"round"`
-		Request        trace.Amendment `json:"request"`
-		Spec           string          `json:"spec"`
-		Plan           string          `json:"plan"`
-		Affected       json.RawMessage `json:"affected"`
-		Dissent        []shed.Entry    `json:"dissent"`
-		Reply          json.RawMessage `json:"reply"`
-		Recommendation string          `json:"recommendation"`
-	}{round, req, spec, graph, json.RawMessage(affected), dissent, json.RawMessage(reply), recommendation}
+	packet := amendmentPacket{round, req, spec, graph, json.RawMessage(affected), dissent, json.RawMessage(reply), recommendation}
 	data, err := json.MarshalIndent(packet, "", "  ")
 	if err != nil {
 		return err

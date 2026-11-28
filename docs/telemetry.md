@@ -96,7 +96,7 @@ single identifier-shaped word, is dropped before the span is sent.
 | `osmia.record.id` | the trace record the span came from | turns, check runs, `osmia.loop_guard.trip` |
 | `osmia.client.id` | the client that ran the turn or whose slot the interval covers: the tailnet node's stable ID of an `osmia client`, or `local` for the server's own machine. A wait span carries it only when the turn waits for one client, as a resumed turn waits for the client holding its session | turns, slot spans of turns |
 | `osmia.state`, `osmia.next_state` | state names; on a route span `osmia.next_state` is the state the subject is in once the exit is decided (a held subject stays where it is) | `osmia.workstream.state`, `osmia.unit.state`, `osmia.transition.route` |
-| `osmia.decided_by` | see [routing values](#routing-values): `code`, `jev`, `fallback`, `owner`, `jev_gate`, `reviewer` | `osmia.workstream.state`, `osmia.unit.state`, only when the transition router chose the transition that ended the state |
+| `osmia.decided_by` | see [routing values](#routing-values): `code`, `jev`, `fallback`, `owner`, `jev_gate`, `manager`, `reviewer` | `osmia.workstream.state`, `osmia.unit.state`, only when the transition router chose the transition that ended the state |
 | `osmia.default_state` | the state the default would have entered | the same spans, and `osmia.transition.route` |
 | `osmia.deviated` | `true` when the transition entered a state other than its default, `false` when it entered the default | `osmia.workstream.state`, `osmia.unit.state`, only when the transition recorded its default |
 | `osmia.trigger` | see [triggers](#triggers) | `osmia.transition.route` |
@@ -207,6 +207,7 @@ before the router existed, carries none of the three attributes.
 | `fallback` | the router committing the default because Jev could not answer (timeout, cool-down, outage or a request too large) | never |
 | `owner` | an owner decision, applied as given | never |
 | `jev_gate` | one of Jev's existing gate decisions, applied as given | always |
+| `manager` | a manager move or ruling, applied as given | never |
 | `reviewer` | a satisfactory reviewer verdict for the current candidate, which authorised the move | optional |
 
 `osmia.deviated` is `true` when the transition entered a state other than the

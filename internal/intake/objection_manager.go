@@ -104,8 +104,10 @@ const (
 
 // storedObjectionDecisionTrigger is a stored name of the manager role: the
 // trigger of the exit the manager's decision on a committee objection raises.
-// Saved routing records hold it and route spans are built from it, so the
-// value must not change.
+// Saved routing records hold it and are named from an occurrence key that holds
+// it (router.OccurrenceKey): router.Router.Route reads the record of that key,
+// and recordspans.Recorder.Route sends the span of a saved record only when its
+// trigger is listed in recordspans.RouteTriggers. The value must not change.
 const storedObjectionDecisionTrigger = "objection.chief_decision"
 
 func objectionSubject(objection string) string { return "objection-" + objection }

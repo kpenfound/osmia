@@ -520,7 +520,7 @@ func (s *Controller) amendmentGate(repository *trace.Repository, stream config.W
 		var b strings.Builder
 		GateSection(&b, "Decision", fmt.Sprintf("Amendment %s of workstream %s changes the approved intent, so it is the owner's to approve or decline. Rounds of further debate and overruling objections are the owner's, not offered here.", id, stream), 0)
 		GateSection(&b, "Card", e.Question+"\nBlocked: "+e.Blocked, 0)
-		GateSection(&b, "Request", fmt.Sprintf("Requested by %s (%s). Citations: %s\nChange: %s\nReason: %s", c.Request.Requester.ID, c.Request.Role, strings.Join(c.Request.Citations, ", "), c.Request.Change, c.Request.Reason), 0)
+		GateSection(&b, "Request", fmt.Sprintf("Requested by %s (%s). Citations: %s\nChange: %s\nReason: %s", trace.DisplayRole(c.Request.Requester.ID), trace.DisplayRole(c.Request.Role), strings.Join(c.Request.Citations, ", "), c.Request.Change, c.Request.Reason), 0)
 		GateSection(&b, "Manager's recommendation", e.Recommendation, 0)
 		if len(entries) == 0 {
 			GateSection(&b, "Dissent", "No objection stands.", 0)

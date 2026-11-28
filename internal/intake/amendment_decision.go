@@ -173,13 +173,18 @@ func ReadAmendment(repository *trace.Repository, stream config.WorkstreamID, id 
 	return c, true, nil
 }
 
+// Response is the amendment as the API reports it. The stored name of the
+// manager in the latest decision and in the packet's request becomes its
+// display name; the recorded documents are not changed.
 func (c AmendmentCase) Response(project config.ProjectID, stream config.WorkstreamID, detail string) AmendmentResponse {
 	out := AmendmentResponse{Project: project, Workstream: stream, Amendment: c.Request.ID, State: c.State.Value, Round: c.Round, Revision: c.Packet.Revision, Detail: detail}
 	if c.Packet.Revision > 0 {
-		out.Packet = json.RawMessage(c.Packet.Content)
+		out.Packet = shownPacket(c.Packet.Content)
 	}
 	if len(c.Decisions) > 0 {
-		out.Decision = &c.Decisions[len(c.Decisions)-1]
+		decision := c.Decisions[len(c.Decisions)-1]
+		decision.Actor = trace.DisplayRole(decision.Actor)
+		out.Decision = &decision
 	}
 	return out
 }
@@ -798,7 +803,7 @@ func (a AmendmentDebate) Rule(ctx context.Context, stream config.WorkstreamID, r
 		return err
 	}
 	id := "amendment-" + req.ID + "-" + AmendmentRuled
-	reason := fmt.Sprintf("the recorded ruling on amendment %s is delivered to %s", req.ID, req.Requester.ID)
+	reason := fmt.Sprintf("the recorded ruling on amendment %s is delivered to %s", req.ID, trace.DisplayRole(req.Requester.ID))
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: a.AmendmentHeader(id, stream, req.Unit, cause), Subject: AmendmentSubject(req.ID), From: state.Value, To: AmendmentRuled, Reason: reason}}
 	if _, err := a.Repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
 		return err
@@ -872,7 +877,7 @@ func (a AmendmentDebate) DeliverRuling(ctx context.Context, stream config.Workst
 // are quoted in the shared envelope.
 func AmendmentRulingPrompt(req trace.Amendment, d AmendmentDecision, role, outcome string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "A decision was recorded on amendment %s, which you asked for. Decision: %s. Actor: %s.\nOutcome: %s\n", req.ID, d.Decision, d.Actor, outcome)
+	fmt.Fprintf(&b, "A decision was recorded on amendment %s, which you asked for. Decision: %s. Actor: %s.\nOutcome: %s\n", req.ID, d.Decision, trace.DisplayRole(d.Actor), outcome)
 	switch role {
 	case MasonRole:
 		b.WriteString("Continue the unit in your existing workspace against the sealed spec and plan, and call done when its acceptance holds.\n")

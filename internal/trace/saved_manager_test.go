@@ -29,10 +29,10 @@ func TestTheStoredNameOfTheManagerIsTheNameSavedTracesHold(t *testing.T) {
 	}
 }
 
-func TestANewManagerThreadIsStoredExactlyAsTracesSavedBeforeStoredIt(t *testing.T) {
+func TestANewManagerThreadIsStoredUnderTheNamesSavedTracesHold(t *testing.T) {
 	r, _, _ := create(t)
 	s := mustScoped(t, r, streamID)
-	identity := fmt.Sprintf(savedManagerIdentity, projectID, streamID)
+	identity := strings.Replace(fmt.Sprintf(savedManagerIdentity, projectID, streamID), `"cause":"chief-of-staff-create"`, `"cause":"manager-create"`, 1)
 	if got := storedBodies(t, s, fmt.Sprintf(savedManagerIdentityPath, streamID)); len(got) != 1 || got[0] != identity {
 		t.Fatalf("stored manager identity = %q, want %q", got, identity)
 	}

@@ -41,8 +41,12 @@ func TestNotifyIsDurableIdempotentAndBoundToActiveManager(t *testing.T) {
 	if err := json.Unmarshal(first, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc.Actor.Kind != "agent" || doc.Actor.ID != Manager || doc.Workstream != "" || doc.Cause != "request_notice" {
+	if doc.Actor.Kind != "agent" || doc.Actor.ID != ManagerDisplay || doc.Workstream != "" || doc.Cause != "request_notice" {
 		t.Fatalf("notice provenance: %+v", doc)
+	}
+	var shown ProjectNotice
+	if err := json.Unmarshal([]byte(doc.Content), &shown); err != nil || shown.Scope.Role != ManagerDisplay || shown.Scope.Thread != ManagerDisplay {
+		t.Fatalf("notice result names the manager's stored identity: %+v %v", shown.Scope, err)
 	}
 	other := scope
 	other.Role = "mason"
@@ -70,6 +74,10 @@ func TestNotifyIsDurableIdempotentAndBoundToActiveManager(t *testing.T) {
 	for _, d := range docs {
 		if d.ID == doc.ID {
 			count++
+			var stored ProjectNotice
+			if err := json.Unmarshal([]byte(d.Content), &stored); err != nil || d.Actor.ID != Manager || stored.Scope != scope {
+				t.Fatalf("stored notice: %+v %+v %v", d.Actor, stored.Scope, err)
+			}
 		}
 	}
 	if count != 1 {

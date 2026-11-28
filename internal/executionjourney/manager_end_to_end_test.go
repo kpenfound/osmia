@@ -26,7 +26,6 @@ import (
 
 const (
 	savedManagerName      = "chief_of_staff"
-	savedManagerCreate    = "chief-of-staff-create"
 	savedShedPath         = "shed/round-1/chief.json"
 	savedShedID           = "shed-round-1-chief"
 	savedEscalatedPath    = "units/unit-resume/chief-event_11936ce4d9d5604f2832090d42f46fee570f429c87999860000d7d6685f54023.json"
@@ -59,7 +58,7 @@ func saveManagerTrace(t *testing.T, cfg *config.Config) {
 	}
 	saved, err := repo.ManagerThread(stream)
 	fixturekit.Must(t, err)
-	if id := saved.Identity; id.ID != savedManagerName || id.Role != savedManagerName || id.ThreadID != savedManagerName || id.Cause != savedManagerCreate {
+	if id := saved.Identity; id.ID != savedManagerName || id.Role != savedManagerName || id.ThreadID != savedManagerName || id.Cause != "manager-create" {
 		t.Fatalf("the manager thread a workstream starts with: %+v", id)
 	}
 	profile := coreadapter.Profile{Name: "other", Backend: "codex", Model: "other"}
@@ -116,7 +115,7 @@ func runCLI(t *testing.T, root string, args ...string) string {
 func neverNamesTheStoredRole(t *testing.T, what, text string) {
 	t.Helper()
 	lower := strings.ToLower(text)
-	if strings.Contains(lower, savedManagerName) || strings.Contains(lower, "chief") {
+	if strings.Contains(lower, savedManagerName) || strings.Contains(lower, trace.ManagerKey) {
 		t.Fatalf("%s names the manager by its stored name:\n%s", what, text)
 	}
 }

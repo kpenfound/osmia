@@ -5,8 +5,9 @@ package trace
 // decisions of a round live at shed/<round>/chief.json with a record ID derived
 // from it, a contest decision at units/<unit>/chief-<event ID>.json with an
 // event ID derived from it, and the manager's notices take their event IDs
-// from it. Saved traces hold these keys and their readers find decisions by
-// them, so the value must not change.
+// from it. It is also the by of the manager's follow-up records and climb
+// steering notes. Saved traces hold these keys and their readers find
+// decisions by them, so the value must not change.
 const ManagerKey = "chief"
 
 // ContestDecisionID is the event ID, and so the record ID, of the manager's
@@ -27,8 +28,12 @@ func ContestDecisionPath(subject, contest string) string {
 
 // ManagerRulerName is a stored name of the manager role: the By of the unit
 // and workstream move documents and of the contest rulings the manager made.
-// Saved traces hold it and their readers recognise the manager's moves and
-// rulings by it, so the value must not change.
+// Saved traces hold it and the readers of those records match it:
+// conversation history (internal/service/conversation.go) lists the manager's
+// unit and workstream moves by it, the trace walk (contestDecider in
+// internal/service/trace_walk.go) reports a contest ruling that holds it as
+// the manager's, and DisplayRuler, which execution.ContestRuler applies to a
+// saved ruling, shows it as the manager. The value must not change.
 const ManagerRulerName = "chief of staff"
 
 // DisplayRuler maps the By of a saved move or ruling to the name shown

@@ -541,7 +541,7 @@ func (c *Client) startDrain() {
 func (c *Client) runningList() []string {
 	var out []string
 	for id, t := range c.running {
-		out = append(out, fmt.Sprintf("%s (%s, %s)", id, t.offer.Role, t.currentPhase()))
+		out = append(out, fmt.Sprintf("%s (%s, %s)", id, t.offer.ShownRole(), t.currentPhase()))
 	}
 	return out
 }

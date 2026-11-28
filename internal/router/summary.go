@@ -111,7 +111,7 @@ func buildSummary(x Exit, legal []Target, transitions []trace.Transition, now ti
 		mine = mine[len(mine)-maxHistory:]
 	}
 	for _, t := range mine {
-		s.History = append(s.History, historyEntry{From: t.From, To: t.To, Reason: plain(t.Reason, maxReason), DecidedBy: t.DecidedBy, MinutesAgo: minutes(t.At, now)})
+		s.History = append(s.History, historyEntry{From: t.From, To: t.To, Reason: plain(t.Reason, maxReason), DecidedBy: trace.DisplayRole(t.DecidedBy), MinutesAgo: minutes(t.At, now)})
 	}
 	return s
 }

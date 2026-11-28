@@ -87,6 +87,41 @@ func TestOwnerMovesACheckingUnitBackToImplementing(t *testing.T) {
 	}
 }
 
+func TestAManagerMoveBackToImplementingTellsTheMasonTheManagerMovedIt(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f, stream, repo := newCheckingFixture(t, "move-manager")
+	reported := lastTurn(t, repo, stream, intake.MasonAgent("resume"))
+	note := "Split the shadow writer out before the checks run again."
+	out, apiErr := f.S.Execution().MoveUnit(ctx, repo, stream, "resume", api.UnitMoveRequest{To: intake.UnitImplementing, Note: note}, intake.ManagerActor, "events_1")
+	if apiErr != nil {
+		t.Fatal(apiErr.Message)
+	}
+	if out.Move.By != trace.ManagerDisplay {
+		t.Fatalf("move %+v", out.Move)
+	}
+	docs, err := trace.Read[trace.Document](repo, stream)
+	fixturekit.Must(t, err)
+	var saved []api.UnitMove
+	for _, d := range docs {
+		if strings.HasPrefix(d.Path, execution.MovePrefix("resume")) {
+			var move api.UnitMove
+			fixturekit.Must(t, json.Unmarshal([]byte(d.Content), &move))
+			saved = append(saved, move)
+		}
+	}
+	if len(saved) != 1 || saved[0].By != trace.ManagerRulerName {
+		t.Fatalf("the saved moves %+v", saved)
+	}
+
+	m := journey.NewMasonController(f.S, repo)
+	fixturekit.Must(t, m.Pass(ctx))
+	turn := lastTurn(t, repo, stream, intake.MasonAgent("resume"))
+	if turn.Sequence <= reported.Sequence || !strings.Contains(turn.Request.Prompt, "The manager moved this unit from checking back to implementing") || !strings.Contains(turn.Request.Prompt, note) || strings.Contains(turn.Request.Prompt, trace.ManagerRulerName) {
+		t.Fatalf("the mason's next turn %s: %s", turn.Request.TurnID, turn.Request.Prompt)
+	}
+}
+
 func TestMoveIntoCheckingRunsTheChecksAgain(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

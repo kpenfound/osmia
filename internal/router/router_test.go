@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/agentcore/jev/systemone"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/recordspans"
@@ -258,11 +259,34 @@ func TestOneLegalTargetIsFollowedWithoutARequest(t *testing.T) {
 	}
 }
 
+func TestTheHistoryJevReadsNamesTheManagerAsManager(t *testing.T) {
+	f := newFx(t, &jevfixture.Transitions{})
+	f.seed("implementing")
+	subject := trace.UnitSubject(unitID)
+	state, err := f.repo.Workflow(streamID, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "manager-move", Revision: 1, Project: projectID, Workstream: streamID, Unit: unitID, At: epoch, Actor: trace.Actor{Kind: "agent", ID: trace.Manager}, Cause: "seed"}
+	if _, err := f.repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: "checking", Reason: "moved", DecidedBy: trace.DecidedByManager, DefaultTo: "checking"}}); err != nil {
+		t.Fatal(err)
+	}
+	route(t, f, f.exit())
+	summary, _ := request(t, f.provider, 0)
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := string(encoded); !strings.Contains(s, `"decided_by":"manager"`) || strings.Contains(s, trace.Manager) {
+		t.Fatalf("the summary Jev reads: %s", s)
+	}
+}
+
 func TestNoCandidateFiltersOnlyTargetsThatNeedOne(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("contested")
 	x := f.exit()
-	x.Trigger, x.Default = "contest.chief_ruling", "revise"
+	x.Trigger, x.Default = execution.TriggerManagerRuling, "revise"
 	x.Targets = []router.Target{
 		{Name: "revise", Description: "Revise the unit with its mason."},
 		{Name: "review", Description: "Review the candidate again.", NeedsCandidate: true},

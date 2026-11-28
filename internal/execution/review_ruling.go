@@ -66,7 +66,7 @@ func LatestMasonRuling(repo *trace.Repository, stream config.WorkstreamID, unit 
 				continue
 			}
 			ruling = masonRuling{ContestedRuling: ContestedRuling{Decision: "revise", Note: move.Note, By: move.By, Contest: d.ID, ResetTurn: move.ResetTurn}, turn: masonAgent(unit) + "-" + strings.TrimPrefix(d.ID, trace.UnitSubject(unit)+"-"),
-				prompt: fmt.Sprintf("The %s moved this unit from %s back to implementing, for you to revise in your existing workspace. Note: %s\nCheck the unit's acceptance, then call done or ask if you need a decision.", move.By, move.From, move.Note)}
+				prompt: fmt.Sprintf("The %s moved this unit from %s back to implementing, for you to revise in your existing workspace. Note: %s\nCheck the unit's acceptance, then call done or ask if you need a decision.", trace.DisplayRuler(move.By), move.From, move.Note)}
 		default:
 			continue
 		}

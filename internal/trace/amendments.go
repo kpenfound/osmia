@@ -364,12 +364,12 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 		txs = append(txs, q)
 	}
 	transitionID := "amendment_" + id + "_filed"
-	transition := Transition{Header: Header{Schema: "osmia.trace.transition", Version: Version, ID: transitionID, Revision: 1, Project: target.project, Workstream: member, Unit: unit, At: at, Actor: h.Actor, Cause: h.Cause, Depth: h.Depth}, Subject: "amendment_" + id, From: "", To: "filed", Reason: fmt.Sprintf("%s filed amendment %s", scope.Role, id)}
+	transition := Transition{Header: Header{Schema: "osmia.trace.transition", Version: Version, ID: transitionID, Revision: 1, Project: target.project, Workstream: member, Unit: unit, At: at, Actor: h.Actor, Cause: h.Cause, Depth: h.Depth}, Subject: "amendment_" + id, From: "", To: "filed", Reason: fmt.Sprintf("%s filed amendment %s", DisplayRole(scope.Role), id)}
 	cited := strings.Join(req.Citations, ", ")
-	events := []Event{Notice(transitionID, "amendment", fmt.Sprintf("Amendment %s was filed by the %s for %s: %s", id, scope.Role, cited, strings.TrimSpace(req.Reason)))}
+	events := []Event{Notice(transitionID, "amendment", fmt.Sprintf("Amendment %s was filed by the %s for %s: %s", id, DisplayRole(scope.Role), cited, strings.TrimSpace(req.Reason)))}
 	if m := req.Upstream; m != nil {
-		events[0].Body = fmt.Sprintf("Amendment %s was filed by the %s for %s, citing upstream commit %s: %s", id, scope.Role, cited, m.To, strings.TrimSpace(req.Reason))
-		events = append(events, UpstreamMoved(transitionID, member, *m, fmt.Sprintf("amendment %s was filed by the %s: upstream commit %s changes what %s means", id, scope.Role, m.To, cited)))
+		events[0].Body = fmt.Sprintf("Amendment %s was filed by the %s for %s, citing upstream commit %s: %s", id, DisplayRole(scope.Role), cited, m.To, strings.TrimSpace(req.Reason))
+		events = append(events, UpstreamMoved(transitionID, member, *m, fmt.Sprintf("amendment %s was filed by the %s: upstream commit %s changes what %s means", id, DisplayRole(scope.Role), m.To, cited)))
 	}
 	txs = append(txs, Transaction{ExpectedVersion: 0, Transition: transition, Events: events})
 	if from != "" {

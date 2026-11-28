@@ -731,6 +731,9 @@ func TestTheManagerDropsADependency(t *testing.T) {
 	if dropped.To != lifecycle.DependencyWaived || dropped.DecidedBy != trace.DecidedByManager || dropped.Judgment != "" {
 		t.Fatalf("the manager's drop %+v", dropped)
 	}
+	if !strings.Contains(dropped.Reason, "its upstream ended (manager)") || strings.Contains(dropped.Reason, trace.Manager) {
+		t.Fatalf("the reason of the manager's drop: %q", dropped.Reason)
+	}
 	if n := len(p.TransitionRequests()); n != 0 {
 		t.Fatalf("Jev was asked %d times about the manager's decision", n)
 	}

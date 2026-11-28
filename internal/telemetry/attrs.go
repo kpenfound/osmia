@@ -256,8 +256,8 @@ func State(state string) Attr { return String(KeyState, state) }
 func NextState(state string) Attr { return String(KeyNextState, state) }
 
 // DecidedBy says who chose the transition that ended the interval, as an
-// enumerated word.
-func DecidedBy(by string) Attr { return String(KeyDecidedBy, by) }
+// enumerated word. The manager's stored decider is sent as its display name.
+func DecidedBy(by string) Attr { return String(KeyDecidedBy, trace.DisplayRole(by)) }
 
 // DefaultState is the state the transition router's default would have
 // entered.

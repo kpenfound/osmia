@@ -64,7 +64,7 @@ func (r *Repository) NotifyTool(scope coreadapter.Scope, now func() time.Time) c
 		}
 		for _, record := range records {
 			if d, ok := record.(Document); ok && d.Workstream == "" && d.ID == id {
-				return json.Marshal(d)
+				return shownNotice(d)
 			}
 		}
 		h := turn.Request.Header
@@ -79,7 +79,21 @@ func (r *Repository) NotifyTool(scope coreadapter.Scope, now func() time.Time) c
 		if err := r.publish(ctx, files); err != nil {
 			return nil, err
 		}
-		return json.Marshal(d)
+		return shownNotice(d)
 	}
 	return tool
+}
+
+func shownNotice(d Document) (json.RawMessage, error) {
+	var notice ProjectNotice
+	if err := json.Unmarshal([]byte(d.Content), &notice); err != nil {
+		return nil, err
+	}
+	notice.Scope.Role, notice.Scope.Thread = DisplayRole(notice.Scope.Role), DisplayRole(notice.Scope.Thread)
+	content, err := json.Marshal(notice)
+	if err != nil {
+		return nil, err
+	}
+	d.Actor, d.Content = d.Actor.Display(), string(content)
+	return json.Marshal(d)
 }

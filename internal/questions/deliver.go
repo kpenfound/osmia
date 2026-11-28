@@ -76,7 +76,7 @@ func Deliver(ctx context.Context, repository *trace.Repository, q trace.Question
 	}
 	p, err := profile(thread.Identity.Role, thread.Identity.ID)
 	if err != nil {
-		return false, fmt.Errorf("profile of role %s: %w", thread.Identity.Role, err)
+		return false, fmt.Errorf("profile of role %s: %w", trace.DisplayRole(thread.Identity.Role), err)
 	}
 	turn := TurnID(asked.ID)
 	_, err = repository.EnqueueTurn(ctx, trace.TurnRequest{

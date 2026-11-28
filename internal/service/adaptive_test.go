@@ -41,7 +41,7 @@ func TestManagerDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
 				if api != nil {
 					t.Fatal(api.Message)
 				}
-				if out.Decision.Actor != trace.Manager {
+				if out.Decision.Actor != trace.ManagerDisplay {
 					t.Fatalf("wrong actor: %+v", out.Decision)
 				}
 				f.awaitAmendment(t, stream, amendmentRuled)

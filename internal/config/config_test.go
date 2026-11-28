@@ -713,7 +713,7 @@ func TestBranchNames(t *testing.T) {
 }
 
 func TestDesignerRoleIsAnOrdinaryRoleThatNeverFallsBackToTheManager(t *testing.T) {
-	manager := topConfig + "[profiles.chief]\nagent = 'codex'\nmodel = 'chief-model'\n[roles.manager]\nprofile = 'chief'\nsandbox = 'container'\nimage = 'chief-image'\nskills = ['https://github.com/example/skills#chief-skill']\n"
+	manager := topConfig + "[profiles.lead]\nagent = 'codex'\nmodel = 'lead-model'\n[roles.manager]\nprofile = 'lead'\nsandbox = 'container'\nimage = 'lead-image'\nskills = ['https://github.com/example/skills#lead-skill']\n"
 	c, err := load(fixture(t, manager, projectConfig))
 	if err != nil {
 		t.Fatal(err)
@@ -724,26 +724,26 @@ func TestDesignerRoleIsAnOrdinaryRoleThatNeverFallsBackToTheManager(t *testing.T
 	if got := c.RoleExecution("designer"); got.Mode != "none" || got.Image != "" || len(got.Skills) != 0 {
 		t.Fatalf("an unconfigured designer's execution: %+v", got)
 	}
-	configured := manager + "[roles.designer]\nprofile = 'chief'\nsandbox = 'sbx'\nimage = 'osmia:latest'\nskills = ['https://github.com/example/skills#design-skill']\n"
+	configured := manager + "[roles.designer]\nprofile = 'lead'\nsandbox = 'sbx'\nimage = 'osmia:latest'\nskills = ['https://github.com/example/skills#design-skill']\n"
 	c, err = load(fixture(t, configured, projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, settings, err := c.Execution("designer", "chief")
+	p, settings, err := c.Execution("designer", "lead")
 	if err != nil || p.Backend != "codex" || settings.Mode != "sbx" || settings.Image != "osmia:latest" || !slices.Equal(settings.Skills, []string{"https://github.com/example/skills#design-skill"}) {
 		t.Fatalf("a configured designer: %+v %+v %v", p, settings, err)
 	}
 }
 
 func TestDesignerSettingsAreTheSameWhicheverManagerKeyIsSet(t *testing.T) {
-	settings := "profile = 'chief'\nsandbox = 'container'\nimage = 'chief-image'\nskills = ['https://github.com/example/skills#chief-skill']\n"
-	base := topConfig + "[profiles.chief]\nagent = 'codex'\nmodel = 'chief-model'\n"
+	settings := "profile = 'lead'\nsandbox = 'container'\nimage = 'lead-image'\nskills = ['https://github.com/example/skills#lead-skill']\n"
+	base := topConfig + "[profiles.lead]\nagent = 'codex'\nmodel = 'lead-model'\n"
 	for name, roles := range map[string]string{
 		"canonical key":    "[roles.manager]\n" + settings,
 		"deprecated alias": "[roles.chief_of_staff]\n" + settings,
 		"no manager role":  "",
 	} {
-		for _, designer := range []string{"", "[roles.designer]\nprofile = 'chief'\nsandbox = 'sbx'\nimage = 'osmia:latest'\n"} {
+		for _, designer := range []string{"", "[roles.designer]\nprofile = 'lead'\nsandbox = 'sbx'\nimage = 'osmia:latest'\n"} {
 			c, err := load(fixture(t, base+roles+designer, projectConfig))
 			if err != nil {
 				t.Fatalf("%s: %v", name, err)
@@ -755,7 +755,7 @@ func TestDesignerSettingsAreTheSameWhicheverManagerKeyIsSet(t *testing.T) {
 				}
 				continue
 			}
-			if got.Profile != "chief" || got.Sandbox != "sbx" || got.Image != "osmia:latest" || len(got.Skills) != 0 {
+			if got.Profile != "lead" || got.Sandbox != "sbx" || got.Image != "osmia:latest" || len(got.Skills) != 0 {
 				t.Fatalf("%s: a configured designer: %+v", name, got)
 			}
 		}

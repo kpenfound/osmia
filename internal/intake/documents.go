@@ -70,6 +70,7 @@ func (s *Controller) OwnerDocuments(w http.ResponseWriter, r *http.Request, h Do
 		if err != nil {
 			h.FailWith(w, DocumentError(err))
 		} else {
+			doc.Actor = doc.Actor.Display()
 			h.Respond(w, 200, doc)
 		}
 		return true
@@ -124,6 +125,10 @@ func (s *Controller) OwnerDocuments(w http.ResponseWriter, r *http.Request, h Do
 		if err != nil {
 			h.FailWith(w, DocumentError(err))
 		} else {
+			for id, d := range out {
+				d.Actor = d.Actor.Display()
+				out[id] = d
+			}
 			h.Respond(w, 200, out)
 		}
 		return true

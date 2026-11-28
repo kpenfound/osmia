@@ -276,9 +276,11 @@ const ownerEnded = "owner"
 const managerEnded = trace.Manager
 
 // storedManagerDropCause is a stored name of the manager role: the cause of
-// the transition that records the manager dropping a dependency. Saved traces
-// hold it and the reader that finds a decided dependency exit compares
-// against it, so the value must not change.
+// the exit that drops a dependency on the manager's request. Saved route
+// records are named from an occurrence key that holds it
+// (router.OccurrenceKey), and router.Router.Route reads the record of that key
+// to return a drop it already decided instead of deciding it again, so the
+// value must not change.
 const storedManagerDropCause = "chief-drop"
 
 func (c dependencyCase) base() bool { return c.Type == BaseEdgeType }
@@ -299,16 +301,16 @@ func (s *Controller) dependencyExit(repo *trace.Repository, stream config.Workst
 	}
 	keep := router.Target{Name: DependencyKept, Stay: true,
 		Description: "Keep the dependency: the dependent keeps waiting on it, as before.",
-		Reason:      fmt.Sprintf("the %s stays: its upstream ended (%s) and nothing decided to drop it", what, c.Ended)}
+		Reason:      fmt.Sprintf("the %s stays: its upstream ended (%s) and nothing decided to drop it", what, trace.DisplayRole(c.Ended))}
 	waive := router.Target{Name: DependencyWaived, Bar: router.BarStrict,
 		Description: "Drop the dependency: write a waiver in the dependent's own trace, so this one dependency stops blocking it. The dependent's other dependencies and the shared project spec stay unchanged.",
-		Reason:      fmt.Sprintf("the %s was dropped: its upstream ended (%s) and the dependent goes on without it", what, c.Ended),
+		Reason:      fmt.Sprintf("the %s was dropped: its upstream ended (%s) and the dependent goes on without it", what, trace.DisplayRole(c.Ended)),
 		Corroborate: []router.Condition{{Question: "works_without", AtLeast: router.LevelStrict}}}
 	adopt := router.Target{Name: DependencyAdopted,
 		Description: "Go on: the upstream's changes are already in the project's base branch, so the dependent no longer waits for a merge.",
 		Reason:      fmt.Sprintf("the %s is satisfied: the upstream's changes are already in the base branch", what)}
 	intent, entries, facts := s.dependencyIntent(repo, stream, c)
-	facts["dependency_type"], facts["ended"], facts["integrated"] = c.Type, c.Ended, c.Integrated
+	facts["dependency_type"], facts["ended"], facts["integrated"] = c.Type, trace.DisplayRole(c.Ended), c.Integrated
 	exit := router.Exit{
 		Repo: repo, Project: repo.Project(), Workstream: stream, Machine: DependencyMachine,
 		Subject: subject, From: state.Value, Version: state.Version, Trigger: c.Trigger, Cause: c.Cause, HeaderCause: c.Cause, Actor: actor, Note: c.Note,

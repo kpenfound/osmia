@@ -68,7 +68,7 @@ func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, re
 	h.Actor = x.Actor
 	entered := target.entered()
 	if !trace.ValidRouting(entered, routing) {
-		return r.refuse(ctx, x, name, rec, rev, journal, fmt.Sprintf("routing %s cannot be recorded for %s", routing.DecidedBy, entered))
+		return r.refuse(ctx, x, name, rec, rev, journal, fmt.Sprintf("routing %s cannot be recorded for %s", trace.DisplayRole(routing.DecidedBy), entered))
 	}
 	rec.State, rec.Target, rec.Outcome, rec.DecidedBy, rec.Judgment, rec.Rule, rec.Confidence, rec.Decided = StateCommitted, target.Name, d.outcome, d.decidedBy, d.judgment, d.rule, d.band, at
 	rec.Entered, rec.Transition = x.From, ""

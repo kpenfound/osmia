@@ -12,6 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -51,5 +52,18 @@ func TestAManagerMoveReturnsAReopenedWorkstreamToDelivered(t *testing.T) {
 	records := routeFor(t, p.Repository, p.Stream, "ws.move_proposal")
 	if len(records) != 1 || records[0].Outcome != router.OutcomeFollowed || records[0].Authority != router.AuthorityManager {
 		t.Fatalf("route %+v", records)
+	}
+
+	reopened, apiFault := p.S.Lifecycle().MoveWorkstream(ctx, p.Repository, p.Stream, api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Upstream broke it after all."}, intake.ManagerActor, "events_1")
+	if apiFault != nil {
+		t.Fatal(apiFault.Message)
+	}
+	if reopened.Move == nil || reopened.Move.By != trace.ManagerDisplay {
+		t.Fatalf("the manager's reopening: %+v", reopened)
+	}
+	saved, err := lifecycle.WorkstreamMoves(p.Repository, p.Stream)
+	fixturekit.Must(t, err)
+	if len(saved) == 0 || saved[len(saved)-1].Move != reopened.Move.Move || saved[len(saved)-1].By != trace.ManagerRulerName {
+		t.Fatalf("the saved moves %+v", saved)
 	}
 }

@@ -43,6 +43,8 @@ func TestStateSpansCarryTheRouting(t *testing.T) {
 	h.routedUnit("u1-3", "u1", "contested", minute(10), trace.Routing{DecidedBy: trace.DecidedByJev, Judgment: judgment, DefaultTo: "checking"})
 	h.routedUnit("u1-4", "u1", "reviewing", minute(11), trace.Routing{DecidedBy: trace.DecidedByOwner, DefaultTo: "implementing"})
 	h.unit("u1-5", "u1", "checking", minute(12), service, "unrouted")
+	h.routedUnit("u1-6", "u1", "implementing", minute(13), trace.Routing{DecidedBy: trace.DecidedByManager, DefaultTo: "implementing"})
+	h.unit("u1-7", "u1", "checking", minute(14), service, "unrouted")
 	if _, err := h.repo.SetFeatureStateRouted(context.Background(), header("transition", "f1", minute(3), service, ""), "building", "building", trace.Routing{DecidedBy: trace.DecidedByJevGate, Judgment: judgment, DefaultTo: "building"}); err != nil {
 		t.Fatal(err)
 	}
@@ -62,6 +64,8 @@ func TestStateSpansCarryTheRouting(t *testing.T) {
 		{"code", "implementing", false, true},
 		{"jev", "checking", true, true},
 		{"owner", "implementing", true, true},
+		{},
+		{"manager", "implementing", false, true},
 		{},
 	}
 	if len(units) != len(want) {

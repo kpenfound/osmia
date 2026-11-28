@@ -706,7 +706,7 @@ func Dispatch(ctx context.Context, repository *trace.Repository, c Candidate, at
 	}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: c.Workstream, Unit: req.Unit, At: at, Actor: Actor, Cause: req.ID, Depth: req.Depth}
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: req.TurnID,
-		Reason: fmt.Sprintf("Queued turn %s dispatched on thread %s", req.TurnID, req.ThreadID)},
+		Reason: fmt.Sprintf("Queued turn %s dispatched on thread %s", req.TurnID, trace.DisplayRole(req.ThreadID))},
 		Events: []trace.Event{{ID: event, Kind: "turn", Body: "Run turn " + req.TurnID, Operation: &op}}}
 	_, err = repository.Transact(ctx, tx)
 	return err

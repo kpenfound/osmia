@@ -139,8 +139,9 @@ sqlite3 -readonly $W "
   | sed -E 's/[0-9]+/N/g' | sort | uniq -c | sort -nr | head
 ```
 
-The second command shows what woke the manager. Notices from a loop
-reach it on every pass, so its turn count is often the largest cost of one.
+The second command shows what woke the manager, whose stored name in traces
+is `chief_of_staff`. Notices from a loop reach it on every pass, so its turn
+count is often the largest cost of one.
 
 Read the manager's latest status note too. It often states what is wrong. That
 is a lead to confirm, not a conclusion.
@@ -237,7 +238,8 @@ what they achieve.
          AND json_extract(json_extract(body, '\$.content'), '\$.scope.Role') = 'chief_of_staff'"
    done | sort | uniq -c | sort -nr
    ```
-   (run from `~/.local/share/osmia/workstreams`)
+   (run from `~/.local/share/osmia/workstreams`; `chief_of_staff` is the
+   manager's stored name in traces)
 
 4. Work repeated per item: reviews per merged unit, re-checks caused by
    rebases.

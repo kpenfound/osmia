@@ -509,7 +509,7 @@ func TestManagerSlotsFullPoolIsReportedByTheCapacityToolAndStatus(t *testing.T) 
 			turn   string
 		}{{f.streams[2], "W1"}, {f.streams[3], "W2"}} {
 			w := manager.Waiting[i]
-			if w.Project != f.ids[i+2] || w.Workstream != want.stream || w.Agent != trace.Manager || w.Turn != want.turn || w.Reason != DeferCapacity {
+			if w.Project != f.ids[i+2] || w.Workstream != want.stream || w.Agent != trace.ManagerDisplay || w.Turn != want.turn || w.Reason != DeferCapacity {
 				t.Fatalf("%s manager waiting[%d] %+v", name, i, w)
 			}
 		}

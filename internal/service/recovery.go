@@ -58,7 +58,7 @@ func (s *Service) recoverThread(ctx context.Context, cfg *config.Config, reposit
 				continue
 			}
 			if err := repository.AbandonTurn(ctx, stream, th.Identity.ID, q.Request.TurnID, s.now()); err != nil {
-				return fmt.Errorf("recover %s turn %s: %w", th.Identity.ID, q.Request.TurnID, err)
+				return fmt.Errorf("recover %s turn %s: %w", trace.DisplayRole(th.Identity.ID), q.Request.TurnID, err)
 			}
 		} else {
 			if th.Active != "" && th.Identity.Role == masonRole {
@@ -85,7 +85,7 @@ func (s *Service) recoverThread(ctx context.Context, cfg *config.Config, reposit
 				continue
 			}
 			if err := repository.RecoverUnclaimedTurn(ctx, stream, th.Identity.ID, q.Request.TurnID, dir, s.now()); err != nil {
-				return fmt.Errorf("recover unclaimed %s turn %s: %w", th.Identity.ID, q.Request.TurnID, err)
+				return fmt.Errorf("recover unclaimed %s turn %s: %w", trace.DisplayRole(th.Identity.ID), q.Request.TurnID, err)
 			}
 		}
 	}

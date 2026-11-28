@@ -305,10 +305,6 @@ func (r *Repository) CreateThread(ctx context.Context, agent Agent) error {
 // this value, so it must not change.
 const Manager = "chief_of_staff"
 
-// managerCreateCause is the stored cause of the record that creates a manager
-// thread. Saved traces hold this value, so it must not change.
-const managerCreateCause = "chief-of-staff-create"
-
 // EnsureManager creates the manager thread of stream's workgroup
 // unless it already exists, and returns the thread. The thread lives on the
 // workgroup's host (its first member), so no other member ever gets a thread
@@ -335,11 +331,11 @@ func (r *Repository) ensureManager(ctx context.Context, stream config.Workstream
 	}
 	if t, ok := log.Threads[Manager]; ok {
 		if t.Identity.Role != Manager || t.Identity.ThreadID != Manager {
-			return Thread{}, fmt.Errorf("%w: agent %s has another role", ErrConflict, Manager)
+			return Thread{}, fmt.Errorf("%w: agent %s has another role", ErrConflict, ManagerDisplay)
 		}
 		return r.snapshot(t), nil
 	}
-	agent := Agent{Header: Header{Schema: "osmia.trace.agent", Version: Version, ID: Manager, Revision: 1, Project: r.project, Workstream: stream, At: at, Actor: actor, Cause: managerCreateCause}, Role: Manager, ThreadID: Manager}
+	agent := Agent{Header: Header{Schema: "osmia.trace.agent", Version: Version, ID: Manager, Revision: 1, Project: r.project, Workstream: stream, At: at, Actor: actor, Cause: "manager-create"}, Role: Manager, ThreadID: Manager}
 	if err := validate(agent); err != nil {
 		return Thread{}, err
 	}

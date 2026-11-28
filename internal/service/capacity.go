@@ -68,7 +68,7 @@ func (s *Service) managerCapacity(limit int) RoleCapacity {
 	manager := s.ManagerSlots()
 	role := RoleCapacity{Role: managerRole, Limit: &limit, Used: manager.Used, Waiting: []SlotWait{}}
 	for _, w := range manager.Waiting {
-		role.Waiting = append(role.Waiting, SlotWait{Project: w.Project, Workstream: w.Workstream, Agent: w.Agent, Turn: w.Turn, Reason: DeferCapacity})
+		role.Waiting = append(role.Waiting, SlotWait{Project: w.Project, Workstream: w.Workstream, Agent: trace.DisplayRole(w.Agent), Turn: w.Turn, Reason: DeferCapacity})
 	}
 	return role
 }
@@ -224,6 +224,6 @@ func (c *runtimeControls) capacity(repo *trace.Repository, scope coreadapter.Sco
 		return json.Marshal(struct {
 			Capacity *CapacityStatus `json:"capacity"`
 			Pauses   []runtime.Pause `json:"pauses"`
-		}{slots, state.Pauses})
+		}{slots, displayState(state).Pauses})
 	}}
 }

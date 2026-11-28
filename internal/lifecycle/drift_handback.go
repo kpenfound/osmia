@@ -78,7 +78,7 @@ func (s *Controller) HandBackDrift(ctx context.Context, repo *trace.Repository, 
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: DriftHandbackDocument(k), Revision: 1, Project: repo.Project(), Workstream: stream, At: at, Actor: actor, Cause: cause}
 	doc := trace.Document{Header: h, Path: DriftHandbackPath(k), Content: string(data) + "\n"}
 	h.Schema, h.ID, h.Cause = "osmia.trace.transition", fmt.Sprintf("%s-%d", DriftRequestSubject, k), doc.ID
-	reason := fmt.Sprintf("the %s handed held drift rebase %d back; drift rebase %d of %s onto %s of %s answers it, and its mason and reviewer receive the note: %s", by, held, k, featureBranch(stream), s.About(repo).Project.BaseBranch, s.About(repo).Project.Upstream, note)
+	reason := fmt.Sprintf("the %s handed held drift rebase %d back; drift rebase %d of %s onto %s of %s answers it, and its mason and reviewer receive the note: %s", trace.DisplayRuler(by), held, k, featureBranch(stream), s.About(repo).Project.BaseBranch, s.About(repo).Project.Upstream, note)
 	tx := trace.Transaction{ExpectedVersion: current.Version, Transition: trace.Transition{Header: h, Subject: DriftRequestSubject, From: current.Value, To: fmt.Sprintf("requested-%d", k), Reason: reason}}
 	if _, err := repo.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {

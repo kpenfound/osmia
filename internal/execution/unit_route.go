@@ -56,8 +56,10 @@ const (
 
 // storedManagerRulingTrigger is a stored name of the manager role: the trigger
 // of the exit a manager ruling on a contested unit raises. Saved routing
-// records hold it and route spans are built from it, so the value must not
-// change.
+// records hold it and are named from an occurrence key that holds it
+// (router.OccurrenceKey): router.Router.Route reads the record of that key, and
+// recordspans.Recorder.Route sends the span of a saved record only when its
+// trigger is listed in recordspans.RouteTriggers. The value must not change.
 const storedManagerRulingTrigger = "contest.chief_ruling"
 
 // TargetWait is the target of an exit that leaves the unit where it is: nothing

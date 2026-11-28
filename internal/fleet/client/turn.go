@@ -138,7 +138,7 @@ func (c *Client) handleOffer(offer api.TurnOffer) {
 		c.drop(t)
 		return
 	}
-	c.log.Info("took a turn", "turn", offer.Turn, "role", offer.Role, "profile", offer.Profile)
+	c.log.Info("took a turn", "turn", offer.Turn, "role", offer.ShownRole(), "profile", offer.Profile)
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()

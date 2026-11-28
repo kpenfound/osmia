@@ -190,7 +190,7 @@ func (d Dispatcher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 
 func ineligible(t trace.Thread, q trace.QueuedTurn) error {
 	if q.Claim != nil {
-		return fmt.Errorf("turn %s on %s's thread is not eligible to run: it was claimed at %s without a captured result", q.Request.TurnID, t.Identity.ID, q.Claim.At.UTC().Format(time.RFC3339))
+		return fmt.Errorf("turn %s on %s's thread is not eligible to run: it was claimed at %s without a captured result", q.Request.TurnID, trace.DisplayRole(t.Identity.ID), q.Claim.At.UTC().Format(time.RFC3339))
 	}
 	for _, earlier := range t.Turns {
 		if earlier.Request.TurnID == q.Request.TurnID {
@@ -201,8 +201,8 @@ func ineligible(t trace.Thread, q trace.QueuedTurn) error {
 			if earlier.Claim != nil {
 				state = "claimed without a captured result"
 			}
-			return fmt.Errorf("turn %s on %s's thread is not eligible to run: it waits behind turn %s, %s since %s, and a thread runs its turns in order", q.Request.TurnID, t.Identity.ID, earlier.Request.TurnID, state, earlier.Request.At.UTC().Format(time.RFC3339))
+			return fmt.Errorf("turn %s on %s's thread is not eligible to run: it waits behind turn %s, %s since %s, and a thread runs its turns in order", q.Request.TurnID, trace.DisplayRole(t.Identity.ID), earlier.Request.TurnID, state, earlier.Request.At.UTC().Format(time.RFC3339))
 		}
 	}
-	return fmt.Errorf("turn %s on %s's thread is not eligible to run", q.Request.TurnID, t.Identity.ID)
+	return fmt.Errorf("turn %s on %s's thread is not eligible to run", q.Request.TurnID, trace.DisplayRole(t.Identity.ID))
 }

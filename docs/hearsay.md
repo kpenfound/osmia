@@ -87,9 +87,9 @@ live Hearsay code entity.
   pushed to later, each with its reason.
 
 Every `decision` carries its context, outcome, rationale, rejected options,
-decider (`owner`, `chief_of_staff` or `committee`), links where they exist (the
-spec document, the pull request URL, the question id), and the project or
-workstream it belongs to. When it revisits an earlier posted decision, such as a
+decider (`owner`, `chief_of_staff`, which is the manager's stored name, or
+`committee`), links where they exist (the spec document, the pull request URL,
+the question id), and the project or workstream it belongs to. When it revisits an earlier posted decision, such as a
 later ruling on the same question or a new amendment decision on the same
 subject, it names that decision in `supersedes`, and the earlier one is posted
 first.

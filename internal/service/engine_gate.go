@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // EngineControl is the lifecycle boundary implemented by engine.Controller.
@@ -52,7 +53,7 @@ func (e *EngineBusyError) Error() string {
 		blockers = append(blockers, fmt.Sprintf("check run project %s workstream %s %s", run.Project, run.Workstream, kind))
 	}
 	for _, turn := range e.Turns {
-		blockers = append(blockers, fmt.Sprintf("Dagger turn project %s workstream %s unit %s agent %s turn %s", turn.Project, turn.Workstream, turn.Unit, turn.Agent, turn.Turn))
+		blockers = append(blockers, fmt.Sprintf("Dagger turn project %s workstream %s unit %s agent %s turn %s", turn.Project, turn.Workstream, turn.Unit, trace.DisplayRole(turn.Agent), turn.Turn))
 	}
 	return fmt.Sprintf("engine %s temporarily unavailable: %s", e.Action, strings.Join(blockers, "; "))
 }

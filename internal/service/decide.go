@@ -368,7 +368,7 @@ func (s *Service) planAmendmentSubject(ctx context.Context, repository *trace.Re
 		state: func(evidence string) (string, []jev.Source, error) {
 			var b stateSections
 			b.add("Decision", fmt.Sprintf("Amendment %s of workstream %s revises the plan and leaves the approved intent unchanged, so the manager decides it on the owner's behalf. Choose whether it is approved or declined.", id, stream), 0)
-			b.add("Request", fmt.Sprintf("Requested by %s (%s). Citations: %s\nChange: %s\nReason: %s", c.Request.Requester.ID, c.Request.Role, strings.Join(c.Request.Citations, ", "), c.Request.Change, c.Request.Reason), 0)
+			b.add("Request", fmt.Sprintf("Requested by %s (%s). Citations: %s\nChange: %s\nReason: %s", trace.DisplayRole(c.Request.Requester.ID), trace.DisplayRole(c.Request.Role), strings.Join(c.Request.Citations, ", "), c.Request.Change, c.Request.Reason), 0)
 			b.add("Manager's evidence", evidence, 0)
 			var dissent []string
 			for _, e := range entries {

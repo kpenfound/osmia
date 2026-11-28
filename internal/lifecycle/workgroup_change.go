@@ -586,10 +586,21 @@ func (c *Controls) ChangeControl(repository *trace.Repository, scope coreadapter
 }
 
 // ChangeToolResult is a change as the manager's change tools report it. A
-// pending change with a recorded hold reads state "held" with its reason.
+// pending change with a recorded hold reads state "held" with its reason, and
+// a requester recorded as the manager reads under its display name.
 type ChangeToolResult struct {
 	WorkgroupChange
 	Reason string `json:"reason,omitempty"`
+}
+
+func (c WorkgroupChange) shown() WorkgroupChange {
+	if c.Requester == nil {
+		return c
+	}
+	requester := *c.Requester
+	requester.Role, requester.Requester = trace.DisplayRole(requester.Role), requester.Requester.Display()
+	c.Requester = &requester
+	return c
 }
 
 // Held reports whether a pending change is held by a recorded diagnostic.
@@ -597,7 +608,7 @@ func (c WorkgroupChange) Held() bool {
 	return c.Failure != "" && c.State != "applied" && c.State != "rejected" && c.State != "failed"
 }
 func (c WorkgroupChange) ToolResult() ChangeToolResult {
-	out := ChangeToolResult{WorkgroupChange: c}
+	out := ChangeToolResult{WorkgroupChange: c.shown()}
 	if c.Held() {
 		out.State, out.Reason = "held", c.Failure
 	}

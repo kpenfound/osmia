@@ -9,7 +9,7 @@ import (
 
 func TestHearsayConfigurationRequiresDelegatedCredentialReferences(t *testing.T) {
 	valid := func() Hearsay {
-		return Hearsay{URL: "https://memory.example/api", Principal: "owner", TokenEnv: "OWNER_TOKEN", Agents: map[string]HearsayAgent{"worker": {ID: "worker", TokenEnv: "WORKER_TOKEN"}, "observer": {ID: "observer", TokenEnv: "OBSERVER_TOKEN"}, "orchestrator": {ID: "chief", TokenEnv: "CHIEF_TOKEN"}}}
+		return Hearsay{URL: "https://memory.example/api", Principal: "owner", TokenEnv: "OWNER_TOKEN", Agents: map[string]HearsayAgent{"worker": {ID: "worker", TokenEnv: "WORKER_TOKEN"}, "observer": {ID: "observer", TokenEnv: "OBSERVER_TOKEN"}, "orchestrator": {ID: "orchestrator", TokenEnv: "ORCHESTRATOR_TOKEN"}}}
 	}
 	if err := valid().validate("config.toml"); err != nil {
 		t.Fatal(err)
@@ -42,8 +42,8 @@ token_env = "OWNER_TOKEN"
 id = "osmia-worker"
 token_env = "WORKER_TOKEN"
 [hearsay.agents.orchestrator]
-id = "osmia-chief"
-token_env = "CHIEF_TOKEN"
+id = "osmia-orchestrator"
+token_env = "ORCHESTRATOR_TOKEN"
 [hearsay.agents.observer]
 id = "osmia-observer"
 token_env = "OBSERVER_TOKEN"

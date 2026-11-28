@@ -258,7 +258,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 	f.ruling(stream, "1", 1, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Cap uploads at 10 MiB."}, hr(3), trace.Actor{Kind: "owner", ID: "local"})
 	f.ruling(stream, "1", 2, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Cap uploads at 10 MiB.", ReturnedAnswer: "RELAYED-TO-THE-ASKERS", Scope: trace.ScopeLocal}, hr(4), managerActor)
 	const assumption = "Treat the 10 MiB cap as inclusive."
-	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":%q,"actor":{"kind":"agent","id":"chief_of_staff"},"thread":"manager","turn":"t1","at":%q}]}`, string(stream), assumption, hr(5).Format(time.RFC3339))
+	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":%q,"actor":{"kind":"agent","id":"`+trace.Manager+`"},"thread":"manager","turn":"t1","at":%q}]}`, string(stream), assumption, hr(5).Format(time.RFC3339))
 	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(5), managerActor)
 
 	res, err := f.s.publishPass(context.Background(), f.repo, f.s.current())

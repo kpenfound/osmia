@@ -72,7 +72,7 @@ func TestManagerDecisionsSavedBeforeTheChangeAreStillFoundAndStillTakeEffect(t *
 	for _, e := range dissent {
 		byID[e.ID] = e
 	}
-	if e := byID[savedDismissed]; e.Disposition != shed.Dismissed || e.By != "chief_of_staff" || e.Blocking || e.Note != "The charter rule does not apply." {
+	if e := byID[savedDismissed]; e.Disposition != shed.Dismissed || e.By != savedManagerActorID || e.Blocking || e.Note != "The charter rule does not apply." {
 		t.Fatalf("the dismissed objection came back as %+v", e)
 	}
 	if e := byID[savedEscalated]; !e.Escalated || !e.Blocking || e.Disposition != "" || e.Escalation != "It may break rule 2." {

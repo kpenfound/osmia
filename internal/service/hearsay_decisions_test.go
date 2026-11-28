@@ -163,7 +163,7 @@ func TestPublishLoggedAssumptionIsAnInferredManagerDecision(t *testing.T) {
 	f := newPublisherFixture(t)
 	stream := fixturekit.Stream
 	f.recordSeal(stream, 1, "# Upload limits\n\nCap uploads.\n")
-	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":"Treat the 10 MiB cap as inclusive.","actor":{"kind":"agent","id":"chief_of_staff"},"thread":"manager","turn":"t1","at":%q}]}`, string(stream), hr(2).Format(time.RFC3339))
+	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":"Treat the 10 MiB cap as inclusive.","actor":{"kind":"agent","id":"`+trace.Manager+`"},"thread":"manager","turn":"t1","at":%q}]}`, string(stream), hr(2).Format(time.RFC3339))
 	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(2), managerActor)
 
 	posts, _ := f.pass()
@@ -390,7 +390,7 @@ func TestPublishDecisionsWaitForAnOutageAndAreNotRepeated(t *testing.T) {
 	stream := fixturekit.Stream
 	f.ask(stream, "1", "Is the cap per file?", hr(1))
 	f.ruling(stream, "1", 1, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "Per file.", Citations: []string{"spec#1"}}, hr(2), managerActor)
-	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":"Count bytes, not characters.","actor":{"kind":"agent","id":"chief_of_staff"},"thread":"manager","turn":"t1","at":%q}]}`, string(stream), hr(3).Format(time.RFC3339))
+	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":"Count bytes, not characters.","actor":{"kind":"agent","id":"`+trace.Manager+`"},"thread":"manager","turn":"t1","at":%q}]}`, string(stream), hr(3).Format(time.RFC3339))
 	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(3), managerActor)
 
 	f.hooks.SetStatus(http.StatusServiceUnavailable)

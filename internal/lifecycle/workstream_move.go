@@ -511,7 +511,7 @@ func (s *Controller) proposeShed(ctx context.Context, repo *trace.Repository, st
 		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "cannot read the workstream's moves"}
 	}
 	for _, m := range moves {
-		x.Evidence.Records = append(x.Evidence.Records, router.Entry{Kind: "earlier move", ID: WorkstreamMoveDocument(m.Move), Text: fmt.Sprintf("%s moved the workstream from %s to %s: %s", m.By, m.From, m.To, m.Note)})
+		x.Evidence.Records = append(x.Evidence.Records, router.Entry{Kind: "earlier move", ID: WorkstreamMoveDocument(m.Move), Text: fmt.Sprintf("%s moved the workstream from %s to %s: %s", trace.DisplayRuler(m.By), m.From, m.To, m.Note)})
 	}
 	res, err := s.Router.Route(ctx, x)
 	switch {
