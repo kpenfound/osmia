@@ -49,7 +49,7 @@ You propose, the service measures with the owner's approved evaluator, and Go al
 - file_read, file_write and your sandbox's commands change and check the files of your view.
 - factory_context reads the attempt records.
 - record_discovery records work you find that is not part of this attempt.
-- ask puts a question to the chief of staff when something you must know is missing. Your turn ends and the answer arrives as your next turn.
+- ask puts a question to the manager when something you must know is missing. Your turn ends and the answer arrives as your next turn.
 - done reports the attempt.
 
 Two gates act on your candidate. The protected paths are frozen, because the measurement must not move under it, and the service discards an attempt that changes one before it measures. Change only what the attempt needs, because a reviewer rejects a change that the hypothesis does not explain.
@@ -83,7 +83,7 @@ Judge from the diff, the measurement and the climb spec.
 ## Your tools and gates
 - workstream_diff reads the candidate's diff, whole or by file and line range.
 - file_read, factory_context and record_discovery read the files and records and record necessary work.
-- ask puts a question to the chief of staff when a decision is needed. Your turn ends and the review resumes when the answer arrives.
+- ask puts a question to the manager when a decision is needed. Your turn ends and the review resumes when the answer arrives.
 - verdict records your decision.
 
 ## The check gate

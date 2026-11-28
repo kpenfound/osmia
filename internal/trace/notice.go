@@ -11,29 +11,29 @@ import (
 // ErrFeatureState reports a feature state a transition refuses to leave.
 var ErrFeatureState = errors.New("feature state refuses the transition")
 
-// NoticeKind is the kind of outbox events delivered to a workstream's chief of
-// staff as information.
+// NoticeKind is the kind of outbox events delivered to a workstream's manager as
+// information.
 const NoticeKind = "notice"
 
 // ProgressKind is the kind of outbox events that report routine progress to
-// a workstream's chief of staff. They ask for no judgment, so the chief of
-// staff receives them in batches, or with the next notice.
+// a workstream's manager. They ask for no judgment, so the manager
+// receives them in batches, or with the next notice.
 const ProgressKind = "progress"
 
-// Notice returns an outbox event for the chief of staff, identified by the
+// Notice returns an outbox event for the manager, identified by the
 // transition that raises it and a key unique within that transition.
 func Notice(transition, key, body string) Event {
 	return Event{ID: EventID(transition, key), Kind: NoticeKind, Body: body}
 }
 
-// Progress returns an outbox event of routine progress for the chief of
-// staff, identified as Notice identifies a notice.
+// Progress returns an outbox event of routine progress for the manager,
+// identified as Notice identifies a notice.
 func Progress(transition, key, body string) Event {
 	return Event{ID: EventID(transition, key), Kind: ProgressKind, Body: body}
 }
 
 // SetFeatureState moves the workstream's FeatureSubject state to the given
-// value and records a notice for the chief of staff in the same commit. The
+// value and records a notice for the manager in the same commit. The
 // header identifies the transition; a retry with the same header, value and
 // reason returns the state it committed.
 func (r *Repository) SetFeatureState(ctx context.Context, h Header, to, reason string) (WorkflowState, error) {
@@ -118,7 +118,7 @@ func (r *Repository) setFeatureState(ctx context.Context, h Header, from *string
 }
 
 // UpstreamMovedKind is the kind of outbox events that tell a workstream's
-// chief of staff what a drift rebase onto upstream did that is visible.
+// manager what a drift rebase onto upstream did that is visible.
 const UpstreamMovedKind = "upstream-moved"
 
 // UpstreamMove names drift rebase Drift of a workstream, which moves the

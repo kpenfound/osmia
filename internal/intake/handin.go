@@ -279,7 +279,7 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 			now = h.S.Now().UTC()
 		}
 		if exists {
-			_, err = repository.EnsureChiefOfStaff(ctx, stream, now, h.actor())
+			_, err = repository.EnsureManager(ctx, stream, now, h.actor())
 		} else {
 			backend, checkErr := h.S.NewWorkspaces(ctx, h.S.About(h.Repository))
 			if checkErr != nil {

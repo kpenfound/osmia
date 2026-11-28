@@ -26,7 +26,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestChiefDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
+func TestManagerDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name, spec string
@@ -36,12 +36,12 @@ func TestChiefDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
 			f, stream := builtForAmendment(t, 1)
 			defer f.stop(t)
 			requester := presentAmendment(t, f, stream, masonRole, tc.spec, intakefixture.RestartPlan)
-			out, api := f.s.intake().RecordAmendmentDecision(context.Background(), f.project, stream, f.repository(), "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: 1, Note: "The revised verification preserves the approved upload outcome."}, chiefActor, "engineering-decision")
+			out, api := f.s.intake().RecordAmendmentDecision(context.Background(), f.project, stream, f.repository(), "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: 1, Note: "The revised verification preserves the approved upload outcome."}, managerActor, "engineering-decision")
 			if tc.allowed {
 				if api != nil {
 					t.Fatal(api.Message)
 				}
-				if out.Decision.Actor != trace.ChiefOfStaff {
+				if out.Decision.Actor != trace.ManagerDisplay {
 					t.Fatalf("wrong actor: %+v", out.Decision)
 				}
 				f.awaitAmendment(t, stream, amendmentRuled)
@@ -54,12 +54,12 @@ func TestChiefDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
 					t.Fatalf("plan revision lost across restart: %v", got)
 				}
 				turns := f.ruling(t, stream, requester)
-				if len(turns) != 1 || !strings.Contains(turns[0].Request.Prompt, "osmia:answer | chief of staff") || strings.Contains(turns[0].Request.Prompt, "osmia:owner_response") {
+				if len(turns) != 1 || !strings.Contains(turns[0].Request.Prompt, "osmia:answer | manager") || strings.Contains(turns[0].Request.Prompt, "osmia:owner_response") {
 					t.Fatalf("misattributed engineering ruling: %+v", turns)
 				}
 				m, err := newMasonController(f.s, f.repository()).bundle(context.Background(), stream, "resume")
 				fixturekit.Must(t, err)
-				if text := m.RenderAmendments(); !strings.Contains(text, "the chief of staff approved") || strings.Contains(text, "osmia:owner_response") {
+				if text := m.RenderAmendments(); !strings.Contains(text, "the manager approved") || strings.Contains(text, "osmia:owner_response") {
 					t.Fatalf("misattributed assignment: %s", text)
 				}
 			} else if api == nil || !strings.Contains(api.Message, "owner decision") {
@@ -72,7 +72,7 @@ func TestChiefDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
 func TestDiscoveryBlocksCompletionUntilAssignedWorkLands(t *testing.T) {
 	t.Parallel()
 	c := newContestFixture(t, "discovered-work")
-	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
+	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.Manager, Thread: trace.Manager, Turn: "events_1"}
 	tool := recordDiscovery(c.repo, scope, c.f.s.now)
 	raw, err := tool.Handle(context.Background(), json.RawMessage(`{"key":"repair-fake","description":"Update the dependent fake for the new protocol","criterion":"spec#1"}`))
 	fixturekit.Must(t, err)
@@ -207,7 +207,7 @@ func TestAssignmentContextAndDependenciesFollowCurrentPlan(t *testing.T) {
 }
 
 func factoryContextScope(c *contestFixture) coreadapter.Scope {
-	return coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
+	return coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.Manager, Thread: trace.Manager, Turn: "events_1"}
 }
 
 func currentSpecDocument(t *testing.T, c *contestFixture) trace.Document {
@@ -310,10 +310,10 @@ func TestFactoryContextListsFolders(t *testing.T) {
 	c := newContestFixture(t, "factory-folders")
 	var recorded []trace.Document
 	for _, id := range []string{"discovery-a", "discovery-b"} {
-		recorded = append(recorded, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: c.repo.Project(), Workstream: c.stream, At: c.f.clock.Now(), Actor: chiefActor, Cause: "fixture"}, Path: "discoveries/" + id + ".json", Content: "{}"})
+		recorded = append(recorded, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: c.repo.Project(), Workstream: c.stream, At: c.f.clock.Now(), Actor: managerActor, Cause: "fixture"}, Path: "discoveries/" + id + ".json", Content: "{}"})
 	}
 	fixturekit.Must(t, c.repo.RecordDocuments(context.Background(), recorded))
-	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
+	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.Manager, Thread: trace.Manager, Turn: "events_1"}
 	tool := factoryContext(c.repo, scope)
 	for _, path := range []string{"discoveries", "discoveries/"} {
 		input, _ := json.Marshal(map[string]any{"path": path})
@@ -344,7 +344,7 @@ func TestFactoryContextReadsCompleteCheckOutput(t *testing.T) {
 	path := "units/resume/checks-99-output.txt"
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "unit-resume-checks-99-output", Revision: 1, Project: c.repo.Project(), Workstream: c.stream, At: c.f.clock.Now(), Actor: execution.ChecksActor, Cause: "fixture"}, Path: path, Content: captured}
 	fixturekit.Must(t, c.repo.RecordDocuments(context.Background(), []trace.Document{doc}))
-	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
+	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.Manager, Thread: trace.Manager, Turn: "events_1"}
 	tool := factoryContext(c.repo, scope)
 	var recovered strings.Builder
 	offset := 0
@@ -371,10 +371,10 @@ func TestFactoryContextReadsCompleteCheckOutput(t *testing.T) {
 	}
 }
 
-func TestChiefInspectsMasonCandidateAndCommissionsWork(t *testing.T) {
+func TestManagerInspectsMasonCandidateAndCommissionsWork(t *testing.T) {
 	t.Parallel()
-	c := newContestFixture(t, "chief-engineering-tools")
-	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
+	c := newContestFixture(t, "manager-engineering-tools")
+	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.Manager, Thread: trace.Manager, Turn: "events_1"}
 	raw, err := inspectCode(c.f.s.about(c.repo), c.repo, scope, c.f.clock.Now).Handle(context.Background(), json.RawMessage(`{"unit":"resume","path":"`+fixturekit.MasonWrote+`"}`))
 	fixturekit.Must(t, err)
 	var evidence struct {
@@ -398,7 +398,7 @@ func TestChiefInspectsMasonCandidateAndCommissionsWork(t *testing.T) {
 	if captured.Commit == evidence.Commit || captured.Content != "captured after the report\n" {
 		t.Fatalf("captured inspection reused stale report: %s", latest)
 	}
-	tools, err := questions.Tools(c.repo, trace.ChiefOfStaff, scope, c.f.clock.Now)
+	tools, err := questions.Tools(c.repo, trace.Manager, scope, c.f.clock.Now)
 	fixturekit.Must(t, err)
 	for _, tool := range tools {
 		if tool.Name != questions.RouteAmendmentTool {
@@ -418,14 +418,14 @@ func TestChiefInspectsMasonCandidateAndCommissionsWork(t *testing.T) {
 		state, err := c.repo.Workflow(c.stream, trace.UnitSubject("resume"))
 		fixturekit.Must(t, err)
 		if state.Value != UnitReviewing {
-			t.Fatalf("chief's own request parked unrelated unit: %s", state.Value)
+			t.Fatalf("manager's own request parked unrelated unit: %s", state.Value)
 		}
 		return
 	}
-	t.Fatal("chief lacks replanning tool")
+	t.Fatal("manager lacks replanning tool")
 }
 
-func TestChiefRecoveryCannotApproveItsOwnCandidate(t *testing.T) {
+func TestManagerRecoveryCannotApproveItsOwnCandidate(t *testing.T) {
 	t.Parallel()
 	m := newMoveFixture(t, "independent-review")
 	out := intakefixture.Handle(t, m.move, `{"unit":"resume","to":"approved","note":"The change appears correct"}`)
@@ -433,7 +433,7 @@ func TestChiefRecoveryCannotApproveItsOwnCandidate(t *testing.T) {
 		t.Fatal(out)
 	}
 	if intakefixture.UnitWorkflow(t, m.repo, m.stream, "resume").Value != UnitReviewing {
-		t.Fatal("chief bypassed independent review")
+		t.Fatal("manager bypassed independent review")
 	}
 }
 
@@ -508,7 +508,7 @@ func TestReplanningWaitsForWritersWithoutHoldingReadOnlyReview(t *testing.T) {
 	var evidence trace.CodeInspection
 	fixturekit.Must(t, json.Unmarshal(raw, &evidence))
 	if evidence.Commit == "" || evidence.Content != "work captured before done\n" {
-		t.Fatalf("chief cannot inspect unfinished captured work: %s", raw)
+		t.Fatalf("manager cannot inspect unfinished captured work: %s", raw)
 	}
 }
 

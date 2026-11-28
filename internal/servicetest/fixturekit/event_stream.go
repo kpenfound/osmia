@@ -65,9 +65,9 @@ func SeedEventTrace(t *testing.T, cfg *config.Config) {
 	sessions := t.TempDir()
 	_, err = repo.Ask(ctx, DemoAgent, ClaimTurn(t, repo, sessions, Quiet, DemoAgent, DemoThread, "build", DemoStart), "Where does state live?", DemoStart)
 	Must(t, err)
-	_, err = repo.EnsureChiefOfStaff(ctx, Quiet, DemoStart, ServiceActor)
+	_, err = repo.EnsureManager(ctx, Quiet, DemoStart, ServiceActor)
 	Must(t, err)
-	_, err = repo.EscalateQuestions(ctx, trace.ChiefOfStaff, ClaimTurn(t, repo, sessions, Quiet, trace.ChiefOfStaff, trace.ChiefOfStaff, "events", DemoStart),
+	_, err = repo.EscalateQuestions(ctx, trace.Manager, ClaimTurn(t, repo, sessions, Quiet, trace.Manager, trace.Manager, "events", DemoStart),
 		trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "Where should state live?", Blocked: "The unit.", Recommendation: "In files."}, DemoStart)
 	Must(t, err)
 	Must(t, repo.Close())

@@ -36,8 +36,8 @@ type chatMessage struct {
 type chatView struct{ name, id, form, endpoint, result string }
 
 var chatViews = []chatView{
-	{"workstream", "w_000", `[data-workstream="w_000"] form[data-field=send]`, "/v1/conversation/w_000", "Sent; the chief of staff answers in its next turn (pending)."},
-	{"workgroup", "g_test", `[data-view="workgroup"] form[data-field=send]`, "/v1/workgroups/g_test/conversation", "Sent; the chief of staff answers in its next turn (pending)."},
+	{"workstream", "w_000", `[data-workstream="w_000"] form[data-field=send]`, "/v1/conversation/w_000", "Sent; the manager answers in its next turn (pending)."},
+	{"workgroup", "g_test", `[data-view="workgroup"] form[data-field=send]`, "/v1/workgroups/g_test/conversation", "Sent; the manager answers in its next turn (pending)."},
 	{"session", "w_001", "#session-form", "/v1/sessions/w_001/message", "Sent; the agent answers in its next turn (pending)."},
 	{"design", "w_002", "#design-form", "/v1/design/w_002/message", "Sent; the design agent answers in its next turn (pending)."},
 }

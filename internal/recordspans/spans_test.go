@@ -106,7 +106,7 @@ func TestUnitStateSpansCarryTheCauseAndNextState(t *testing.T) {
 }
 
 func TestUnitCauseIsFromTheBoundedVocabulary(t *testing.T) {
-	chief := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
 	rebase := func(from, to string) trace.Transition {
 		return trace.Transition{Header: trace.Header{Actor: service, Cause: "unit-u1-rebase-3-conflicted"}, From: from, To: to}
 	}
@@ -126,9 +126,9 @@ func TestUnitCauseIsFromTheBoundedVocabulary(t *testing.T) {
 		{trace.Transition{Header: trace.Header{Actor: checks}, From: "checking", To: "contested"}, CauseChecksIncomplete},
 		{trace.Transition{Header: trace.Header{Actor: review}, From: "reviewing", To: "contested"}, CauseReviewContested},
 		{trace.Transition{Header: trace.Header{Actor: mason}, From: "implementing", To: "contested"}, CauseContested},
-		{trace.Transition{Header: trace.Header{Actor: chief}, From: "contested", To: "implementing"}, CauseContestRuled},
+		{trace.Transition{Header: trace.Header{Actor: manager}, From: "contested", To: "implementing"}, CauseContestRuled},
 		{trace.Transition{Header: trace.Header{Actor: owner}, From: "contested", To: "reviewing"}, CauseContestRuled},
-		{trace.Transition{Header: trace.Header{Actor: chief}, From: "implementing", To: "approved"}, CauseMoved},
+		{trace.Transition{Header: trace.Header{Actor: manager}, From: "implementing", To: "approved"}, CauseMoved},
 		{trace.Transition{Header: trace.Header{Actor: service}, From: "approved", To: "merged"}, CauseLanded},
 		{trace.Transition{Header: trace.Header{Actor: service}, From: "implementing", To: "waiting"}, CauseAmendmentWait},
 		{trace.Transition{Header: trace.Header{Actor: service}, From: "waiting", To: "implementing"}, CauseAmendmentResolved},
@@ -406,5 +406,33 @@ func TestObserverPanicNeverFailsACommit(t *testing.T) {
 	h.feature("t2", "sketched", minute(2), owner, "sketched")
 	if state, err := h.repo.Workflow(stream, trace.FeatureSubject); err != nil || state.Value != "sketched" {
 		t.Fatalf("state %v %v", state, err)
+	}
+}
+
+func TestAManagerTurnSpanReportsTheManagerRole(t *testing.T) {
+	h := newHarness(t)
+	h.turnOf(trace.Manager, "m1", minute(1), minute(2), func(req *trace.TurnRequest, resp *trace.TurnResponse) {
+		req.Unit, resp.Unit = "", ""
+	})
+
+	turns := named(h.spans(), "invoke_agent "+trace.ManagerDisplay)
+	if len(turns) != 1 {
+		t.Fatalf("%d manager turn spans: %v", len(turns), h.spans())
+	}
+	for key, want := range map[string]string{
+		"gen_ai.agent.name": trace.ManagerDisplay, "gen_ai.agent.id": trace.ManagerDisplay, "osmia.role": trace.ManagerDisplay,
+	} {
+		if got := str(turns[0], key); got != want {
+			t.Errorf("attribute %s = %q, want %q", key, got, want)
+		}
+	}
+	if len(named(h.spans(), "invoke_agent "+trace.Manager)) != 0 {
+		t.Fatal("a turn span carries the stored name of the manager")
+	}
+}
+
+func TestAManagerEndingAWorkstreamStateIsTheManagerCause(t *testing.T) {
+	if got := FeatureCause(trace.Transition{Header: trace.Header{Actor: trace.Actor{Kind: "agent", ID: trace.Manager}}}); got != trace.ManagerDisplay {
+		t.Fatalf("cause %q, want %q", got, trace.ManagerDisplay)
 	}
 }

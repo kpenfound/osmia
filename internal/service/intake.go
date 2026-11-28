@@ -145,7 +145,7 @@ func (s *Service) agentProfile(cfg *config.Config, role string, agent string) (c
 
 type apiErrAsError = intake.ApiErrAsError
 
-var chiefActor = intake.ChiefActor
+var managerActor = intake.ManagerActor
 
 var ownerActor = intake.OwnerActor
 
@@ -326,11 +326,11 @@ func (s *Service) intake() *intake.Controller {
 		RecoveryEntries:          s.recoveryEntries,
 		ChangeHeld:               changeHeld,
 		ChangeRepositoryHeld:     changeRepositoryHeld,
-		ChiefContext:             chiefContext,
-		ChiefOverride:            s.chiefOverride,
+		ManagerContext:           managerContext,
+		ManagerOverride:          s.managerOverride,
 		DesignerOverride:         s.designerOverride,
-		ChiefRepository:          s.chiefRepository,
-		ChiefRepositoryForRead:   s.chiefRepositoryForRead,
+		ManagerRepository:        s.managerRepository,
+		ManagerRepositoryForRead: s.managerRepositoryForRead,
 		ContestedEntry:           s.contestedEntry,
 		ContestedGate:            s.contestedGate,
 		ContextFor:               s.contextFor,

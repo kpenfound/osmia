@@ -88,7 +88,7 @@ func (r *Repository) PendingCrossRepoWorkgroup(stream config.WorkstreamID) (conf
 }
 
 // JoinCrossRepoWorkgroup publishes stream's shared locator and retracts its
-// unused local chief in one member-trace commit. The project-level solitary
+// unused local manager in one member-trace commit. The project-level solitary
 // workgroup can then be retracted: readers already route through the locator.
 // Retrying the same join changes nothing; an existing conversation is refused.
 func (r *Repository) JoinCrossRepoWorkgroup(ctx context.Context, stream config.WorkstreamID, id config.WorkgroupID, at time.Time, actor Actor, cause string) error {
@@ -109,14 +109,14 @@ func (r *Repository) JoinCrossRepoWorkgroup(ctx context.Context, stream config.W
 	if state.Value != "" && state.Value != string(id) {
 		return refused("workstream %s already points to cross-repo workgroup %s", stream, state.Value)
 	}
-	chief, hasChief := log.Threads[ChiefOfStaff]
-	if hasChief && len(chief.Turns) > 0 {
-		return refused("workstream %s already has chief-of-staff turns of its own", stream)
+	manager, hasManager := log.Threads[Manager]
+	if hasManager && len(manager.Turns) > 0 {
+		return refused("workstream %s already has manager turns of its own", stream)
 	}
-	if state.Value == string(id) && !hasChief {
+	if state.Value == string(id) && !hasManager {
 		return nil
 	}
-	delete(log.Threads, ChiefOfStaff)
+	delete(log.Threads, Manager)
 	var txs []Transaction
 	if state.Value == "" {
 		txs = append(txs, Transaction{ExpectedVersion: state.Version,

@@ -6,13 +6,13 @@ import (
 	"time"
 )
 
-// NotesHeading heads the chief of staff's notes, the one part of the hand-in
+// NotesHeading heads the manager's notes, the one part of the hand-in
 // the service does not write from evidence.
-const NotesHeading = "## Notes from the chief of staff"
+const NotesHeading = "## Notes from the manager"
 
 // RenderHandIn writes the hand-in for the occurrence of run in the group, as
 // Markdown: the evidence its run recorded, the group's earlier history, what
-// the workstream is asked to do and, last and separate, the chief of staff's
+// the workstream is asked to do and, last and separate, the manager's
 // notes. Only the notes are free text; everything else is written from the
 // record.
 func RenderHandIn(g Group, run, notes string) (string, error) {

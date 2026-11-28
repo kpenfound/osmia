@@ -54,7 +54,7 @@ func newPriorityRig(t *testing.T) *priorityRig {
 	opts, cfg := conversationFixture(t, "pr-")
 	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
 	fixturekit.Must(t, err)
-	_, err = configFile.WriteString("[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")
+	_, err = configFile.WriteString("[roles.manager]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")
 	fixturekit.Must(t, errors.Join(err, configFile.Close()))
 
 	r := &priorityRig{t: t, ctx: ctx, results: map[string][]string{}, prompts: map[string]string{},
@@ -67,12 +67,12 @@ func newPriorityRig(t *testing.T) *priorityRig {
 		_, err := repo.SetFeatureState(ctx, h, state, "ended")
 		fixturekit.Must(t, err)
 	}
-	_, err = repo.EnsureChiefOfStaff(ctx, fixturekit.Stream, fixturekit.DemoStart, serviceActor)
+	_, err = repo.EnsureManager(ctx, fixturekit.Stream, fixturekit.DemoStart, serviceActor)
 	fixturekit.Must(t, err)
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{
 		Header:  trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_events_seed", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "events"},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events_seed", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
-		SystemPrompt: fmt.Sprintf(followUpPrompt, fixturekit.Stream) + "\n\n" + chiefGuidance(), Prompt: "A service event."})
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "events_seed", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
+		SystemPrompt: fmt.Sprintf(followUpPrompt, fixturekit.Stream) + "\n\n" + managerGuidance(), Prompt: "A service event."})
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.Close())
 
@@ -100,7 +100,7 @@ func newPriorityRig(t *testing.T) *priorityRig {
 				r.problems = append(r.problems, fmt.Sprintf("event %s: %s %v", name, out, err))
 			}
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Nothing to do"), nil
 	}
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, "events_") {
@@ -139,14 +139,14 @@ func newPriorityRig(t *testing.T) *priorityRig {
 		default:
 			r.problems = append(r.problems, "unexpected turn "+req.Name)
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Done"), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Done"), nil
 	}
 
 	r.s, r.c = start(t, r.opts)
 	select {
 	case <-seeded:
 	case <-time.After(fixturekit.DemoTimeout):
-		t.Fatal("the service's chief-of-staff turn did not run")
+		t.Fatal("the service's manager turn did not run")
 	}
 	intakefixture.Mutation(t, r.c, "PUT", "priority", PriorityRequest{Project: fixturekit.Project, Workstreams: []config.WorkstreamID{fixturekit.Stream}})
 	return r
@@ -214,7 +214,7 @@ func (r *priorityRig) requireRecordedFor(sent ConversationEntry, want []config.W
 		r.t.Fatalf("priority records: %+v", got)
 	}
 	p := got[0]
-	if p.ID != trace.PriorityID || p.Revision != 1 || p.Actor != ownerActor || p.Cause != request || p.Agent != trace.ChiefOfStaff || p.Turn != sent.Turn || !slices.Equal(p.Order, want) {
+	if p.ID != trace.PriorityID || p.Revision != 1 || p.Actor != ownerActor || p.Cause != request || p.Agent != trace.Manager || p.Turn != sent.Turn || !slices.Equal(p.Order, want) {
 		r.t.Fatalf("priority record %+v", p)
 	}
 }
@@ -223,11 +223,11 @@ func (r *priorityRig) requireOwnerPause() {
 	r.t.Helper()
 	pauses := r.pauses()
 	if len(pauses) != 1 || pauses[0].Source != runtime.PauseOwner || pauses[0].Reason != "travel" || pauses[0].SetAt.IsZero() {
-		r.t.Fatalf("chief pause: %+v", pauses)
+		r.t.Fatalf("manager pause: %+v", pauses)
 	}
 }
 
-func TestChiefEventTurnsCannotActForTheOwner(t *testing.T) {
+func TestManagerEventTurnsCannotActForTheOwner(t *testing.T) {
 	t.Parallel()
 	r := newPriorityRig(t)
 	r.requireNoProblems()
@@ -240,7 +240,7 @@ func TestChiefEventTurnsCannotActForTheOwner(t *testing.T) {
 	}
 }
 
-func TestChiefRefusesInvalidPriorityOrders(t *testing.T) {
+func TestManagerRefusesInvalidPriorityOrders(t *testing.T) {
 	t.Parallel()
 	r := newPriorityRig(t)
 	r.send(priorityInvalidPrompt)
@@ -264,7 +264,7 @@ func TestChiefRefusesInvalidPriorityOrders(t *testing.T) {
 	}
 }
 
-func TestChiefSetsPriorityOrderForTheOwner(t *testing.T) {
+func TestManagerSetsPriorityOrderForTheOwner(t *testing.T) {
 	t.Parallel()
 	r := newPriorityRig(t)
 	sent := r.send(priorityValidPrompt)
@@ -279,7 +279,7 @@ func TestChiefSetsPriorityOrderForTheOwner(t *testing.T) {
 	r.requireRecordedFor(sent, want)
 }
 
-func TestChiefPausesTheFactoryForTheOwner(t *testing.T) {
+func TestManagerPausesTheFactoryForTheOwner(t *testing.T) {
 	t.Parallel()
 	r := newPriorityRig(t)
 	r.send(priorityPausePrompt)
@@ -287,18 +287,18 @@ func TestChiefPausesTheFactoryForTheOwner(t *testing.T) {
 	r.requireOwnerPause()
 }
 
-func TestChiefResumesTheFactoryForTheOwner(t *testing.T) {
+func TestManagerResumesTheFactoryForTheOwner(t *testing.T) {
 	t.Parallel()
 	r := newPriorityRig(t)
 	r.send(priorityPausePrompt)
 	r.send(priorityResumePrompt)
 	r.requireNoProblems()
 	if got := r.pauses(); len(got) != 0 {
-		t.Fatalf("chief resume: %+v", got)
+		t.Fatalf("manager resume: %+v", got)
 	}
 }
 
-func TestOwnerTurnsOfTheChiefHaveTheChiefToolsAndGuidance(t *testing.T) {
+func TestOwnerTurnsOfTheManagerHaveTheManagerToolsAndGuidance(t *testing.T) {
 	t.Parallel()
 	r := newPriorityRig(t)
 	r.send(priorityValidPrompt)
@@ -314,7 +314,7 @@ func TestOwnerTurnsOfTheChiefHaveTheChiefToolsAndGuidance(t *testing.T) {
 	}
 	slices.Sort(names)
 	if wantNames := []string{"answer", "ask_owner_about_checks", "capacity", "decide", "decide_amendment", "decide_change", "decide_charter", "drop_dependency", "escalate", "factory_context", "file_read", "flake_fix", "follow_up", "hand_back_drift", "inspect_code", "log_assumption", "move_unit", "move_workstream", "notify", "pause", "preview", "prioritise", "project_context", "propose_charter", "pull_request_checks", "read_cloud_trace", "read_remote_file", "record_delivery_brief", "record_discovery", "relay_ruling", "request_change", "resolve_contested", "resolve_objection", "resume", "retry_change", "route_amendment", "set_status", "triage_finding"}; !slices.Equal(names, wantNames) {
-		t.Fatalf("chief-of-staff tools %v, want %v", names, wantNames)
+		t.Fatalf("manager tools %v, want %v", names, wantNames)
 	}
 	for prompt, system := range r.prompts {
 		if !strings.Contains(system, priorityGuidance) || !strings.Contains(system, amendmentGuidance) {
@@ -323,7 +323,7 @@ func TestOwnerTurnsOfTheChiefHaveTheChiefToolsAndGuidance(t *testing.T) {
 	}
 }
 
-func TestPriorityOrderAndChiefPauseSurviveARestart(t *testing.T) {
+func TestPriorityOrderAndManagerPauseSurviveARestart(t *testing.T) {
 	t.Parallel()
 	r := newPriorityRig(t)
 	sent := r.send(priorityValidPrompt)
@@ -339,7 +339,7 @@ func TestPriorityOrderAndChiefPauseSurviveARestart(t *testing.T) {
 		t.Fatalf("runtime priority after restart %v, want %v", got, want)
 	}
 	if got := r.pauses(); !reflect.DeepEqual(got, paused) {
-		t.Fatalf("chief pause after restart: %+v", got)
+		t.Fatalf("manager pause after restart: %+v", got)
 	}
 	r.requireRecordedFor(sent, want)
 	st, _ := r.s.store.Effective()

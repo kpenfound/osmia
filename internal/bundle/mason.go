@@ -368,8 +368,8 @@ func (m Mason) RenderAmendments() string {
 	line("## Amendments")
 	for _, n := range m.Amendments {
 		actor, section := "owner", "owner_response"
-		if n.Actor == trace.ChiefOfStaff {
-			actor, section = "chief of staff", "answer"
+		if n.Actor == trace.Manager {
+			actor, section = "manager", "answer"
 		}
 		line("- %s: the %s approved amendment %s; seal %d governs %s revision %d and %s revision %d", n.Source, actor, n.Amendment, n.Seal, plan.SpecPath, n.Spec, plan.PlanPath, n.Plan)
 		if n.Rework {

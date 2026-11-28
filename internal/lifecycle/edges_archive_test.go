@@ -126,7 +126,7 @@ func TestArchivedUpstreamMergeReleasesEdgeAcrossRestart(t *testing.T) {
 			f.Start(t)
 			sent, err := f.C.Send(ctx, f.Stream2, "Report the dependency status after restart.")
 			fixturekit.Must(t, err)
-			journey.LifecycleAwait(t, f, "survivor chief dispatch after restart", func() bool {
+			journey.LifecycleAwait(t, f, "survivor manager dispatch after restart", func() bool {
 				conversation, err := f.C.Conversation(ctx, f.Stream2)
 				fixturekit.Must(t, err)
 				for _, entry := range conversation.Entries {

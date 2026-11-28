@@ -167,7 +167,7 @@ func scheduleFollowUp(ctx context.Context, r *trace.Repository, host config.Work
 }
 
 func markFollowUpActed(ctx context.Context, r *trace.Repository, host config.WorkstreamID, turn, by string, at time.Time) error {
-	th, err := r.Thread(host, trace.ChiefOfStaff)
+	th, err := r.Thread(host, trace.Manager)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -197,7 +197,7 @@ func stallTurn(q trace.QueuedTurn) bool {
 
 func newFollowUpTool(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	description := "Schedule a turn of your own to check back later. after: a Go duration from 5m to 24h, such as 45m or 3h. reason: what to check, which the turn's prompt repeats with what changed since. The service keeps one pending follow-up per workstream: a newer one replaces an unfired one. Use it whenever you expect work to start or finish later, instead of telling the owner it will happen; owner pauses do not stop it."
-	if scope.Role == trace.ChiefOfStaff {
+	if scope.Role == trace.Manager {
 		description += " workstream: the member of your workgroup to check on; omit to check on the whole workgroup."
 	}
 	return coreadapter.Tool{Name: followUpTool, Effect: coreadapter.ToolMemory, Description: description,
@@ -206,8 +206,8 @@ func newFollowUpTool(r *trace.Repository, scope coreadapter.Scope, now func() ti
 			if err := r.ActiveTurn(scope); err != nil {
 				return nil, err
 			}
-			if scope.Role != trace.ChiefOfStaff {
-				return nil, errors.New("follow_up is granted to the chief of staff only")
+			if scope.Role != trace.Manager {
+				return nil, errors.New("follow_up is granted to the manager only")
 			}
 			var in struct {
 				After      string              `json:"after"`
@@ -226,7 +226,7 @@ func newFollowUpTool(r *trace.Repository, scope coreadapter.Scope, now func() ti
 				return priorityRefusal("reason must say in at most 1000 characters what to check")
 			}
 			if in.Workstream != "" {
-				if _, _, refusal, err := chiefMember(r, scope, in.Workstream); err != nil {
+				if _, _, refusal, err := managerMember(r, scope, in.Workstream); err != nil {
 					return nil, err
 				} else if refusal != "" {
 					return priorityRefusal(refusal)
@@ -239,7 +239,7 @@ func newFollowUpTool(r *trace.Repository, scope coreadapter.Scope, now func() ti
 			}
 			at := now()
 			id := followUpID(scope.Thread, in.Workstream)
-			f := followUp{ID: id, Workstream: in.Workstream, Reason: reason, ScheduledAt: at, Due: at.Add(after), By: "chief", Turn: scope.Turn, State: followUpPending}
+			f := followUp{ID: id, Workstream: in.Workstream, Reason: reason, ScheduledAt: at, Due: at.Add(after), By: trace.ManagerKey, Turn: scope.Turn, State: followUpPending}
 			prior, replaced := recs.latest[id]
 			replaced = replaced && prior.State == followUpPending
 			if replaced {
@@ -319,7 +319,7 @@ func (f followUps) pass(ctx context.Context, r *trace.Repository, streams []conf
 }
 
 func (f followUps) stream(ctx context.Context, r *trace.Repository, host config.WorkstreamID) error {
-	th, err := r.Thread(host, trace.ChiefOfStaff)
+	th, err := r.Thread(host, trace.Manager)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -417,7 +417,7 @@ func (f followUps) fire(ctx context.Context, r *trace.Repository, host config.Wo
 		}
 		req := trace.TurnRequest{
 			Header:  trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: r.Project(), Workstream: host, At: now, Actor: followUpActor, Cause: x.ID},
-			AgentID: trace.ChiefOfStaff, ThreadID: th.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: system, Context: turnContext, Prompt: prompt}
+			AgentID: trace.Manager, ThreadID: th.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: system, Context: turnContext, Prompt: prompt}
 		if _, err := r.EnqueueTurn(ctx, req); err != nil && !errors.Is(err, trace.ErrConflict) {
 			return err
 		}
@@ -451,7 +451,7 @@ func (f followUps) prompt(r *trace.Repository, host config.WorkstreamID, x follo
 				continue
 			}
 		}
-		target, stream, refusal, err := r.ChiefMember(host, member)
+		target, stream, refusal, err := r.ManagerMember(host, member)
 		if err != nil {
 			return "", err
 		}
@@ -542,7 +542,7 @@ func (f followUps) summary(r *trace.Repository, stream config.WorkstreamID, sinc
 	return b.String(), nil
 }
 
-const followUpPrompt = "You are the chief of staff for workstream %s. This turn is a follow-up you scheduled that came due. The prompt says why it was scheduled, when, and what changed since. The project context in the turn context was assembled when it came due."
+const followUpPrompt = "You are the manager for workstream %s. This turn is a follow-up you scheduled that came due. The prompt says why it was scheduled, when, and what changed since. The project context in the turn context was assembled when it came due."
 
 const followUpEvery = 5 * time.Second
 
@@ -568,7 +568,7 @@ func (p *conversationPath) followUps(ctx context.Context, repository *trace.Repo
 	cfg := s.current()
 	f := followUps{now: s.now, window: followUpWindow(cfg), service: s, system: s.followUpSystem, archived: s.archivedWorkstream,
 		profile: func() (coreadapter.Profile, error) {
-			_, profile, err := s.chiefOverride(cfg)
+			_, profile, err := s.managerOverride(cfg)
 			return profile, err
 		}}
 	return f.pass(ctx, repository, streams)
@@ -579,9 +579,9 @@ func (s *Service) followUpSystem(ctx context.Context, target *trace.Repository, 
 	if err != nil {
 		return "", "", err
 	}
-	context, err := chiefContext(ctx, s.Context(), target, func() {}, bundle.Project(), host)
+	context, err := managerContext(ctx, s.Context(), target, func() {}, bundle.Project(), host)
 	if err != nil {
 		return "", "", err
 	}
-	return fmt.Sprintf(followUpPrompt, host) + "\n\n" + chiefGuidance(), context, nil
+	return fmt.Sprintf(followUpPrompt, host) + "\n\n" + managerGuidance(), context, nil
 }

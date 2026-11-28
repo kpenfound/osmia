@@ -312,15 +312,15 @@ func TestCrossRepoWorkgroupDraftAndRatify(t *testing.T) {
 		}
 	}
 
-	b, err := f.S.Context().Assemble(ctx, f.Project, bundle.Scope{Role: "chief_of_staff", Workstream: f.Stream1})
+	b, err := f.S.Context().Assemble(ctx, f.Project, bundle.Scope{Role: trace.Manager, Workstream: f.Stream1})
 	fixturekit.Must(t, err)
 	if b.ProjectSpec == nil || b.ProjectSpec.Workgroup != id || b.ProjectSpec.Slice == nil || b.ProjectSpec.Slice.Workstream != f.Stream1 {
-		t.Fatalf("chief of staff's context of member1 does not carry the ratified project spec: %+v", b.ProjectSpec)
+		t.Fatalf("manager's context of member1 does not carry the ratified project spec: %+v", b.ProjectSpec)
 	}
-	b2, err := f.S.Context().Assemble(ctx, f.Project2, bundle.Scope{Role: "chief_of_staff", Workstream: f.Stream2})
+	b2, err := f.S.Context().Assemble(ctx, f.Project2, bundle.Scope{Role: trace.Manager, Workstream: f.Stream2})
 	fixturekit.Must(t, err)
 	if b2.ProjectSpec == nil || b2.ProjectSpec.Workgroup != id || b2.ProjectSpec.Slice == nil || b2.ProjectSpec.Slice.Workstream != f.Stream2 {
-		t.Fatalf("chief of staff's context of member2 does not carry the ratified project spec: %+v", b2.ProjectSpec)
+		t.Fatalf("manager's context of member2 does not carry the ratified project spec: %+v", b2.ProjectSpec)
 	}
 }
 
@@ -436,7 +436,7 @@ func TestDraftWorkgroupRefusesReadinessWithNothingRecordedOnAnyMember(t *testing
 	}
 
 	if _, apiFault := f.S.Lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.Stream1, f.Stream2}); apiFault == nil {
-		t.Fatal("draft workgroup with a member that already has chief-of-staff turns was not refused")
+		t.Fatal("draft workgroup with a member that already has manager turns was not refused")
 	}
 
 	repo1, err := f.S.Repository(f.Project)
@@ -459,8 +459,8 @@ func TestDraftWorkgroupRefusesReadinessWithNothingRecordedOnAnyMember(t *testing
 	if _, ok := trace.WorkgroupOf(groups2, f.Stream2); !ok {
 		t.Fatal("member2's workgroup was retracted despite the refused join")
 	}
-	if _, err := repo1.ChiefOfStaffThread(f.Stream1); err != nil {
-		t.Fatalf("member1's chief thread changed: %v", err)
+	if _, err := repo1.ManagerThread(f.Stream1); err != nil {
+		t.Fatalf("member1's manager thread changed: %v", err)
 	}
 	entries, err := os.ReadDir(filepath.Join(f.S.Current().Root.String(), "workgroups"))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -523,8 +523,8 @@ func TestDraftWorkgroupInterruptedBetweenMembersCompletesOnRetryWithNoSecondWork
 	if joined, err := repo2.CrossRepoWorkgroupOf(f.Stream2); err != nil || joined != g.ID {
 		t.Fatalf("member2 was not joined by the retry: joined=%q err=%v", joined, err)
 	}
-	if _, err := repo2.ChiefOfStaffThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("member2 still has its own chief-of-staff thread after joining: %v", err)
+	if _, err := repo2.ManagerThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("member2 still has its own manager thread after joining: %v", err)
 	}
 	reopened, err := trace.OpenWorkgroupTrace(f.S.Current().Root, g.ID, resolved)
 	fixturekit.Must(t, err)
@@ -566,7 +566,7 @@ func TestDraftWorkgroupRetryAfterCreationBeforeAnyMemberJoins(t *testing.T) {
 	}
 }
 
-func TestCrossRepoWorkgroupSharesOneChiefOfStaffAcrossARestart(t *testing.T) {
+func TestCrossRepoWorkgroupSharesOneManagerAcrossARestart(t *testing.T) {
 	t.Parallel()
 	f := newCrossRepoRatifyFixture(t)
 	defer f.Stop(t)
@@ -582,13 +582,13 @@ func TestCrossRepoWorkgroupSharesOneChiefOfStaffAcrossARestart(t *testing.T) {
 
 	repo1, err := f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	if _, err := repo1.ChiefOfStaffThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("member1's own repository got a chief-of-staff thread of its own: %v", err)
+	if _, err := repo1.ManagerThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("member1's own repository got a manager thread of its own: %v", err)
 	}
 	repo2, err := f.S.Repository(f.Project2)
 	fixturekit.Must(t, err)
-	if _, err := repo2.ChiefOfStaffThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("member2's own repository got a chief-of-staff thread of its own: %v", err)
+	if _, err := repo2.ManagerThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("member2's own repository got a manager thread of its own: %v", err)
 	}
 
 	sent2, err := f.C.Send(ctx, f.Stream2, "Does the client ever see the offset?")
@@ -610,13 +610,13 @@ func TestCrossRepoWorkgroupSharesOneChiefOfStaffAcrossARestart(t *testing.T) {
 	checkSharedConversation(t)
 	repo1, err = f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	if _, err := repo1.ChiefOfStaffThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("member1's own repository got a chief-of-staff thread after restart: %v", err)
+	if _, err := repo1.ManagerThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("member1's own repository got a manager thread after restart: %v", err)
 	}
 	repo2, err = f.S.Repository(f.Project2)
 	fixturekit.Must(t, err)
-	if _, err := repo2.ChiefOfStaffThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("member2's own repository got a chief-of-staff thread after restart: %v", err)
+	if _, err := repo2.ManagerThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("member2's own repository got a manager thread after restart: %v", err)
 	}
 }
 func mustRepo(t *testing.T, s *journey.Service, project config.ProjectID) *trace.Repository {

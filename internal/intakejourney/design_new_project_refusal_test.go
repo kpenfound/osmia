@@ -32,7 +32,7 @@ func (r *takenAfterStart) Repository(ctx context.Context, owner, name string) (p
 	return repo, found, err
 }
 
-func TestNewProjectStartRefusedAfterStartReachesTheInboxAndTheChief(t *testing.T) {
+func TestNewProjectStartRefusedAfterStartReachesTheInboxAndTheManager(t *testing.T) {
 	f := newNewProjectStartFixture(t, true)
 	ctx := context.Background()
 	repos := &takenAfterStart{Repositories: f.github.Client()}
@@ -51,18 +51,18 @@ func TestNewProjectStartRefusedAfterStartReachesTheInboxAndTheChief(t *testing.T
 		t.Fatalf("the entry's retry: %+v", entry)
 	}
 	refusalTurns := func() []trace.QueuedTurn {
-		th, err := f.homeRepository(t).Thread(stream, trace.ChiefOfStaff)
+		th, err := f.homeRepository(t).Thread(stream, trace.Manager)
 		fixturekit.Must(t, err)
 		return slices.DeleteFunc(slices.Clone(th.Turns), func(q trace.QueuedTurn) bool {
 			return !strings.HasPrefix(q.Request.TurnID, "design-project-refused-")
 		})
 	}
-	f.await(t, "the chief of staff's turn about the refusal", func() bool {
+	f.await(t, "the manager's turn about the refusal", func() bool {
 		turns := refusalTurns()
 		return len(turns) == 1 && turns[0].Response != nil
 	})
 	if turn := refusalTurns()[0]; !strings.Contains(turn.Request.Prompt, "already exists on GitHub") || !strings.Contains(turn.Request.Prompt, "tries the creation again on every pass") {
-		t.Fatalf("the chief's turn: %s", turn.Request.Prompt)
+		t.Fatalf("the manager's turn: %s", turn.Request.Prompt)
 	}
 	seen := repos.reads.Load()
 	f.await(t, "more passes over the refused creation", func() bool { return repos.reads.Load() >= seen+3 })

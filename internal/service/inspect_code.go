@@ -24,11 +24,11 @@ func inspectCode(cfg *config.Config, repo *trace.Repository, scope coreadapter.S
 		"path defaults to the project root: a file returns its text and a directory returns its file names. start (a one-based line) and lines (default 200, maximum 1000) select part of a file or of a listing; an excerpt over 65536 bytes is refused, so ask for fewer lines. " +
 		"Set unit to read that unit's latest recorded candidate. Set captured to true, with unit, to read its unfinished changes since its last report. A captured read waits for the unit's writer to finish its turn, and the service then takes the snapshot itself. A unit with no completed report is read the same way. The returned commit identifies the evidence. " +
 		"Cite the returned inspection citation when you answer from code."
-	if scope.Role == trace.ChiefOfStaff {
+	if scope.Role == trace.Manager {
 		description += " workstream: a member workstream ID of your workgroup whose code and units to read. Omit it for this conversation's own workstream."
 	}
 	return coreadapter.Tool{Name: "inspect_code", Effect: coreadapter.ToolMemory, Description: description, InputSchema: memberSchema(scope, `"captured":{"type":"boolean"},"unit":{"type":"string"},"path":{"type":"string"},"start":{"type":"integer"},"lines":{"type":"integer"}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
-		if scope.Role != trace.ChiefOfStaff && scope.Role != architectRole {
+		if scope.Role != trace.Manager && scope.Role != architectRole {
 			return nil, errors.New("inspect_code is not granted to this role")
 		}
 		if err := repo.ActiveTurn(scope); err != nil {
@@ -47,7 +47,7 @@ func inspectCode(cfg *config.Config, repo *trace.Repository, scope coreadapter.S
 		if err := decoder.Decode(&in); err != nil {
 			return nil, err
 		}
-		target, stream, refusal, err := chiefMember(repo, scope, in.Workstream)
+		target, stream, refusal, err := managerMember(repo, scope, in.Workstream)
 		if err != nil {
 			return nil, err
 		}

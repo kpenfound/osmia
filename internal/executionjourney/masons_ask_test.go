@@ -27,15 +27,15 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func newAskingMasonFixture(t *testing.T, masons int, drafted string, p *intakefixture.Faults) (*journey.ShedFixture, *intakefixture.FakeMasons, *intakefixture.Chief) {
+func newAskingMasonFixture(t *testing.T, masons int, drafted string, p *intakefixture.Faults) (*journey.ShedFixture, *intakefixture.FakeMasons, *intakefixture.Manager) {
 	t.Helper()
 	return newAskingMasonFixturePrepared(t, masons, drafted, p, nil)
 }
 
-func newAskingMasonFixturePrepared(t *testing.T, masons int, drafted string, p *intakefixture.Faults, prepare func(*journey.Options)) (*journey.ShedFixture, *intakefixture.FakeMasons, *intakefixture.Chief) {
+func newAskingMasonFixturePrepared(t *testing.T, masons int, drafted string, p *intakefixture.Faults, prepare func(*journey.Options)) (*journey.ShedFixture, *intakefixture.FakeMasons, *intakefixture.Manager) {
 	t.Helper()
 	f, fake := journey.NewMasonFixturePrepared(t, masons, drafted, prepare)
-	c := &intakefixture.Chief{P: p, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
+	c := &intakefixture.Manager{P: p, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	f.Engine.Mu.Lock()
 	defer f.Engine.Mu.Unlock()
 	f.Engine.Turns["*"] = c.Turn

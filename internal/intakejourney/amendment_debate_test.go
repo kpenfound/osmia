@@ -143,7 +143,7 @@ func TestAmendmentShedPresentation(t *testing.T) {
 				}
 			}
 			if !found {
-				t.Error("chief presentation notice missing")
+				t.Error("manager presentation notice missing")
 			}
 			feature, err := repo.Workflow(stream, trace.FeatureSubject)
 			fixturekit.Must(t, err)

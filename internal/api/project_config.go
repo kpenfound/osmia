@@ -53,7 +53,7 @@ type ProjectConfigValues struct {
 	CapacityGitOperations *int              `json:"capacity.git_operations,omitempty"`
 	HearsayScope          *string           `json:"hearsay_scope,omitempty" description:"A Hearsay entity id, such as work:<source>:<project>, that replaces the project's default read entity."`
 	HearsayDeclareRepo    *bool             `json:"hearsay_declare_repo,omitempty" description:"True posts the project to Hearsay with its GitHub repo declared, which makes its records visible to that repository's readers. Default false."`
-	FlakeFixes            *bool             `json:"flake_fixes,omitempty" description:"True turns flake-fix workstreams on for the project: a flaky check is recorded and the chief of staff may open a workstream to fix its cause. Those workstreams' pull requests go out under the owner's name. Default false."`
+	FlakeFixes            *bool             `json:"flake_fixes,omitempty" description:"True turns flake-fix workstreams on for the project: a flaky check is recorded and the manager may open a workstream to fix its cause. Those workstreams' pull requests go out under the owner's name. Default false."`
 	HearsayEntities       map[string]string `json:"hearsay_entities,omitempty" description:"Entries to set, by local entity ID, each a Hearsay entity id."`
 }
 

@@ -184,7 +184,7 @@ func ask(name, instructions string) router.Question {
 var triggerSpecs = map[string]wsTrigger{
 	TriggerDraftExhausted: {
 		describe: map[string]string{
-			TargetExhausted: "Stop drafting: none of the architect's drafts was accepted, so the workstream stays handed in and the chief of staff is told.",
+			TargetExhausted: "Stop drafting: none of the architect's drafts was accepted, so the workstream stays handed in and the manager is told.",
 		},
 	},
 	TriggerShedConcluded: {
@@ -208,7 +208,7 @@ var triggerSpecs = map[string]wsTrigger{
 		corroborate: map[string][]router.Condition{TargetAssembled: {{Question: "work_lost", AtLeast: router.LevelModest}, {Question: "stage_repeatable", AtLeast: router.LevelModest}}},
 	},
 	TriggerSealFailed: {
-		describe:  map[string]string{TargetFailed: "Record the failed sealing and tell the chief of staff; the owner ratifies again once it is put right."},
+		describe:  map[string]string{TargetFailed: "Record the failed sealing and tell the manager; the owner ratifies again once it is put right."},
 		questions: []router.Question{ask("transient", "The sealing failure looks like a one-off of infrastructure.")},
 	},
 	TriggerFinalClean: {
@@ -228,7 +228,7 @@ var triggerSpecs = map[string]wsTrigger{
 	},
 	TriggerFinalFailed: {
 		describe: map[string]string{
-			TargetFailed:         "Record the failed final review and tell the chief of staff; a new review runs once the branch or its governing documents change.",
+			TargetFailed:         "Record the failed final review and tell the manager; a new review runs once the branch or its governing documents change.",
 			TargetFreshReview:    "Ask for a fresh final review of the branch: the failure looks transient.",
 			TargetReopenBuilding: "Reopen the workstream for repair units: the failure comes from the branch.",
 		},
@@ -269,7 +269,7 @@ func (d *Drafter) exhaustedExit(stream config.WorkstreamID, state trace.Workflow
 		Default: TargetExhausted, Targets: targets, Questions: ExitQuestions(TriggerDraftExhausted),
 		TransitionID: func(router.Target) string { return id },
 		Enter: func(_ context.Context, p router.Plan) (router.Effect, error) {
-			return router.Effect{Events: []trace.Event{trace.Notice(id, "chief", body)}, Reason: reason}, nil
+			return router.Effect{Events: []trace.Event{trace.Notice(id, trace.ManagerKey, body)}, Reason: reason}, nil
 		},
 		Evidence: router.Evidence{
 			Intent:  "The workstream was handed in and the architect drafts its spec and plan.",
@@ -433,7 +433,7 @@ func (m DefaultMove) Exit() router.Exit {
 	}
 }
 
-// FeatureProgress is the notice that tells the chief of staff of a move of the
+// FeatureProgress is the notice that tells the manager of a move of the
 // workstream's feature state: the one every move of it records.
 func FeatureProgress(id, from, to, reason string) trace.Event {
 	body := fmt.Sprintf("Workstream state changed to %s: %s", to, reason)

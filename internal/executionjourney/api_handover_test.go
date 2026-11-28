@@ -29,13 +29,13 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-type handoverChief struct {
+type handoverManager struct {
 	mu      sync.Mutex
 	prompts map[string][]string
 	written map[string]string
 }
 
-func (h *handoverChief) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+func (h *handoverManager) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 	listed, err := tools.ListTools(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -45,7 +45,7 @@ func (h *handoverChief) turn(ctx context.Context, req agent.Request, _ *agent.Tu
 		names = append(names, tool.Name)
 	}
 	if !slices.Equal(names, []string{status.ToolName}) {
-		return nil, fmt.Errorf("chief of staff tools %v", names)
+		return nil, fmt.Errorf("manager tools %v", names)
 	}
 	stream := filepath.Base(filepath.Dir(filepath.Dir(req.SessionDir)))
 	h.mu.Lock()
@@ -62,7 +62,7 @@ func (h *handoverChief) turn(ctx context.Context, req agent.Request, _ *agent.Tu
 		h.written[stream] = out
 		h.mu.Unlock()
 	}
-	return &agent.Result{ClaudeID: "session-chief", ResultText: "Noted", SessionDir: req.SessionDir, NumTurns: 1}, nil
+	return &agent.Result{ClaudeID: "session-manager", ResultText: "Noted", SessionDir: req.SessionDir, NumTurns: 1}, nil
 }
 
 func TestHandInToSketchedPlan(t *testing.T) {
@@ -75,20 +75,20 @@ func TestHandInToSketchedPlan(t *testing.T) {
 	const issueBody = "# Resumable uploads\r\n\nFrom the issue tracker.\n"
 	opts.Issues = &fixturekit.FakeIssues{Token: "ghp_architect_secret", Text: map[issues.Ref]string{ref: issueBody}}
 
-	chief := &handoverChief{prompts: map[string][]string{}, written: map[string]string{}}
-	engine.Turns["*"] = chief.turn
+	manager := &handoverManager{prompts: map[string][]string{}, written: map[string]string{}}
+	engine.Turns["*"] = manager.turn
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		turns := &isolation.Turns{Workspaces: intake.StagedWorkspaces{}, Views: isolation.Views{Directory: filepath.Join(root, "views")}, Engine: engine,
-			Grants: map[string]coreadapter.Capabilities{trace.ChiefOfStaff: {Tools: []string{status.ToolName}}},
+			Grants: map[string]coreadapter.Capabilities{trace.Manager: {Tools: []string{status.ToolName}}},
 			Select: func(_ context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
-				workspace := filepath.Join(root, "chief", scope.Workstream, scope.Turn)
+				workspace := filepath.Join(root, "manager", scope.Workstream, scope.Turn)
 				if err := os.MkdirAll(workspace, 0700); err != nil {
 					return isolation.Selection{}, err
 				}
 				return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-				set, err := status.Tool(r, trace.ChiefOfStaff, scope, clock.Now)
+				set, err := status.Tool(r, trace.Manager, scope, clock.Now)
 				return []coreadapter.Tool{set}, err
 			},
 			Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}},
@@ -204,8 +204,8 @@ func TestHandInToSketchedPlan(t *testing.T) {
 		}
 		return ready
 	})
-	chief.mu.Lock()
-	defer chief.mu.Unlock()
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
 	for i, stream := range streams {
 		got, err := f.C.Status(ctx, stream)
 		fixturekit.Must(t, err)
@@ -214,21 +214,21 @@ func TestHandInToSketchedPlan(t *testing.T) {
 			st.Goal != "Ship resumable uploads." || st.Attention != "" || st.Revision != 1 {
 			t.Fatalf("status of %s: %+v %+v", stream, got, st)
 		}
-		if chief.written[string(stream)] != `{"stored":true,"revision":1}` {
-			t.Fatalf("set_status of %s: %q", stream, chief.written[string(stream)])
+		if manager.written[string(stream)] != `{"stored":true,"revision":1}` {
+			t.Fatalf("set_status of %s: %q", stream, manager.written[string(stream)])
 		}
-		prompts := strings.Join(chief.prompts[string(stream)], "\n")
+		prompts := strings.Join(manager.prompts[string(stream)], "\n")
 		for _, want := range []string{
 			events.Preamble,
 			"Workstream state changed to handed: the owner handed in handed/" + inputs[i].handed + " from " + inputs[i].source,
 			"Workstream state changed from handed to sketched: " + sketches[stream],
 		} {
 			if !strings.Contains(prompts, want) {
-				t.Fatalf("chief of staff of %s was not told %q:\n%s", stream, want, prompts)
+				t.Fatalf("manager of %s was not told %q:\n%s", stream, want, prompts)
 			}
 		}
 		if strings.Contains(prompts, "is invalid") {
-			t.Fatalf("chief of staff of %s heard of the invalid draft:\n%s", stream, prompts)
+			t.Fatalf("manager of %s heard of the invalid draft:\n%s", stream, prompts)
 		}
 	}
 	drafts := slices.DeleteFunc(f.Runs(), func(run string) bool { return !strings.HasPrefix(run, "draft-") })

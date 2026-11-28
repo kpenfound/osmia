@@ -34,7 +34,7 @@ import (
 const exitDemoRoles = `[roles.committee]
 sandbox = "container"
 image = "fixture-image"
-[roles.chief_of_staff]
+[roles.manager]
 sandbox = "container"
 image = "fixture-image"
 [capacity]
@@ -77,7 +77,7 @@ func (h *handInDemo) start(t *testing.T) {
 			h.engine.Turns[name] = h.d.Route
 		}
 	}
-	h.engine.Turns["*"] = h.d.Chief
+	h.engine.Turns["*"] = h.d.Manager
 	h.f.Start(t)
 	added, err := h.f.C.AddProject(h.ctx, fixturekit.Request(h.clone))
 	fixturekit.Must(t, err)

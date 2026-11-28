@@ -151,10 +151,10 @@ func (h *Hub) TraceEvents(project config.ProjectID) func(trace.Commit) {
 				add(api.EventClimbPhase, stream)
 			case parts[2] == "questions" || parts[2] == "events.jsonl" || parts[2] == "documents.jsonl":
 				add(api.EventInbox, stream)
-			case parts[2] == "agents" && len(parts) > 3 && trace.ChiefLike(parts[3]):
+			case parts[2] == "agents" && len(parts) > 3 && trace.ManagerLike(parts[3]):
 				add(api.EventConversation, stream)
 			case parts[2] == "workflow.json" && c.Workflow != nil:
-				if slices.ContainsFunc(c.Workflow.Threads, trace.ChiefLike) {
+				if slices.ContainsFunc(c.Workflow.Threads, trace.ManagerLike) {
 					add(api.EventConversation, stream)
 				}
 				if c.Workflow.Deliveries {

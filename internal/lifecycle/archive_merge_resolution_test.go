@@ -64,7 +64,7 @@ func TestDesignProductionPostCleanupMergeRetiresProjectSpecAcrossRestart(t *test
 		} else if len(ids) != 0 || rev != 0 || !active {
 			t.Fatal("project spec retired before every member merged")
 		}
-		for _, role := range []string{intake.MasonRole, trace.ChiefOfStaff} {
+		for _, role := range []string{intake.MasonRole, trace.Manager} {
 			b, err := f.S.Context().Assemble(ctx, f.Project2, bundle.Scope{Role: role, Workstream: f.Stream2})
 			fixturekit.Must(t, err)
 			if (b.ProjectSpec != nil) == want {

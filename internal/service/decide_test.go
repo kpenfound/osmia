@@ -17,12 +17,12 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The decide tool is held by an ordinary chief-of-staff turn and by no other
+// The decide tool is held by an ordinary manager turn and by no other
 // role's turn, a design session's included.
-func TestDecideIsAChiefOfStaffToolOnly(t *testing.T) {
+func TestDecideIsAManagerToolOnly(t *testing.T) {
 	t.Parallel()
-	if !slices.Contains(chiefGrant.Tools, decideTool) || !slices.Contains(chiefOrdinaryNarrow.Tools, decideTool) {
-		t.Fatalf("an ordinary chief-of-staff turn does not hold decide: %v", chiefOrdinaryNarrow.Tools)
+	if !slices.Contains(managerGrant.Tools, decideTool) || !slices.Contains(managerOrdinaryNarrow.Tools, decideTool) {
+		t.Fatalf("an ordinary manager turn does not hold decide: %v", managerOrdinaryNarrow.Tools)
 	}
 	for name, tools := range map[string][]string{"design session": designNarrow.Tools, "mason": masonGrant.Tools, "unit mason": unitMasonGrant.Tools, "reviewer": reviewerGrant.Tools} {
 		if slices.Contains(tools, decideTool) {
@@ -32,23 +32,23 @@ func TestDecideIsAChiefOfStaffToolOnly(t *testing.T) {
 }
 
 type decideKit struct {
-	f      *gateFixture
-	p      *gateJev
-	chief  coreadapter.Scope
-	decide coreadapter.Tool
-	tools  map[string]coreadapter.Tool
+	f       *gateFixture
+	p       *gateJev
+	manager coreadapter.Scope
+	decide  coreadapter.Tool
+	tools   map[string]coreadapter.Tool
 }
 
 func newDecideKit(t *testing.T, p *gateJev, role string) *decideKit {
 	t.Helper()
 	f := newGateFixture(t, p)
 	fixturekit.RecordCharter(t, f.repo, "1. Every change has a test.\n")
-	chief := claimThread(t, f.repo, f.now(), "chief", trace.ChiefOfStaff, "chief1", "")
+	manager := claimThread(t, f.repo, f.now(), "manager", trace.Manager, "manager1", "")
 	asker := claimThread(t, f.repo, f.now(), "asker", role, "build_asker", "unit1")
 	_, err := f.repo.Ask(context.Background(), "asker", asker, "Should uploads resume after a restart?", f.now())
 	fixturekit.Must(t, err)
-	k := &decideKit{f: f, p: p, chief: chief}
-	k.turn(t, "chief", chief)
+	k := &decideKit{f: f, p: p, manager: manager}
+	k.turn(t, "manager", manager)
 	return k
 }
 
@@ -84,7 +84,7 @@ const (
 	escalateUpload = `{"questions":["1"],"rephrasing":"Should uploads resume?","blocked":"The upload unit.","options":["Resume","Restart"],"recommendation":"Resume."}`
 )
 
-func TestAConfidentRoutingPickBindsTheChiefsOutcomeToolsInLaterTurns(t *testing.T) {
+func TestAConfidentRoutingPickBindsTheManagersOutcomeToolsInLaterTurns(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95, pick: func(_ string, options []string) string { return "answer" }}
 	k := newDecideKit(t, p, masonRole)
@@ -101,8 +101,8 @@ func TestAConfidentRoutingPickBindsTheChiefsOutcomeToolsInLaterTurns(t *testing.
 	if got := k.call(t, k.tools["escalate"], escalateUpload); got["recorded"] != false || !strings.Contains(got["reason"].(string), "Jev decided answer") {
 		t.Fatalf("escalate against the pick: %v", got)
 	}
-	later := claimThread(t, k.f.repo, k.f.now(), "chief2", trace.ChiefOfStaff, "chief2", "")
-	k.turn(t, "chief2", later)
+	later := claimThread(t, k.f.repo, k.f.now(), "manager2", trace.Manager, "manager2", "")
+	k.turn(t, "manager2", later)
 	if again := k.call(t, k.decide, decideQuestion); again["decision"] != "binding" || again["pick"] != "answer" {
 		t.Fatalf("decide again: %v", again)
 	}
@@ -124,15 +124,15 @@ func TestAConfidentRoutingPickBindsTheChiefsOutcomeToolsInLaterTurns(t *testing.
 }
 
 // A pick below the threshold, and an unconfigured Jev, leave the decision to
-// the chief of staff: decide says so and any valid outcome is accepted.
-func TestADecisionThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
+// the manager: decide says so and any valid outcome is accepted.
+func TestADecisionThatIsNotConfidentLeavesTheManagerFree(t *testing.T) {
 	t.Parallel()
 	for name, p := range map[string]*gateJev{"below the threshold": {confidence: 0.6}, "unconfigured": nil} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			k := newDecideKit(t, p, masonRole)
 			got := k.call(t, k.decide, decideQuestion)
-			if got["decision"] != "chief" || got["pick"] != nil {
+			if got["decision"] != "manager" || got["pick"] != nil {
 				t.Fatalf("decide: %v", got)
 			}
 			if got := k.call(t, k.tools["escalate"], escalateUpload); got["recorded"] != true {
@@ -143,7 +143,7 @@ func TestADecisionThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
 }
 
 // A question the architect asked is the owner's route, not Jev's: decide sends
-// no request and records no judgment, and the chief's outcome tool needs no
+// no request and records no judgment, and the manager's outcome tool needs no
 // decide result for it.
 func TestAQuestionJevDoesNotRouteIsRefusedWithoutARequest(t *testing.T) {
 	t.Parallel()
@@ -228,7 +228,7 @@ func TestAContestRulingBindsAndAnUnexecutablePickGoesToTheOwner(t *testing.T) {
 	}
 }
 
-func TestAContestRulingByJevIsRecordedAsJevsWithTheChiefsNote(t *testing.T) {
+func TestAContestRulingByJevIsRecordedAsJevsWithTheManagersNote(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95, pick: func(_ string, options []string) string { return "review" }}
 	c := newContestFixture(t, "decide-contest-review")
@@ -275,10 +275,10 @@ func TestAContestRulingByJevIsRecordedAsJevsWithTheChiefsNote(t *testing.T) {
 	}
 }
 
-// A contest ruling that is not confident leaves the chief of staff free: with a
+// A contest ruling that is not confident leaves the manager free: with a
 // pick below the threshold, or Jev unconfigured, decide says the ruling is the
-// chief of staff's and resolve_contested takes any ruling the contest takes.
-func TestAContestRulingThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
+// manager's and resolve_contested takes any ruling the contest takes.
+func TestAContestRulingThatIsNotConfidentLeavesTheManagerFree(t *testing.T) {
 	t.Parallel()
 	for name, p := range map[string]*gateJev{"below the threshold": {confidence: 0.5, pick: func(_ string, options []string) string { return "escalate" }}, "unconfigured": nil} {
 		t.Run(name, func(t *testing.T) {
@@ -287,7 +287,7 @@ func TestAContestRulingThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
 			c.f.s.jev = gateJudge(c.f.clock.Now, p)
 			c.contest(t)
 			decide := c.controls.decide(c.repo, c.scope)
-			if out := intakefixture.Handle(t, decide, `{"kind":"contested-ruling","subject":"resume","evidence":"The reviewer ended without a verdict."}`); !strings.Contains(out, `"decision":"chief"`) || strings.Contains(out, `"pick"`) {
+			if out := intakefixture.Handle(t, decide, `{"kind":"contested-ruling","subject":"resume","evidence":"The reviewer ended without a verdict."}`); !strings.Contains(out, `"decision":"manager"`) || strings.Contains(out, `"pick"`) {
 				t.Fatalf("decide: %s", out)
 			}
 			if out := intakefixture.Handle(t, c.tool, `{"unit":"resume","decision":"review","note":"Check the verdict file."}`); !strings.Contains(out, `"recorded":true`) {

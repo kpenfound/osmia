@@ -104,11 +104,11 @@ func doneThrough(t *testing.T, args map[string]any) (map[string]any, UnitReport,
 	outbox, err := f.repository.Outbox(stream)
 	must(t, err)
 	for _, entry := range outbox {
-		if entry.TransitionID == CheckingTransitionID("resume", 1) && intakefixture.ChiefEvent(entry.Event) {
+		if entry.TransitionID == CheckingTransitionID("resume", 1) && intakefixture.ManagerEvent(entry.Event) {
 			return result, report, entry.Event
 		}
 	}
-	t.Fatal("the move to checking told the chief of staff nothing")
+	t.Fatal("the move to checking told the manager nothing")
 	return nil, UnitReport{}, trace.Event{}
 }
 

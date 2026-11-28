@@ -59,20 +59,20 @@ func TestConsolidatedEscalationPausesOnlyItsMembersWhileAThirdContinues(t *testi
 		t.Fatal(err)
 	}
 
-	chief := chiefThread(t, r, "chief_turn")
-	chiefAt := at.Add(time.Minute)
+	manager := managerThread(t, r, "manager_turn")
+	managerAt := at.Add(time.Minute)
 
-	batch, err := r.EscalateQuestions(ctx, "chief", chief, EscalationRequest{
+	batch, err := r.EscalateQuestions(ctx, "manager", manager, EscalationRequest{
 		Questions: []string{"1", string(secondStream) + ":1"}, Rephrasing: "Where does the upload index live, and does it rebuild on start?",
 		Section: "spec#3", Conflict: "The spec says the index is derived, but doesn't say whether a restart may recompute it.",
 		Blocked: "Both workstreams' upload units.", Options: []string{"Keep the index fixed at start", "Rebuild it on every start"},
 		Recommendation: "Keep it fixed at start.",
-	}, chiefAt)
+	}, managerAt)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := r.AnswerQuestion(ctx, "chief", chief, string(thirdStream)+":1", "Fixed; see the logging guide.", []string{"kb/logging.md"}, chiefAt); err != nil {
+	if _, err := r.AnswerQuestion(ctx, "manager", manager, string(thirdStream)+":1", "Fixed; see the logging guide.", []string{"kb/logging.md"}, managerAt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -85,7 +85,7 @@ func TestConsolidatedEscalationPausesOnlyItsMembersWhileAThirdContinues(t *testi
 		t.Fatalf("B's question: %+v err=%v", qb, err)
 	}
 	qc, err := r.Questions(thirdStream)
-	if err != nil || len(qc) != 1 || qc[0].State != QuestionAnswered || qc[0].Ruling == nil || qc[0].Ruling.Actor != (Actor{Kind: "agent", ID: "chief"}) {
+	if err != nil || len(qc) != 1 || qc[0].State != QuestionAnswered || qc[0].Ruling == nil || qc[0].Ruling.Actor != (Actor{Kind: "agent", ID: "manager"}) {
 		t.Fatalf("C's question should be answered directly, unaffected: %+v err=%v", qc, err)
 	}
 
@@ -113,7 +113,7 @@ func TestConsolidatedEscalationPausesOnlyItsMembersWhileAThirdContinues(t *testi
 
 	relayedText := "The index does not rebuild on start."
 	relayAt := at.Add(3 * time.Minute)
-	relayed, err := r.RelayRuling(ctx, "chief", chief, "1", relayedText, ScopeLocal, relayAt)
+	relayed, err := r.RelayRuling(ctx, "manager", manager, "1", relayedText, ScopeLocal, relayAt)
 	if err != nil {
 		t.Fatal(err)
 	}

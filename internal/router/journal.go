@@ -16,7 +16,7 @@ import (
 // subject route-<digest> and the document routes/<digest>.json, which one
 // commit writes together: the document says what was decided, the subject's
 // value says how far it was carried out, and the subject's transitions carry
-// the notices to the chief of staff.
+// the notices to the manager.
 const (
 	// StateDecided: Jev's answers were turned into a target that is recorded
 	// but not yet applied. A restart applies it, without asking again.
@@ -57,7 +57,7 @@ type Record struct {
 	Note        string      `json:"note,omitempty"`
 	Turn        string      `json:"turn,omitempty"`
 	HeaderCause string      `json:"header_cause,omitempty"`
-	// Proposed is the target a proposal of the chief of staff asked for.
+	// Proposed is the target a proposal of the manager asked for.
 	Proposed string `json:"proposed,omitempty"`
 	// OwnerCard says where the owner decides a move the exit left pending: empty
 	// or RecoveryCard for the recovery card, else the card the exit named.

@@ -7,13 +7,13 @@ import (
 
 // Who decided an ordinary decision record. A record names its decider in
 // DecidedBy; an empty value means the decider of the record's kind: the owner
-// for the owner's rulings, ratifications and dispositions, the chief of staff
+// for the owner's rulings, ratifications and dispositions, the manager
 // for its own decisions. A decision Jev made is the same record with DecidedBy
 // "jev" and Judgment naming the judgment record it comes from.
 const (
-	DecidedByOwner = "owner"
-	DecidedByChief = ChiefOfStaff
-	DecidedByJev   = "jev"
+	DecidedByOwner   = "owner"
+	DecidedByManager = Manager
+	DecidedByJev     = "jev"
 )
 
 // JevActor is the trace actor of a record Jev's decision wrote.
@@ -24,7 +24,7 @@ var JevActor = Actor{Kind: "service", ID: DecidedByJev}
 // decided.
 func ValidDecider(by, judgment string) bool {
 	switch by {
-	case "", DecidedByOwner, DecidedByChief:
+	case "", DecidedByOwner, DecidedByManager:
 		return judgment == ""
 	case DecidedByJev:
 		return key(judgment)

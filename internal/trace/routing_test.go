@@ -45,7 +45,7 @@ func TestValidRouting(t *testing.T) {
 		{"a reviewer verdict", "approved", Routing{DecidedBy: DecidedByReviewer, DefaultTo: "approved"}, true},
 		{"a judgment and a default without a decider", "checking", Routing{Judgment: testJudgment, DefaultTo: "checking"}, false},
 		{"a default without a decider", "checking", Routing{DefaultTo: "checking"}, false},
-		{"an unknown decider", "checking", Routing{DecidedBy: "chief"}, false},
+		{"an unknown decider", "checking", Routing{DecidedBy: "manager"}, false},
 		{"a default that is not a state key", "checking", Routing{DecidedBy: DecidedByCode, DefaultTo: "not a state"}, false},
 		{"a judgment that is not a key", "implementing", Routing{DecidedBy: DecidedByJev, Judgment: "not a key", DefaultTo: "checking"}, false},
 	} {

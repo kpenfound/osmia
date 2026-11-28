@@ -590,7 +590,7 @@ func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 func TestUnitAndFinalDocumentPathsAreValidated(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
-	for _, path := range []string{"units/parser/other.json", "units/parser", "units/../report.json", "units/a/b/report.json", "units/parser/chief-.json", "units/parser/chief-a b.json", "units/parser/checks-0.json", "units/parser/checks-x.json", "units/parser/checks-0-output.txt", "units/parser/checks-x-output.txt", "final/checks-0-output.txt", "final/checks-x-output.txt", "units/parser/move-0.json", "units/parser/move-x.json"} {
+	for _, path := range []string{"units/parser/other.json", "units/parser", "units/../report.json", "units/a/b/report.json", ContestDecisionPrefix("parser")+".json", ContestDecisionPrefix("parser")+"a b.json", "units/parser/checks-0.json", "units/parser/checks-x.json", "units/parser/checks-0-output.txt", "units/parser/checks-x-output.txt", "final/checks-0-output.txt", "final/checks-x-output.txt", "units/parser/move-0.json", "units/parser/move-x.json"} {
 		d := unitReport("{}\n", 2)
 		d.ID, d.Path = "unit-other", path
 		if err := r.RecordDocuments(ctx, []Document{d}); err == nil {
@@ -661,9 +661,9 @@ func TestUnitAndFinalDocumentPathsAreValidated(t *testing.T) {
 	if err := r.RecordDocuments(ctx, []Document{move}); err != nil {
 		t.Fatal(err)
 	}
-	chief := unitReport("{\"decision\":\"escalate\"}\n", 1)
-	chief.ID, chief.Path = "unit-parser-chief-contest-1", "units/parser/chief-contest-1.json"
-	if err := r.RecordDocuments(ctx, []Document{chief}); err != nil {
+	manager := unitReport("{\"decision\":\"escalate\"}\n", 1)
+	manager.ID, manager.Path = "unit-parser-"+ManagerKey+"-contest-1", ContestDecisionPrefix("parser")+"contest-1.json"
+	if err := r.RecordDocuments(ctx, []Document{manager}); err != nil {
 		t.Fatal(err)
 	}
 }

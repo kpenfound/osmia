@@ -263,7 +263,7 @@ func TestBounceRulingsReachTheNextRole(t *testing.T) {
 	t.Parallel()
 	for _, history := range []string{"reviews", "checks", "mixed"} {
 		for _, decision := range []string{"review", "revise"} {
-			for _, entry := range []string{"owner", "chief", "owner_decided"} {
+			for _, entry := range []string{"owner", "manager", "owner_decided"} {
 				t.Run(history+"/"+decision+"/"+entry, func(t *testing.T) {
 					t.Parallel()
 					b := newBounceFixture(t, history)
@@ -274,25 +274,25 @@ func TestBounceRulingsReachTheNextRole(t *testing.T) {
 					ruling, found, err := execution.LatestContestedRuling(b.f.Repository(), b.stream, bounceUnit, 3)
 					fixturekit.Must(t, err)
 					by := "owner"
-					if entry == "chief" {
-						by = "chief of staff"
+					if entry == "manager" {
+						by = "manager"
 					}
 					if !found || execution.ContestRuler(ruling) != by {
 						t.Fatalf("ruling attribution: %+v", ruling)
 					}
 					if entry != "owner" {
-						_, decisions, err := execution.ChiefDecisions(b.f.Repository(), b.stream, bounceUnit)
+						_, decisions, err := execution.ManagerDecisions(b.f.Repository(), b.stream, bounceUnit)
 						fixturekit.Must(t, err)
 						if len(decisions) != 1 || decisions[0].Contest != contest.ID || decisions[0].Decision != decision {
-							t.Fatalf("chief attribution: %+v", decisions)
+							t.Fatalf("manager attribution: %+v", decisions)
 						}
 					}
 					b.deliveredOnce(t, decision)
 					if entry != "owner" {
-						_, decisions, err := execution.ChiefDecisions(b.f.Repository(), b.stream, bounceUnit)
+						_, decisions, err := execution.ManagerDecisions(b.f.Repository(), b.stream, bounceUnit)
 						fixturekit.Must(t, err)
 						if len(decisions) != 1 {
-							t.Fatalf("duplicate chief attribution: %+v", decisions)
+							t.Fatalf("duplicate manager attribution: %+v", decisions)
 						}
 					}
 				})
@@ -315,7 +315,7 @@ func TestBounceEscalationReachesTheOwnersInbox(t *testing.T) {
 			if len(entries) != 1 || entries[0].Unit != bounceUnit {
 				t.Fatalf("owner inbox: %+v", entries)
 			}
-			_, decisions, err := execution.ChiefDecisions(b.f.Repository(), b.stream, bounceUnit)
+			_, decisions, err := execution.ManagerDecisions(b.f.Repository(), b.stream, bounceUnit)
 			fixturekit.Must(t, err)
 			if len(decisions) != 1 || decisions[0].Decision != execution.EscalateContest {
 				t.Fatalf("escalation attribution: %+v", decisions)
@@ -324,7 +324,7 @@ func TestBounceEscalationReachesTheOwnersInbox(t *testing.T) {
 	}
 }
 
-func TestBounceChiefDecisionValidation(t *testing.T) {
+func TestBounceManagerDecisionValidation(t *testing.T) {
 	t.Parallel()
 	for _, history := range []string{"reviews", "checks", "mixed"} {
 		t.Run(history, func(t *testing.T) {
@@ -338,7 +338,7 @@ func TestBounceChiefDecisionValidation(t *testing.T) {
 				t.Fatalf("send-back contest: %+v", contest)
 			}
 			decision := func(id string) trace.Document {
-				return execution.ChiefDecisionDocument(repo, b.stream, bounceUnit, id, "escalate", "Investigate the checks.", "events_1", fixturekit.DemoStart)
+				return execution.ManagerDecisionDocument(repo, b.stream, bounceUnit, id, "escalate", "Investigate the checks.", "events_1", fixturekit.DemoStart)
 			}
 
 			earlier := decision(execution.CheckDocumentID(bounceUnit, 3) + "-contested")
@@ -353,7 +353,7 @@ func TestBounceChiefDecisionValidation(t *testing.T) {
 	}
 }
 
-func TestBounceOwnerDecisionAnswersChiefEscalation(t *testing.T) {
+func TestBounceOwnerDecisionAnswersManagerEscalation(t *testing.T) {
 	t.Parallel()
 	for _, decision := range []string{"review", "revise"} {
 		t.Run(decision, func(t *testing.T) {
@@ -365,7 +365,7 @@ func TestBounceOwnerDecisionAnswersChiefEscalation(t *testing.T) {
 			fixturekit.Must(t, intakefixture.AwaitCheck(t, b.resolved))
 			b.rule(t, decision, "owner_decided")
 			b.deliveredOnce(t, decision)
-			docs, decisions, err := execution.ChiefDecisions(b.f.Repository(), b.stream, bounceUnit)
+			docs, decisions, err := execution.ManagerDecisions(b.f.Repository(), b.stream, bounceUnit)
 			fixturekit.Must(t, err)
 			if len(decisions) != 2 || docs[0].ID != docs[1].ID || docs[1].Revision != 2 || decisions[1].Decision != decision {
 				t.Fatalf("escalation and owner ruling: %+v %+v", docs, decisions)
@@ -443,20 +443,20 @@ func TestBounceRulingKeysAreBounded(t *testing.T) {
 	c := journey.NewContestFixture(t, "bounce-keys")
 	for _, unit := range []string{bounceUnit, strings.Repeat("u", 64), strings.Repeat("u", 128)} {
 		contest := trace.UnitSubject(unit) + "-contested-checks-7-12"
-		d := execution.ChiefDecisionDocument(c.Repo, c.Stream, unit, contest, "escalate", "Investigate the checks.", "events_1", fixturekit.DemoStart)
+		d := execution.ManagerDecisionDocument(c.Repo, c.Stream, unit, contest, "escalate", "Investigate the checks.", "events_1", fixturekit.DemoStart)
 		if len(d.ID) > 128 {
 			t.Fatalf("unbounded decision key: %s", d.ID)
 		}
 		unbounded := d
-		unbounded.ID = trace.UnitSubject(unit) + "-chief-" + contest
-		unbounded.Path = "units/" + trace.UnitSubject(unit) + "/chief-" + contest + ".json"
+		unbounded.ID = trace.UnitSubject(unit) + "-manager-" + contest
+		unbounded.Path = trace.ContestDecisionPrefix(trace.UnitSubject(unit)) + contest + ".json"
 		if len(unbounded.ID) > 128 {
 			if err := c.Repo.RecordDocuments(context.Background(), []trace.Document{unbounded}); err == nil {
-				t.Fatal("trace accepted an oversized chief decision key")
+				t.Fatal("trace accepted an oversized manager decision key")
 			}
 		}
 		fixturekit.Must(t, c.Repo.RecordDocuments(context.Background(), []trace.Document{d}))
-		_, decisions, err := execution.ChiefDecisions(c.Repo, c.Stream, unit)
+		_, decisions, err := execution.ManagerDecisions(c.Repo, c.Stream, unit)
 		fixturekit.Must(t, err)
 		if len(decisions) != 1 || decisions[0].Contest != contest {
 			t.Fatalf("decisions: %+v", decisions)
@@ -464,7 +464,7 @@ func TestBounceRulingKeysAreBounded(t *testing.T) {
 	}
 }
 
-func TestBounceRulingAndChiefDecisionCommitTogether(t *testing.T) {
+func TestBounceRulingAndManagerDecisionCommitTogether(t *testing.T) {
 	t.Parallel()
 	for _, decision := range []string{"review", "revise"} {
 		t.Run(decision, func(t *testing.T) {
@@ -486,16 +486,16 @@ func TestBounceRulingAndChiefDecisionCommitTogether(t *testing.T) {
 				}
 			})
 			inject.Store(true)
-			b.rule(t, decision, "chief")
+			b.rule(t, decision, "manager")
 			commit := intakefixture.AwaitCheck(t, commits)
-			if commit.Workflow == nil || !slices.ContainsFunc(commit.Paths, func(p string) bool { return strings.Contains(p, "/chief-") }) {
-				t.Fatalf("ruling split from chief decision or move: %+v", commit)
+			if commit.Workflow == nil || !slices.ContainsFunc(commit.Paths, func(p string) bool { return strings.Contains(p, "/"+trace.ManagerKey+"-") }) {
+				t.Fatalf("ruling split from manager decision or move: %+v", commit)
 			}
 			b.deliveredOnce(t, decision)
-			_, decisions, err := execution.ChiefDecisions(b.f.Repository(), b.stream, bounceUnit)
+			_, decisions, err := execution.ManagerDecisions(b.f.Repository(), b.stream, bounceUnit)
 			fixturekit.Must(t, err)
 			if len(decisions) != 1 {
-				t.Fatalf("chief decisions: %+v", decisions)
+				t.Fatalf("manager decisions: %+v", decisions)
 			}
 		})
 	}
@@ -665,10 +665,10 @@ func TestBounceRulingRecoveryAtRoleDeliveryBoundaries(t *testing.T) {
 				armed.Store(false)
 				b.f.Start(t)
 				b.deliveredOnce(t, decision)
-				_, decisions, err := execution.ChiefDecisions(b.f.Repository(), b.stream, bounceUnit)
+				_, decisions, err := execution.ManagerDecisions(b.f.Repository(), b.stream, bounceUnit)
 				fixturekit.Must(t, err)
 				if len(decisions) != 1 || decisions[0].Decision != decision {
-					t.Fatalf("chief attribution after interruption: %+v", decisions)
+					t.Fatalf("manager attribution after interruption: %+v", decisions)
 				}
 			})
 		}

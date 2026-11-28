@@ -184,7 +184,7 @@ func (m *Machine) start(ctx context.Context, stream config.WorkstreamID, state t
 	id := "climb-start"
 	txs := []trace.Transaction{{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: m.header(id, stream, id), Subject: InnerSubject, From: state.Value, To: to, Reason: reason},
-		Events:     []trace.Event{trace.Progress(id, "chief", body)}}}
+		Events:     []trace.Event{trace.Progress(id, trace.ManagerKey, body)}}}
 	if !rec.Skipped {
 		subject := trace.UnitSubject(EvaluatorUnitID)
 		txs = append(txs,
@@ -208,7 +208,7 @@ func (m *Machine) evaluated(ctx context.Context, stream config.WorkstreamID, sta
 	id := "climb-calibrating"
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: m.header(id, stream, trace.UnitSubject(EvaluatorUnitID)+"-merged"), Subject: InnerSubject, From: state.Value, To: InnerCalibrating, Reason: "the evaluator unit landed as the first commit on the climb branch, so calibration starts"},
-		Events:     []trace.Event{trace.Progress(id, "chief", "The evaluator unit landed on the climb branch. Calibration starts.")}}
+		Events:     []trace.Event{trace.Progress(id, trace.ManagerKey, "The evaluator unit landed on the climb branch. Calibration starts.")}}
 	if _, err := m.Repository.TransactWhileFeature(ctx, tx, featureBuilding); err != nil && !errors.Is(err, trace.ErrConflict) {
 		return err
 	}
@@ -317,9 +317,9 @@ func (m *Machine) calibrate(ctx context.Context, stream config.WorkstreamID, sta
 		return fmt.Errorf("calibration ended with the verdict %q", cal.Verdict)
 	}
 	id := fmt.Sprintf("climb-calibration-%d", revisionOf)
-	event := trace.Notice(id, "chief", body)
+	event := trace.Notice(id, trace.ManagerKey, body)
 	if cal.Verdict == Calibrated {
-		event = trace.Progress(id, "chief", body)
+		event = trace.Progress(id, trace.ManagerKey, body)
 	}
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: m.header(id, stream, trace.ClimbEvaluatorID), Subject: InnerSubject, From: state.Value, To: to, Reason: reason},
@@ -357,7 +357,7 @@ func (m *Machine) recalibrateAfterAmendment(ctx context.Context, stream config.W
 	id := fmt.Sprintf("climb-recalibrating-%d", revision)
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: m.header(id, stream, id), Subject: InnerSubject, From: state.Value, To: InnerCalibrating, Reason: fmt.Sprintf("the climb spec changed to revision %d (%s) while the climb was held, so calibration runs again", revision, change.Words())},
-		Events:     []trace.Event{trace.Progress(id, "chief", fmt.Sprintf("The climb spec changed to revision %d (%s) while the climb was held. Calibration runs again.", revision, change.Words()))}}
+		Events:     []trace.Event{trace.Progress(id, trace.ManagerKey, fmt.Sprintf("The climb spec changed to revision %d (%s) while the climb was held. Calibration runs again.", revision, change.Words()))}}
 	if _, err := m.Repository.TransactWhileFeature(ctx, tx, featureBuilding); err != nil && !errors.Is(err, trace.ErrConflict) {
 		return err
 	}
@@ -407,7 +407,7 @@ func (m *Machine) amended(ctx context.Context, stream config.WorkstreamID, state
 	reason := fmt.Sprintf("the climb spec changed from revision %d to %d and %s changed, so %s and the evaluator is calibrated again on the current best commit; no attempt starts before the owner approves it again", pinned, revision, change.Words(), what)
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: m.header(id, stream, id), Subject: InnerSubject, From: state.Value, To: InnerCalibrating, Reason: reason},
-		Events:     []trace.Event{trace.Notice(id, "chief", fmt.Sprintf("An approved amendment changed the climb spec to revision %d: %s. The evaluator is calibrated again on the current best commit and the owner approves it again before an attempt starts; the earlier baseline and best are retired.", revision, change.Words()))}}
+		Events:     []trace.Event{trace.Notice(id, trace.ManagerKey, fmt.Sprintf("An approved amendment changed the climb spec to revision %d: %s. The evaluator is calibrated again on the current best commit and the owner approves it again before an attempt starts; the earlier baseline and best are retired.", revision, change.Words()))}}
 	if _, err := m.Repository.TransactWhileFeature(ctx, tx, featureBuilding); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			return nil
@@ -513,7 +513,7 @@ func (m *Machine) Approve(ctx context.Context, stream config.WorkstreamID, commi
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.Repository.Project(), Workstream: stream, At: m.now(), Actor: by, Cause: trace.ClimbCalibrationID},
 			Subject: InnerSubject, From: state.Value, To: InnerClimbing, Reason: fmt.Sprintf("the owner approved the calibrated evaluator %q at %s: baseline %v, spread %v, %d protected paths frozen", cal.Evaluator, cal.Commit, rec.Baseline, rec.Noise, len(rec.Protected)), DecidedBy: trace.DecidedByOwner},
-		Events: []trace.Event{trace.Progress(id, "chief", fmt.Sprintf("The owner approved the evaluator %q at %s. The protected paths are frozen and the first attempt starts from baseline %v.", cal.Evaluator, cal.Commit, rec.Baseline))}}
+		Events: []trace.Event{trace.Progress(id, trace.ManagerKey, fmt.Sprintf("The owner approved the evaluator %q at %s. The protected paths are frozen and the first attempt starts from baseline %v.", cal.Evaluator, cal.Commit, rec.Baseline))}}
 	if _, err := m.Repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			if now, rerr := ReadInner(m.Repository, stream); rerr == nil && now.Value == InnerClimbing {

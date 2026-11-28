@@ -18,7 +18,7 @@ import (
 )
 
 // The states of the choice about a push whose check results did not appear.
-// A choice is offered by the chief of staff and answered by the owner; a push
+// A choice is offered by the manager and answered by the owner; a push
 // that supersedes the one it concerns, or a completed result for that push,
 // closes an offer nobody answered.
 const (
@@ -34,7 +34,7 @@ const (
 // holds no result.
 const ChecksContinued = "continued"
 
-// ChecksToolName is the chief-only service tool that asks for a fresh read of
+// ChecksToolName is the manager-only service tool that asks for a fresh read of
 // the pushed commit's statuses or for a rerun of the pull request's checks,
 // and ChecksChoiceToolName the one that brings the owner the choice to keep
 // waiting or to continue without check results.
@@ -290,7 +290,7 @@ func forgetPoll(repository *trace.Repository, stream config.WorkstreamID, push i
 }
 
 // ChecksRerunRecord is the document final/checks-push-<n>-request-<m>.json:
-// the m-th rerun of every check of push n the chief of staff asked for,
+// the m-th rerun of every check of push n the manager asked for,
 // recorded before the command runs.
 type ChecksRerunRecord struct {
 	Push         int       `json:"push"`
@@ -351,7 +351,7 @@ func (s *Controller) RerunChecksNow(ctx context.Context, repository *trace.Repos
 		if err != nil {
 			return err
 		}
-		doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: repository.Project(), Workstream: stream, At: s.Now(), Actor: chiefActor, Cause: ChecksToolName},
+		doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: repository.Project(), Workstream: stream, At: s.Now(), Actor: managerActor, Cause: ChecksToolName},
 			Path: checksRerunPath(push.Number, n), Content: string(data) + "\n"}
 		return repository.RecordDocuments(context.WithoutCancel(ctx), []trace.Document{doc})
 	}
@@ -399,7 +399,7 @@ func (s *Controller) rerunDirectory(ctx context.Context, cfg *config.Config, rep
 // them, and returns the offered record. It refuses, recording nothing, with a
 // reason when the named push is not the current one, the workstream is not
 // assembled, the push already has a completed result or a choice to continue,
-// or an offer for it waits for the owner. note is what the chief of staff
+// or an offer for it waits for the owner. note is what the manager
 // found.
 func (s *Controller) OfferChecksChoice(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, named int, note, turn string) (ChecksChoiceRecord, string, error) {
 	push, reason, err := pushNamed(repository, stream, named)
@@ -427,7 +427,7 @@ func (s *Controller) OfferChecksChoice(ctx context.Context, repository *trace.Re
 	}
 	choice := ChecksChoice{Push: push.Number, Operation: push.Operation, PullRequest: push.PullRequest, PushedCommit: push.Commit, State: ChecksChoiceOffered, Note: note, OfferedAt: s.Now(), At: s.Now()}
 	var refusal string
-	revision, written, err := s.writeChecksChoice(ctx, repository, stream, choice, chiefActor, turn, func(latest ChecksChoiceRecord, found bool) bool {
+	revision, written, err := s.writeChecksChoice(ctx, repository, stream, choice, managerActor, turn, func(latest ChecksChoiceRecord, found bool) bool {
 		switch {
 		case found && latest.State == ChecksChoiceOffered:
 			refusal = fmt.Sprintf("the owner is already asked about push %d and has not answered; the entry stays in the inbox", push.Number)
@@ -517,7 +517,7 @@ func (s *Controller) AnswerChecksChoice(ctx context.Context, raw string, req Che
 }
 
 // ChecksChoiceEntry is the owner's choice about the current push while the
-// chief of staff's offer waits for an answer and the push has no check
+// manager's offer waits for an answer and the push has no check
 // outcome. A push that supersedes the one it concerns closes it, as does a
 // completed result or an answer.
 func ChecksChoiceEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error) {
@@ -537,7 +537,7 @@ func ChecksChoiceEntry(repository *trace.Repository, w trace.WorkstreamStatus) (
 	e := decision(InboxChecksChoice, stream, record.OfferedAt, "/checks-choice/"+string(stream), body)
 	e.Revision = record.Revision
 	e.Options = []string{ChecksChoiceKeepWaiting, ChecksChoiceContinue}
-	e.Question = fmt.Sprintf("No check results are available for push %d, commit %s of pull request #%d in %s. The chief of staff found: %s Keep waiting for the checks, or continue the final review without check results? Continuing applies to this push only: a later push waits for its own results.", current.Number, current.Commit, current.PullRequest, current.Upstream, strings.TrimSpace(record.Note))
+	e.Question = fmt.Sprintf("No check results are available for push %d, commit %s of pull request #%d in %s. The manager found: %s Keep waiting for the checks, or continue the final review without check results? Continuing applies to this push only: a later push waits for its own results.", current.Number, current.Commit, current.PullRequest, current.Upstream, strings.TrimSpace(record.Note))
 	e.Blocked = "The final review of the assembled branch. It starts when the checks of this push complete, or when you choose to continue without them; the service keeps reading the pull request's check statuses meanwhile, and this entry closes once a run completes."
 	return e, true, nil
 }
@@ -554,7 +554,7 @@ func (w *finalWatch) continuedChecks(ctx context.Context, choice ChecksChoiceRec
 	return run, nil
 }
 
-func chiefChecksTarget(load func() *Controller, repository *trace.Repository, scope coreadapter.Scope, name string, raw json.RawMessage, in any, workstream func() config.WorkstreamID) (*Controller, *trace.Repository, config.WorkstreamID, json.RawMessage, error) {
+func managerChecksTarget(load func() *Controller, repository *trace.Repository, scope coreadapter.Scope, name string, raw json.RawMessage, in any, workstream func() config.WorkstreamID) (*Controller, *trace.Repository, config.WorkstreamID, json.RawMessage, error) {
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
 	if err := d.Decode(in); err != nil {
@@ -570,11 +570,11 @@ func chiefChecksTarget(load func() *Controller, repository *trace.Repository, sc
 	if err := repository.ActiveTurn(scope); err != nil {
 		return nil, nil, "", nil, err
 	}
-	if scope.Role != trace.ChiefOfStaff {
-		out, err := refusal(name + " is only available to the chief of staff")
+	if scope.Role != trace.Manager {
+		out, err := refusal(name + " is only available to the manager")
 		return nil, nil, "", out, err
 	}
-	target, stream, why, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), workstream())
+	target, stream, why, err := repository.ManagerMember(config.WorkstreamID(scope.Workstream), workstream())
 	if err != nil {
 		return nil, nil, "", nil, err
 	}
@@ -593,7 +593,7 @@ type pollFailedCheck struct {
 }
 
 // ChecksToolOf returns the pull_request_checks tool of one claimed
-// chief-of-staff turn, over the controller load returns when the tool is
+// manager turn, over the controller load returns when the tool is
 // called. It asks the watch of the workstream's current push to read the
 // pushed commit's statuses now, or asks Dagger Cloud to rerun every check of
 // the push's pull request. A request naming any push but the current one is
@@ -609,7 +609,7 @@ func ChecksToolOf(load func() *Controller, repository *trace.Repository, scope c
 			Push       int                 `json:"push"`
 			Workstream config.WorkstreamID `json:"workstream"`
 		}
-		s, target, stream, refused, err := chiefChecksTarget(load, repository, scope, ChecksToolName, raw, &in, func() config.WorkstreamID { return in.Workstream })
+		s, target, stream, refused, err := managerChecksTarget(load, repository, scope, ChecksToolName, raw, &in, func() config.WorkstreamID { return in.Workstream })
 		if refused != nil || err != nil {
 			return refused, err
 		}
@@ -662,7 +662,7 @@ func ChecksToolOf(load func() *Controller, repository *trace.Repository, scope c
 }
 
 // ChecksChoiceToolOf returns the ask_owner_about_checks tool of one claimed
-// chief-of-staff turn. It brings the owner the choice to keep waiting for the
+// manager turn. It brings the owner the choice to keep waiting for the
 // current push's check results or to continue the final review without them;
 // only the owner's answer, through the inbox, continues. A call naming any
 // push but the current one is refused, naming the current one.
@@ -676,7 +676,7 @@ func ChecksChoiceToolOf(load func() *Controller, repository *trace.Repository, s
 			Note       string              `json:"note"`
 			Workstream config.WorkstreamID `json:"workstream"`
 		}
-		s, target, stream, refused, err := chiefChecksTarget(load, repository, scope, ChecksChoiceToolName, raw, &in, func() config.WorkstreamID { return in.Workstream })
+		s, target, stream, refused, err := managerChecksTarget(load, repository, scope, ChecksChoiceToolName, raw, &in, func() config.WorkstreamID { return in.Workstream })
 		if refused != nil || err != nil {
 			return refused, err
 		}

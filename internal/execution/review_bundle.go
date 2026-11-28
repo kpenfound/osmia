@@ -83,7 +83,7 @@ func (m *masons) recordReviewPreparationError(ctx context.Context, stream config
 	k := state.Version + 1
 	id := fmt.Sprintf("%s-%d", subject, k)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.Now(), Actor: trace.Actor{Kind: "service", ID: "reviewer"}, Cause: cause}
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: fmt.Sprintf("blocked-%d", k), Reason: reason}, Events: []trace.Event{trace.Notice(id, "chief", "The reviewer bundle is blocked: "+reason+". It can be prepared again after the evidence is fixed.")}}
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: fmt.Sprintf("blocked-%d", k), Reason: reason}, Events: []trace.Event{trace.Notice(id, trace.ManagerKey, "The reviewer bundle is blocked: "+reason+". It can be prepared again after the evidence is fixed.")}}
 	_, err = m.repository.Transact(ctx, tx)
 	if errors.Is(err, trace.ErrConflict) {
 		return nil

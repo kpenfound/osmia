@@ -131,7 +131,7 @@ const SealAction = intake.SealAction
 
 type ShedMoreRequest = api.ShedMoreRequest
 
-var chiefActor = intake.ChiefActor
+var managerActor = intake.ManagerActor
 
 const publicationOpened = delivery.PublicationOpened
 

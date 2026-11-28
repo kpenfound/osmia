@@ -61,7 +61,7 @@ func TestPlanOnlyReopensUnderOneSealEachReassemble(t *testing.T) {
 			t.Fatalf("reassembly %d recorded %+v", k+1, moved)
 		}
 		if body := intakefixture.NoticeOf(t, repository, stream, want); body == "" {
-			t.Fatalf("reassembly %d told the chief of staff nothing", k+1)
+			t.Fatalf("reassembly %d told the manager nothing", k+1)
 		}
 		if again, _, _, err := seal.Latest(repository, stream); err != nil || again.Seal != sealed.Seal {
 			t.Fatalf("a plan-only revision changed the seal: %+v %v", again, err)
@@ -79,8 +79,8 @@ func recordPlanOnlyRevision(t *testing.T, repository *trace.Repository, stream c
 	t.Helper()
 	ctx := context.Background()
 	id := "repair_" + string(rune('0'+k))
-	h := trace.Header{Schema: "osmia.trace.amendment", Version: trace.Version, ID: id, Revision: 1, Project: repository.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: trace.Actor{Kind: "agent", ID: "chief"}, Cause: "fixture"}
-	fixturekit.Must(t, repository.Append(ctx, trace.Amendment{Header: h, Requester: h.Actor, Role: trace.ChiefOfStaff, Thread: "chief", Turn: "filing_" + id, Citations: []string{"spec#1"}, Change: "Add a repair unit.", Reason: "The final review found a gap.", Seal: sealed.Seal, SealRevision: sealRevision, SpecHash: sealed.SpecHash}))
+	h := trace.Header{Schema: "osmia.trace.amendment", Version: trace.Version, ID: id, Revision: 1, Project: repository.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: trace.Actor{Kind: "agent", ID: "manager"}, Cause: "fixture"}
+	fixturekit.Must(t, repository.Append(ctx, trace.Amendment{Header: h, Requester: h.Actor, Role: trace.Manager, Thread: "manager", Turn: "filing_" + id, Citations: []string{"spec#1"}, Change: "Add a repair unit.", Reason: "The final review found a gap.", Seal: sealed.Seal, SealRevision: sealRevision, SpecHash: sealed.SpecHash}))
 	for i, to := range []string{"filed", intake.AmendmentApplied} {
 		from := ""
 		if i > 0 {

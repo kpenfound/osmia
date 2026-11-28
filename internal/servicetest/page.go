@@ -19,11 +19,11 @@ import (
 
 // PageFixture starts a web listener with a four-unit build: one merged unit,
 // one running mason, one mason waiting for capacity and one planned unit.
-// Its chief of staff can publish status; a second workstream is owner-paused.
+// Its manager can publish status; a second workstream is owner-paused.
 type PageFixture struct {
-	S     *service.Service
-	C     *service.Client
-	Chief coreadapter.Scope
+	S       *service.Service
+	C       *service.Client
+	Manager coreadapter.Scope
 }
 
 func NewPageFixture(t *testing.T) *PageFixture {
@@ -41,9 +41,9 @@ func NewPageFixture(t *testing.T) *PageFixture {
 	s, c := Start(t, opts)
 	f := &PageFixture{S: s, C: c}
 	live := service.InspectForTest(s).SoleRepository()
-	_, err = live.EnsureChiefOfStaff(ctx, fixturekit.Stream, at, trace.Actor{Kind: "service", ID: "osmia"})
+	_, err = live.EnsureManager(ctx, fixturekit.Stream, at, trace.Actor{Kind: "service", ID: "osmia"})
 	fixturekit.Must(t, err)
-	f.Chief = fixturekit.ClaimTurn(t, live, t.TempDir(), fixturekit.Stream, trace.ChiefOfStaff, trace.ChiefOfStaff, "status", at)
+	f.Manager = fixturekit.ClaimTurn(t, live, t.TempDir(), fixturekit.Stream, trace.Manager, trace.Manager, "status", at)
 	fixturekit.QueueRoleTurn(t, live, fixturekit.Stream, "agent_mason_upload", "mason", "upload", at)
 	_, err = live.ClaimTurn(ctx, fixturekit.Stream, "agent_mason_upload", "token_upload", t.TempDir(), at)
 	fixturekit.Must(t, err)
@@ -54,9 +54,9 @@ func NewPageFixture(t *testing.T) *PageFixture {
 	return f
 }
 
-// Status writes the next status revision through the chief of staff's turn.
+// Status writes the next status revision through the manager's turn.
 func (f *PageFixture) Status(t *testing.T, content trace.StatusContent) {
 	t.Helper()
-	_, err := service.InspectForTest(f.S).SoleRepository().SetStatus(context.Background(), trace.ChiefOfStaff, f.Chief, content, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	_, err := service.InspectForTest(f.S).SoleRepository().SetStatus(context.Background(), trace.Manager, f.Manager, content, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	fixturekit.Must(t, err)
 }

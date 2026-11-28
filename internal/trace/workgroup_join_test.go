@@ -10,7 +10,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-func TestJoinCrossRepoWorkgroupPublishesLocatorAndChiefTogether(t *testing.T) {
+func TestJoinCrossRepoWorkgroupPublishesLocatorAndManagerTogether(t *testing.T) {
 	for _, step := range []string{boundaryBeforeCommit, boundaryCommitted} {
 		t.Run(step, func(t *testing.T) {
 			r, root, p := create(t)
@@ -39,13 +39,13 @@ func TestJoinCrossRepoWorkgroupPublishesLocatorAndChiefTogether(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, chiefErr := reopened.ChiefOfStaffThread(streamID)
+			_, managerErr := reopened.ManagerThread(streamID)
 			if step == boundaryBeforeCommit {
-				if pointer != "" || chiefErr != nil {
-					t.Fatalf("partial unpublished transfer: %s %v", pointer, chiefErr)
+				if pointer != "" || managerErr != nil {
+					t.Fatalf("partial unpublished transfer: %s %v", pointer, managerErr)
 				}
-			} else if pointer != group || !errors.Is(chiefErr, os.ErrNotExist) {
-				t.Fatalf("partial published transfer: %s %v", pointer, chiefErr)
+			} else if pointer != group || !errors.Is(managerErr, os.ErrNotExist) {
+				t.Fatalf("partial published transfer: %s %v", pointer, managerErr)
 			}
 			if err := reopened.JoinCrossRepoWorkgroup(context.Background(), streamID, group, at, owner, "draft-workgroup"); err != nil {
 				t.Fatal(err)

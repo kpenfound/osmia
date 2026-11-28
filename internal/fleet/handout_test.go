@@ -9,6 +9,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 func handoutConfig() *config.Config {
@@ -19,9 +20,9 @@ func handoutConfig() *config.Config {
 			"review": {Agent: "claude", Model: "opus"},
 		},
 		Roles: map[string]config.Role{
-			"mason":          {Profile: "fast", Sandbox: "sbx", Image: "osmia:latest", CPUs: 4, Memory: "8g", Skills: []string{"https://example.com/skills.git@main#go"}},
-			"reviewer":       {Profile: "review", Sandbox: "container", Image: "reviewer:1"},
-			"chief_of_staff": {Profile: "review", EventsProfile: "slow", Sandbox: "none"},
+			"mason":            {Profile: "fast", Sandbox: "sbx", Image: "osmia:latest", CPUs: 4, Memory: "8g", Skills: []string{"https://example.com/skills.git@main#go"}},
+			"reviewer":         {Profile: "review", Sandbox: "container", Image: "reviewer:1"},
+			config.ManagerRole: {Profile: "review", EventsProfile: "slow", Sandbox: "none"},
 		},
 		Dagger: config.DaggerConfig{Version: "v0.20.5", Engine: "cloud", CloudComputeTokenEnv: "OSMIA_TEST_DAGGER_COMPUTE", CloudAPITokenEnv: "OSMIA_TEST_DAGGER_API"},
 		Jev:    config.Jev{APIKeyEnv: "OSMIA_TEST_JEV_KEY"},
@@ -43,11 +44,11 @@ func TestTheHandoutCarriesEveryRoleRequirement(t *testing.T) {
 	if mason.Dagger == nil || mason.Dagger.Mode != "cloud" || mason.Dagger.Version != "v0.20.5" {
 		t.Fatalf("mason dagger: %+v", mason.Dagger)
 	}
-	if roles["reviewer"].Dagger != nil || roles["chief_of_staff"].Dagger != nil {
+	if roles["reviewer"].Dagger != nil || roles[trace.Manager].Dagger != nil {
 		t.Fatalf("only the mason takes a Dagger requirement: %+v", roles)
 	}
-	if cos := roles["chief_of_staff"]; cos.EventsProfile != "slow" || cos.Sandbox != "none" || cos.Skills == nil {
-		t.Fatalf("chief of staff: %+v", cos)
+	if cos := roles[trace.Manager]; cos.EventsProfile != "slow" || cos.Sandbox != "none" || cos.Skills == nil {
+		t.Fatalf("manager: %+v", cos)
 	}
 	if got := len(h.Profiles); got != 3 || h.Profiles[0].Name != "fast" || h.Profiles[0].Backend != "claude" || h.Profiles[0].Model != "sonnet" || h.Profiles[0].Fallback != "slow" || h.Profiles[0].MaxTurns != 30 {
 		t.Fatalf("profiles: %+v", h.Profiles)

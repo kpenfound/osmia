@@ -53,13 +53,13 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	p.AwaitText(message+"[data-field=state]", "queued")
 	p.AwaitText(message+"[data-field=queued-reason]", "starting")
 
-	q, err := service.InspectForTest(f.s).SoleRepository().ClaimTurn(ctx, quiet, trace.ChiefOfStaff, "token_message", t.TempDir(), time.Now().UTC())
+	q, err := service.InspectForTest(f.s).SoleRepository().ClaimTurn(ctx, quiet, trace.Manager, "token_message", t.TempDir(), time.Now().UTC())
 	must(t, err)
 	if q.Request.TurnID != turn {
 		t.Fatalf("claimed %s, not the message's turn %s", q.Request.TurnID, turn)
 	}
 	p.AwaitText(message+"[data-field=state]", "running")
-	f.answerChief(t, quiet, turn, "Noted; the uploads resume on Friday.")
+	f.answerManager(t, quiet, turn, "Noted; the uploads resume on Friday.")
 	p.AwaitText(card+`[data-kind=response][data-turn="`+turn+`"] [data-field=text]`, "Noted; the uploads resume on Friday.")
 	p.AwaitText(message+"[data-field=state]", "done")
 	p.Await("the same document", `window.notReloaded === true`)
@@ -419,7 +419,7 @@ func TestBrowserConversationShowsEarlierBackgroundTurn(t *testing.T) {
 	repo := service.InspectForTest(f.s).SoleRepository()
 	profile, err := service.InspectForTest(f.s).Config().NamedProfile("default")
 	must(t, err)
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_browser_event", Project: repo.Project(), Workstream: quiet, At: time.Now().UTC(), Actor: trace.Actor{Kind: "service", ID: "osmia"}, Cause: "events"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events_browser", Profile: profile, Prompt: "Background event"})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_browser_event", Project: repo.Project(), Workstream: quiet, At: time.Now().UTC(), Actor: trace.Actor{Kind: "service", ID: "osmia"}, Cause: "events"}, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "events_browser", Profile: profile, Prompt: "Background event"})
 	must(t, err)
 	sent, err := f.c.Send(ctx, quiet, "Owner message")
 	must(t, err)
@@ -429,8 +429,8 @@ func TestBrowserConversationShowsEarlierBackgroundTurn(t *testing.T) {
 	message := `[data-workstream="` + string(quiet) + `"] [data-kind=message][data-turn="` + sent.Turn + `"] `
 	p.AwaitText(message+"[data-field=state]", "queued")
 	p.AwaitText(message+"[data-field=queued-reason]", "waiting for an event turn on this thread")
-	q, err := repo.ClaimTurn(ctx, quiet, trace.ChiefOfStaff, "browser-background", t.TempDir(), time.Now().UTC())
+	q, err := repo.ClaimTurn(ctx, quiet, trace.Manager, "browser-background", t.TempDir(), time.Now().UTC())
 	must(t, err)
-	f.answerChief(t, quiet, q.Request.TurnID, "Background handled")
+	f.answerManager(t, quiet, q.Request.TurnID, "Background handled")
 	p.AwaitText(message+"[data-field=queued-reason]", "starting")
 }

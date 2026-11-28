@@ -23,7 +23,7 @@ func TestTheOwnersAbandonmentIsAPinnedMove(t *testing.T) {
 	f.S.SetSole(&journey.ActiveProject{Repository: repository})
 	p := &jevfixture.Transitions{}
 	journey.InspectForTest(f.S).SetJudge(jevfixture.TransitionJudge(f.S.Now, p))
-	tool := chiefMoveTool(t, f, repository, stream, "message_1", true)
+	tool := managerMoveTool(t, f, repository, stream, "message_1", true)
 	if out := intakefixture.Handle(t, tool, `{"to":"abandoned","note":"Stop this one.","owner_decided":true}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("the relayed abandonment: %s", out)
 	}
@@ -75,9 +75,9 @@ func TestTheOwnersWorkstreamMoveIsAPinnedMove(t *testing.T) {
 	}
 }
 
-func TestAChiefProposalToAGateLeavesAPendingOwnerDecision(t *testing.T) {
+func TestAManagerProposalToAGateLeavesAPendingOwnerDecision(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := journey.NewFinalFixtureWith(t, "route-chief-gate", "")
+	f, stream, repository, a := journey.NewFinalFixtureWith(t, "route-manager-gate", "")
 	journey.HostFinalReviews(t, f, stream)
 	f.S.SetSole(&journey.ActiveProject{Repository: repository})
 	p := &jevfixture.Transitions{Script: func(ask jevfixture.Ask) jevfixture.Reply {
@@ -87,12 +87,12 @@ func TestAChiefProposalToAGateLeavesAPendingOwnerDecision(t *testing.T) {
 	journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-	tool := chiefMoveTool(t, f, repository, stream, "events_1", false)
+	tool := managerMoveTool(t, f, repository, stream, "events_1", false)
 
 	for _, to := range []string{intake.AbandonedState, intake.RatifiedState} {
 		out := intakefixture.Handle(t, tool, `{"to":"`+to+`","note":"Nothing else is moving it."}`)
 		if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "the owner's decision") || strings.Contains(out, "say") {
-			t.Fatalf("the chief proposal to %s: %s", to, out)
+			t.Fatalf("the manager proposal to %s: %s", to, out)
 		}
 	}
 	if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != intake.AssembledState {
@@ -133,9 +133,9 @@ func TestAChiefProposalToAGateLeavesAPendingOwnerDecision(t *testing.T) {
 	}
 }
 
-func TestAChiefMoveToBuildingIsPinnedAndCommitted(t *testing.T) {
+func TestAManagerMoveToBuildingIsPinnedAndCommitted(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := journey.NewFinalFixtureWith(t, "route-chief-building", "")
+	f, stream, repository, a := journey.NewFinalFixtureWith(t, "route-manager-building", "")
 	journey.HostFinalReviews(t, f, stream)
 	f.S.SetSole(&journey.ActiveProject{Repository: repository})
 	p := &jevfixture.Transitions{}
@@ -143,7 +143,7 @@ func TestAChiefMoveToBuildingIsPinnedAndCommitted(t *testing.T) {
 	journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-	tool := chiefMoveTool(t, f, repository, stream, "events_2", false)
+	tool := managerMoveTool(t, f, repository, stream, "events_2", false)
 	if out := intakefixture.Handle(t, tool, `{"to":"building","note":"Reopen it so a revision can repair the gap."}`); !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"state":"building"`) {
 		t.Fatalf("move_workstream to building: %s", out)
 	}
@@ -153,7 +153,7 @@ func TestAChiefMoveToBuildingIsPinnedAndCommitted(t *testing.T) {
 			feature = tr
 		}
 	}
-	if feature.DecidedBy != trace.DecidedByChief || feature.DefaultTo != intake.BuildingState || feature.Departed() {
+	if feature.DecidedBy != trace.DecidedByManager || feature.DefaultTo != intake.BuildingState || feature.Departed() {
 		t.Fatalf("the feature's transition %+v", feature)
 	}
 	rec, ok := journey.LookupRoute(t, repository, stream, "ws.move_proposal")

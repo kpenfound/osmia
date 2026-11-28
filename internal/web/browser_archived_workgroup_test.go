@@ -19,7 +19,7 @@ type archivedGroupAPI struct {
 }
 
 const archivedGroupFeed = `{"workgroup":"g_test","members":[` +
-	`{"workstream":"w_003","repo":"p_fake","state":"delivered","display_state":"delivered","units":{},"wait":"","pr_link":"https://example.invalid/pull/1","running":false,"archived":true,"archived_by":"chief_of_staff"},` +
+	`{"workstream":"w_003","repo":"p_fake","state":"delivered","display_state":"delivered","units":{},"wait":"","pr_link":"https://example.invalid/pull/1","running":false,"archived":true,"archived_by":"manager"},` +
 	`{"workstream":"w_004","repo":"p_fake","state":"delivered","display_state":"delivered","units":{},"wait":"","pr_link":"https://example.invalid/pull/2","running":false,"archived":true}],` +
 	`"entries":[` +
 	`{"kind":"message","turn":"owner-1","text":"How is the shared interface going?","state":"done","at":"2026-01-01T00:00:00Z"},` +
@@ -32,7 +32,7 @@ func (a *archivedGroupAPI) handler(members ...string) http.Handler {
 		var rows []string
 		for _, id := range members {
 			rows = append(rows, fmt.Sprintf(`{"workstream":%q,"project":"p_fake","workspaces":"git","state":"delivered","display_state":"delivered",`+
-				`"archived":true,"archived_by":"chief_of_staff","trace_deleted":true,"workgroup":{"id":"g_test","members":["w_003","w_004"],"edges":[]},`+
+				`"archived":true,"archived_by":"manager","trace_deleted":true,"workgroup":{"id":"g_test","members":["w_003","w_004"],"edges":[]},`+
 				`"units":[],"advisories":[],"open_questions":0,"gates":[],"context_mode":"file","drift":null,"status":null,"agents":[]}`, id))
 		}
 		writeJSON(w, `{"workstreams":[`+strings.Join(rows, ",")+`],"profiles":{},"daily_budget":null,"capacity":null,`+

@@ -7,16 +7,16 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// ChiefTurns is a fake chief of staff. It answers each prompt, and the first
+// ManagerTurns is a fake manager. It answers each prompt, and the first
 // turn it runs waits for hold to close when hold is set.
-type ChiefTurns struct {
+type ManagerTurns struct {
 	Mu       sync.Mutex
 	Prepared []coreadapter.PreparedTurn
 	Hold     chan struct{}
 	Entered  chan struct{}
 }
 
-func (c *ChiefTurns) Run(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+func (c *ManagerTurns) Run(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 	c.Mu.Lock()
 	c.Prepared = append(c.Prepared, p)
 	first := len(c.Prepared) == 1
@@ -41,11 +41,11 @@ func (c *ChiefTurns) Run(ctx context.Context, p coreadapter.PreparedTurn) (corea
 	return coreadapter.SessionResult{Session: session, FinalResponse: "Answer to " + p.Prompt}, nil
 }
 
-func (c *ChiefTurns) CheckResume(context.Context, coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
+func (c *ManagerTurns) CheckResume(context.Context, coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 	return nil
 }
 
-func (c *ChiefTurns) Calls() []coreadapter.PreparedTurn {
+func (c *ManagerTurns) Calls() []coreadapter.PreparedTurn {
 	c.Mu.Lock()
 	defer c.Mu.Unlock()
 	return append([]coreadapter.PreparedTurn(nil), c.Prepared...)

@@ -47,10 +47,10 @@ func checkMoved(t *testing.T, e trace.OutboxEntry, stream config.WorkstreamID, m
 	}
 }
 
-func chiefDeliverer(t *testing.T, f *journey.ShedFixture, repository *trace.Repository, stream config.WorkstreamID) *events.Deliverer {
+func managerDeliverer(t *testing.T, f *journey.ShedFixture, repository *trace.Repository, stream config.WorkstreamID) *events.Deliverer {
 	t.Helper()
-	if _, err := repository.ChiefOfStaffThread(stream); errors.Is(err, os.ErrNotExist) {
-		fixturekit.Must(t, repository.CreateThread(context.Background(), trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: trace.ChiefOfStaff, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.S.Now(), Actor: execution.ForemanActor, Cause: "test"}, Role: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff}))
+	if _, err := repository.ManagerThread(stream); errors.Is(err, os.ErrNotExist) {
+		fixturekit.Must(t, repository.CreateThread(context.Background(), trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: trace.Manager, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.S.Now(), Actor: execution.ForemanActor, Cause: "test"}, Role: trace.Manager, ThreadID: trace.Manager}))
 	} else {
 		fixturekit.Must(t, err)
 	}
@@ -63,7 +63,7 @@ func chiefDeliverer(t *testing.T, f *journey.ShedFixture, repository *trace.Repo
 
 func deliveredTurns(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, body string) int {
 	t.Helper()
-	th, err := repository.ChiefOfStaffThread(stream)
+	th, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	n := 0
 	for _, q := range th.Turns {
@@ -74,7 +74,7 @@ func deliveredTurns(t *testing.T, repository *trace.Repository, stream config.Wo
 	return n
 }
 
-func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
+func TestConflictedDriftTellsTheManagerOnceAndItsMasonMayAmend(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, _ := journey.NewFinalFixtureWith(t, "drift-moved", "")
 	d := journey.Drifter{Foreman: &journey.Foreman{Masons: journey.NewMasonController(f.S, repository)}}
@@ -90,7 +90,7 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 	}
 	checkMoved(t, moved[0], stream, move, "feature branch "+intake.FeatureBranch(stream)+" conflicts with upstream in CODEOWNERS")
 	conflicted := moved[0].Event.Body
-	fixturekit.Must(t, chiefDeliverer(t, f, repository, stream).Pass(ctx))
+	fixturekit.Must(t, managerDeliverer(t, f, repository, stream).Pass(ctx))
 	if n := deliveredTurns(t, repository, stream, conflicted); n != 1 {
 		t.Fatalf("the conflict was delivered in %d turns", n)
 	}
@@ -160,12 +160,12 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 	if moved = upstreamMovedEvents(t, repository, stream); len(moved) != 2 {
 		t.Fatalf("upstream moved events after a restart %+v", moved)
 	}
-	deliverer := chiefDeliverer(t, f, repository, stream)
+	deliverer := managerDeliverer(t, f, repository, stream)
 	fixturekit.Must(t, deliverer.Pass(ctx))
 	if n := deliveredTurns(t, repository, stream, moved[1].Event.Body); n != 0 {
 		t.Fatalf("the amendment's event was queued behind the conflict's turn in %d turns", n)
 	}
-	journey.CompleteDriftTurn(t, f, repository, stream, trace.ChiefOfStaff, nil)
+	journey.CompleteDriftTurn(t, f, repository, stream, trace.Manager, nil)
 	fixturekit.Must(t, deliverer.Pass(ctx))
 	fixturekit.Must(t, deliverer.Pass(ctx))
 	if n := deliveredTurns(t, repository, stream, conflicted); n != 1 {
@@ -253,7 +253,7 @@ func TestDriftCarryReturnsApprovalsAndTheirReviewerMayAmend(t *testing.T) {
 		t.Fatalf("the review prompt lacks %q:\n%s", want, review.Request.Prompt)
 	}
 	if !strings.Contains(review.Request.Prompt, "call "+questions.AskTool+" to raise it") || !strings.Contains(review.Request.Prompt, "citing upstream commit "+upstream) {
-		t.Fatalf("the review prompt does not send upstream's change to the chief of staff:\n%s", review.Request.Prompt)
+		t.Fatalf("the review prompt does not send upstream's change to the manager:\n%s", review.Request.Prompt)
 	}
 	q, err := repository.ClaimTurn(ctx, stream, agent, "reviewing", filepath.Join(f.S.Cfg.Root.String(), "threads", "reviewing"), f.Clock.Now())
 	fixturekit.Must(t, err)
@@ -269,7 +269,7 @@ func TestDriftCarryReturnsApprovalsAndTheirReviewerMayAmend(t *testing.T) {
 	}
 }
 
-func TestDriftUnderAFinalReportTellsTheChief(t *testing.T) {
+func TestDriftUnderAFinalReportTellsTheManager(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, report := journey.DeliveryFixture(t)
 	ctx := context.Background()

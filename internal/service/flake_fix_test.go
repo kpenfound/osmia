@@ -109,29 +109,29 @@ func (l *flakeFixLive) occurrence(t *testing.T, stream config.WorkstreamID, path
 	return found
 }
 
-func (l *flakeFixLive) chief(t *testing.T, stream config.WorkstreamID, name string) coreadapter.Tool {
+func (l *flakeFixLive) manager(t *testing.T, stream config.WorkstreamID, name string) coreadapter.Tool {
 	t.Helper()
 	repo := l.repository()
 	ctx := context.Background()
 	for attempt := 0; ; attempt++ {
 		id := fmt.Sprintf("%s-%d", name, attempt)
-		agentID, thread, turn := "fix-chief-"+id, "fix-chief-thread-"+id, "fix-chief-turn-"+id
+		agentID, thread, turn := "fix-manager-"+id, "fix-manager-thread-"+id, "fix-manager-turn-"+id
 		now := time.Now().UTC()
 		h := func(schema, hid string) trace.Header {
 			return trace.Header{Schema: "osmia.trace." + schema, Version: trace.Version, ID: hid, Revision: 1, Project: repo.Project(), Workstream: stream, At: now, Actor: ownerActor, Cause: "flake-fix-test"}
 		}
-		fixturekit.Must(t, repo.CreateThread(ctx, trace.Agent{Header: h("agent", agentID), Role: trace.ChiefOfStaff, ThreadID: thread}))
+		fixturekit.Must(t, repo.CreateThread(ctx, trace.Agent{Header: h("agent", agentID), Role: trace.Manager, ThreadID: thread}))
 		_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h("turn-request", "request_"+turn), AgentID: agentID, ThreadID: thread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Work"})
 		fixturekit.Must(t, err)
 		if _, err := repo.ClaimTurn(ctx, stream, agentID, "token_"+id, "/owned/"+id, now); err != nil {
 			if attempt < 5 {
 				continue
 			}
-			t.Fatalf("claiming a chief-of-staff turn: %v", err)
+			t.Fatalf("claiming a manager turn: %v", err)
 		}
 		controls := &runtimeControls{}
 		controls.service.Store(l.s)
-		return controls.flakeFix(repo, coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: thread, Turn: turn, Role: trace.ChiefOfStaff})
+		return controls.flakeFix(repo, coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: thread, Turn: turn, Role: trace.Manager})
 	}
 }
 
@@ -219,10 +219,10 @@ func expectedFlakeFixWorkstream(project config.ProjectID, group string, generati
 	return intake.HandInWorkstream(project, flakes.HandInKey(project, group, generation))
 }
 
-func TestFlakeFixIsAChiefOfStaffToolOnly(t *testing.T) {
+func TestFlakeFixIsAManagerToolOnly(t *testing.T) {
 	t.Parallel()
-	if !slices.Contains(chiefGrant.Tools, flakeFixToolName) || !slices.Contains(chiefOrdinaryNarrow.Tools, flakeFixToolName) {
-		t.Fatalf("an ordinary chief-of-staff turn does not hold %s: %v", flakeFixToolName, chiefOrdinaryNarrow.Tools)
+	if !slices.Contains(managerGrant.Tools, flakeFixToolName) || !slices.Contains(managerOrdinaryNarrow.Tools, flakeFixToolName) {
+		t.Fatalf("an ordinary manager turn does not hold %s: %v", flakeFixToolName, managerOrdinaryNarrow.Tools)
 	}
 	for name, tools := range map[string][]string{"design session": designNarrow.Tools, "mason": masonGrant.Tools, "unit mason": unitMasonGrant.Tools, "reviewer": reviewerGrant.Tools} {
 		if slices.Contains(tools, flakeFixToolName) {
@@ -256,7 +256,7 @@ func openFlakeFix(t *testing.T) *openedFlakeFix {
 	t.Helper()
 	l, faults, occ := startUnnoticedFlakeFix(t)
 	l.awaitNoticeOf(t, l.stream, occ.ID)
-	tool := l.chief(t, l.stream, "open")
+	tool := l.manager(t, l.stream, "open")
 	opened := callFlakeFix(t, tool, openInput(occ.ID, flakeFixNotes))
 	want := expectedFlakeFixWorkstream(l.repository().Project(), l.group, 0)
 	if opened.refused() || opened.Decision != flakes.Opened || opened.Workstream != want {
@@ -265,7 +265,7 @@ func openFlakeFix(t *testing.T) *openedFlakeFix {
 	return &openedFlakeFix{flakeFixLive: l, faults: faults, occ: occ, tool: tool, want: want, text: handedText(t, l.repository(), want)}
 }
 
-func TestFlakeNoticeAsksTheChiefToDecideWithTheFlakeFixTool(t *testing.T) {
+func TestFlakeNoticeAsksTheManagerToDecideWithTheFlakeFixTool(t *testing.T) {
 	t.Parallel()
 	l, _, occ := startUnnoticedFlakeFix(t)
 	notices := l.awaitNoticeOf(t, l.stream, occ.ID)
@@ -282,7 +282,7 @@ func TestFlakeOccurrenceBelongsToTheGroupOfItsFlakyTest(t *testing.T) {
 	}
 }
 
-func TestOpeningAFlakeFixHandsInTheEvidenceAndTheChiefsNotesSeparately(t *testing.T) {
+func TestOpeningAFlakeFixHandsInTheEvidenceAndTheManagersNotesSeparately(t *testing.T) {
 	t.Parallel()
 	o := openFlakeFix(t)
 	for _, part := range []string{flakyTraceTest, flakeFixUnitRun, string(o.stream), "resume", flakeFixNotes, flakes.NotesHeading} {
@@ -291,11 +291,11 @@ func TestOpeningAFlakeFixHandsInTheEvidenceAndTheChiefsNotesSeparately(t *testin
 		}
 	}
 	if strings.Index(o.text, flakes.NotesHeading) < strings.Index(o.text, flakeFixUnitRun) || strings.Count(o.text, flakeFixNotes) != 1 {
-		t.Fatalf("the chief's notes are not a separate section after the evidence:\n%s", o.text)
+		t.Fatalf("the manager's notes are not a separate section after the evidence:\n%s", o.text)
 	}
 }
 
-func TestOpeningAFlakeFixRecordsTheChiefsHandInWithoutSkippingTheDebate(t *testing.T) {
+func TestOpeningAFlakeFixRecordsTheManagersHandInWithoutSkippingTheDebate(t *testing.T) {
 	t.Parallel()
 	o := openFlakeFix(t)
 	transitions, err := trace.Read[trace.Transition](o.repository(), o.want)
@@ -305,7 +305,7 @@ func TestOpeningAFlakeFixRecordsTheChiefsHandInWithoutSkippingTheDebate(t *testi
 		switch {
 		case tr.ID == intake.HandInTransition:
 			handedIn = true
-			if tr.Actor != chiefActor || tr.To != intake.HandedState || !strings.Contains(tr.Reason, "chief of staff") || !strings.Contains(tr.Reason, string(o.stream)) || !strings.Contains(tr.Reason, o.occ.ID) {
+			if tr.Actor != managerActor || tr.To != intake.HandedState || !strings.Contains(tr.Reason, "manager") || !strings.Contains(tr.Reason, string(o.stream)) || !strings.Contains(tr.Reason, o.occ.ID) {
 				t.Fatalf("the hand-in transition: %+v", tr)
 			}
 		case tr.ID == intake.SkipTransition:
@@ -346,7 +346,7 @@ func TestTheFeedNamesTheWorkstreamAFlakeDecisionOpened(t *testing.T) {
 	o := openFlakeFix(t)
 	feed := intakefixture.ReadFeed(t, o.c, o.stream)
 	if !slices.ContainsFunc(feed.Entries, func(e FeedEntry) bool {
-		return e.Transition != nil && strings.HasPrefix(e.Transition.Subject, "flake-decision-") && strings.Contains(e.Transition.Reason, string(o.want)) && e.Transition.Actor == chiefActor.Kind+":"+chiefActor.ID
+		return e.Transition != nil && strings.HasPrefix(e.Transition.Subject, "flake-decision-") && strings.Contains(e.Transition.Reason, string(o.want)) && e.Transition.Actor == managerActor.Kind+":"+trace.DisplayRole(managerActor.ID)
 	}) {
 		t.Fatalf("the feed does not name %s: %+v", o.want, feed.Entries)
 	}
@@ -408,7 +408,7 @@ func findRunOccurrence(occurrences []flakes.Occurrence, stream config.Workstream
 	return flakes.Occurrence{}, false
 }
 
-// Two chiefs, of two workstreams, open the same group at once: one workstream
+// Two managers, of two workstreams, open the same group at once: one workstream
 // results, and the occurrence that lost the race joined it.
 func TestFlakeFixConcurrentOpensOfOneGroupYieldOneWorkstream(t *testing.T) {
 	t.Parallel()
@@ -427,7 +427,7 @@ func TestFlakeFixConcurrentOpensOfOneGroupYieldOneWorkstream(t *testing.T) {
 	before, err := repo.Workstreams()
 	fixturekit.Must(t, err)
 
-	tools := []coreadapter.Tool{l.chief(t, l.stream, "a"), l.chief(t, other, "b")}
+	tools := []coreadapter.Tool{l.manager(t, l.stream, "a"), l.manager(t, other, "b")}
 	occurrences := []flakes.Occurrence{first, second}
 	answers := make([]flakeFixAnswer, 2)
 	var wg sync.WaitGroup
@@ -476,7 +476,7 @@ func TestFlakeFixReplayAfterAbandonAndRestartOpensNothingAndTheNextFlakeOpensThe
 	const unitRun = "units/resume/checks-1.json"
 	occ := l.occurrence(t, l.stream, unitRun)
 	l.awaitNoticeOf(t, l.stream, occ.ID)
-	first := callFlakeFix(t, l.chief(t, l.stream, "first"), openInput(occ.ID, ""))
+	first := callFlakeFix(t, l.manager(t, l.stream, "first"), openInput(occ.ID, ""))
 	want := expectedFlakeFixWorkstream(l.repository().Project(), l.group, 0)
 	if first.Decision != flakes.Opened || first.Workstream != want {
 		t.Fatalf("open answered %+v", first)
@@ -486,7 +486,7 @@ func TestFlakeFixReplayAfterAbandonAndRestartOpensNothingAndTheNextFlakeOpensThe
 	fixturekit.Must(t, err)
 	l.restart(t)
 
-	replay := callFlakeFix(t, l.chief(t, l.stream, "replay"), openInput(occ.ID, "replayed"))
+	replay := callFlakeFix(t, l.manager(t, l.stream, "replay"), openInput(occ.ID, "replayed"))
 	if replay.Decision != flakes.Opened || replay.Workstream != want {
 		t.Fatalf("the replayed open answered %+v", replay)
 	}
@@ -505,7 +505,7 @@ func TestFlakeFixReplayAfterAbandonAndRestartOpensNothingAndTheNextFlakeOpensThe
 	if next = l.occurrence(t, l.stream, nextRun); next.Decision.State != flakes.Pending {
 		t.Fatalf("the new occurrence is %+v, want it awaiting a decision", next.Decision)
 	}
-	opened := callFlakeFix(t, l.chief(t, l.stream, "next"), openInput(next.ID, ""))
+	opened := callFlakeFix(t, l.manager(t, l.stream, "next"), openInput(next.ID, ""))
 	wantNext := expectedFlakeFixWorkstream(l.repository().Project(), l.group, 1)
 	if opened.Decision != flakes.Opened || opened.Workstream != wantNext || wantNext == want {
 		t.Fatalf("the new flake answered %+v, want an opened %s", opened, wantNext)
@@ -525,7 +525,7 @@ func TestFlakeFixInterruptedOpenCompletesAfterRestart(t *testing.T) {
 	l := startFlakeFixLive(t, "flake-fix-interrupted", flakyOutcome(flakyTraceTest))
 	occ := l.occurrence(t, l.stream, "units/resume/checks-1.json")
 	l.awaitNoticeOf(t, l.stream, occ.ID)
-	tool := l.chief(t, l.stream, "interrupted")
+	tool := l.manager(t, l.stream, "interrupted")
 	l.s.setBoundary(func(name string) error {
 		if name == "flake-fix-handed" {
 			return errFlakeStop
@@ -551,7 +551,7 @@ func TestFlakeFixInterruptedOpenCompletesAfterRestart(t *testing.T) {
 	if got := flakeFixWorkstreams(t, l.repository()); !slices.Equal(got, []config.WorkstreamID{want}) {
 		t.Fatalf("flake-fix workstreams %v", got)
 	}
-	retry := callFlakeFix(t, l.chief(t, l.stream, "retry"), openInput(occ.ID, "A note that survives."))
+	retry := callFlakeFix(t, l.manager(t, l.stream, "retry"), openInput(occ.ID, "A note that survives."))
 	if retry.Decision != flakes.Opened || retry.Workstream != want {
 		t.Fatalf("the retried open answered %+v", retry)
 	}
@@ -568,7 +568,7 @@ func TestFlakeFixDeclineNeedsAReasonAndNotifiesAgainOnTheNextFlake(t *testing.T)
 	l := startFlakeFixLive(t, "flake-fix-decline", flakyOutcome(flakyTraceTest))
 	occ := l.occurrence(t, l.stream, "units/resume/checks-1.json")
 	l.awaitNoticeOf(t, l.stream, occ.ID)
-	tool := l.chief(t, l.stream, "decline")
+	tool := l.manager(t, l.stream, "decline")
 
 	for _, input := range []string{
 		fmt.Sprintf(`{"action":"decline","occurrence":%q}`, occ.ID),
@@ -593,7 +593,7 @@ func TestFlakeFixDeclineNeedsAReasonAndNotifiesAgainOnTheNextFlake(t *testing.T)
 	transitions, err := trace.Read[trace.Transition](l.repository(), l.stream)
 	fixturekit.Must(t, err)
 	if !slices.ContainsFunc(transitions, func(tr trace.Transition) bool {
-		return strings.HasPrefix(tr.Subject, "flake-decision-") && tr.To == "declined" && strings.Contains(tr.Reason, reason) && tr.Actor == chiefActor
+		return strings.HasPrefix(tr.Subject, "flake-decision-") && tr.To == "declined" && strings.Contains(tr.Reason, reason) && tr.Actor == managerActor
 	}) {
 		t.Fatalf("the trace does not record the decline: %+v", transitions)
 	}
@@ -625,7 +625,7 @@ func TestFlakeFixRefusals(t *testing.T) {
 	l := startFlakeFixLive(t, "flake-fix-refusals", flakyOutcome(flakyTraceTest))
 	occ := l.occurrence(t, l.stream, "units/resume/checks-1.json")
 	l.awaitNoticeOf(t, l.stream, occ.ID)
-	tool := l.chief(t, l.stream, "refusals")
+	tool := l.manager(t, l.stream, "refusals")
 	refused := func(what, input, contains string) {
 		t.Helper()
 		if a := callFlakeFix(t, tool, input); !a.refused() || !strings.Contains(a.Reason, contains) {

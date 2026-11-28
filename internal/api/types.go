@@ -260,7 +260,7 @@ type CharterState struct {
 }
 
 // HandInRequest hands work to the ordered Projects, whose first project hosts
-// the shared chief and conversation. Project is a one-project shorthand.
+// the shared manager and conversation. Project is a one-project shorthand.
 // Exactly one of Path (an absolute file path), URL (a GitHub issue URL) and
 // Stdin (the input itself) is
 // set. Key identifies the request: a retry with the same key returns the same
@@ -366,7 +366,7 @@ type DesignStartRequest struct {
 
 // DesignStartResponse names the workstream a design session's brief started
 // a workgroup on. Handed is the path of the recorded brief; Source names the
-// design session it came from. The workgroup's chief of staff opens a new
+// design session it came from. The workgroup's manager opens a new
 // thread from that brief and the design transcript attached to it; the design
 // conversation's own thread is not continued.
 type DesignStartResponse struct {
@@ -425,15 +425,15 @@ type BaseUpstreamResponse struct {
 // when the workstream's own base was abandoned: continue from upstream.
 const BaseDecisionUpstream = "upstream"
 
-// The actors that archive a workstream: the owner by request, or the chief of
-// staff once the workstream's own pull request merged.
+// The actors that archive a workstream: the owner by request, or the manager
+// once the workstream's own pull request merged.
 const (
-	ArchivedByOwner = "owner"
-	ArchivedByChief = "chief_of_staff"
+	ArchivedByOwner   = "owner"
+	ArchivedByManager = trace.ManagerDisplay
 )
 
 // ArchiveResponse reports whether a workstream is archived after the
-// owner's request. ArchivedBy names who archived it, owner or chief_of_staff,
+// owner's request. ArchivedBy names who archived it, owner or manager,
 // and is empty while the workstream is not archived.
 type ArchiveResponse struct {
 	Project    config.ProjectID    `json:"project"`
@@ -475,7 +475,7 @@ type ShedRedraftRequest struct {
 
 // PacketResponse is the ratification packet of a workstream: the revisions the
 // owner decides on, why debate ended, the dissent record with what blocks
-// ratification first, and the chief of staff's recommendation. ProjectSpec
+// ratification first, and the manager's recommendation. ProjectSpec
 // is present only when the workstream belongs to a multi-member workgroup
 // whose project spec is already drafted: ratifying this packet then seals
 // that project spec and every member, not only this workstream.
@@ -759,7 +759,7 @@ type DailyBudgetStatus struct {
 // per-workstream worker-turn limit in force.
 type CapacityStatus struct {
 	PerWorkstream int            `json:"per_workstream" description:"Maximum concurrent worker turns per workstream; check slots are independent."`
-	Roles         []RoleCapacity `json:"roles" description:"Factory-wide mason, reviewer, committee, architect, checks and chief slot pools, in that order."`
+	Roles         []RoleCapacity `json:"roles" description:"Factory-wide mason, reviewer, committee, architect, checks and manager slot pools, in that order."`
 	Clients       []ClientStatus `json:"clients" description:"The local client and every connected client, in the order new turns rotate through them. Each client's slots are a second bound next to the role pools."`
 }
 
@@ -874,13 +874,13 @@ type ClientFailure struct {
 // Limit, and says in Scope and Note how it is bounded instead.
 // Waiting lists work waiting for a slot and never paused work.
 type RoleCapacity struct {
-	Role      string     `json:"role" description:"Slot pool: mason, reviewer, committee, architect, checks or chief. The checks pool uses capacity.checks (default 2) across all projects and workstreams. The chief pool uses capacity.chief (default 3) across all projects and workstreams and holds background chief-of-staff turns only; turns the owner starts take no chief slot."`
+	Role      string     `json:"role" description:"Slot pool: mason, reviewer, committee, architect, checks or manager. The checks pool uses capacity.checks (default 2) across all projects and workstreams. The manager pool uses capacity.manager (default 3) across all projects and workstreams and holds background manager turns only; turns the owner starts take no manager slot."`
 	Used      int        `json:"used" description:"Number of slots currently in use."`
-	Limit     *int       `json:"limit,omitempty" description:"Configured factory-wide slot limit from config.toml. Present only for bounded pools (mason, reviewer, committee, checks, chief). Absent when unbounded is true: that pool has no factory-wide limit, which is not a limit of 0."`
+	Limit     *int       `json:"limit,omitempty" description:"Configured factory-wide slot limit from config.toml. Present only for bounded pools (mason, reviewer, committee, checks, manager). Absent when unbounded is true: that pool has no factory-wide limit, which is not a limit of 0."`
 	Unbounded bool       `json:"unbounded,omitempty" description:"True when the pool has no factory-wide limit (architect). Such an entry has no limit field, scope is per_workstream and note explains it; there is no configuration setting to raise."`
 	Scope     string     `json:"scope,omitempty" description:"How an unbounded pool is bounded instead: per_workstream means at most one turn runs per workstream. Absent for bounded pools."`
 	Note      string     `json:"note,omitempty" description:"Plain-words explanation of an unbounded pool: no factory-wide limit, at most one turn per workstream, no configuration setting. Absent for bounded pools."`
-	Waiting   []SlotWait `json:"waiting" description:"Work waiting for a slot. Check runs identify their project, workstream and unit, final review or session. Background chief turns identify their project, workstream, agent and turn, oldest first."`
+	Waiting   []SlotWait `json:"waiting" description:"Work waiting for a slot. Check runs identify their project, workstream and unit, final review or session. Background manager turns identify their project, workstream, agent and turn, oldest first."`
 }
 
 // UnboundedScope is RoleCapacity.Scope of a pool that runs at most one turn
@@ -905,7 +905,7 @@ type SlotWait struct {
 	Unit       string              `json:"unit,omitempty"`
 	Review     int                 `json:"review,omitempty" description:"Final review number for a waiting final-review check run."`
 	Session    bool                `json:"session,omitempty" description:"True for a waiting session check run; workstream identifies the session."`
-	Preview    bool                `json:"preview,omitempty" description:"True for a waiting service-run chief preview."`
+	Preview    bool                `json:"preview,omitempty" description:"True for a waiting service-run manager preview."`
 	Verify     bool                `json:"verify,omitempty" description:"True for a waiting service-run verify call."`
 	Agent      string              `json:"agent,omitempty"`
 	Turn       string              `json:"turn,omitempty"`
@@ -950,13 +950,13 @@ type RoleFallback struct {
 	Profile    string `json:"profile"`
 }
 
-// WorkstreamStatus is the chief of staff's status for one workstream, next to
+// WorkstreamStatus is the manager's status for one workstream, next to
 // the facts the service owns. State is null until a feature state is
 // recorded; Units is empty until the units' states are recorded, and each
 // unit carries its latest reported card when present; Advisories holds the
 // active overlap advisories about other workstreams of the project; Gates is
 // empty while no owner decision waits; Drift is null before the first drift
-// rebase; Status is null until the chief of staff writes one. Agents holds
+// rebase; Status is null until the manager writes one. Agents holds
 // service-owned facts about claimed and parked turns. Workspaces is the
 // workspace backend the workstream was created on, git or jujutsu.
 type WorkstreamStatus struct {
@@ -996,7 +996,7 @@ type WorkstreamStatus struct {
 	// Archived is set when the owner archived the workstream, which takes a
 	// delivered or abandoned workstream out of the list of work.
 	Archived bool `json:"archived,omitempty"`
-	// ArchivedBy names who archived the workstream: owner, or chief_of_staff
+	// ArchivedBy names who archived the workstream: owner, or manager
 	// when it archived the workstream because its pull request merged.
 	ArchivedBy string `json:"archived_by,omitempty"`
 	// TraceDeleted is set after permanent archive cleanup completes.
@@ -1169,7 +1169,7 @@ type AgentStatus struct {
 // DriftStatus is a workstream's latest drift rebase: its number, its
 // outcome (requested while it has none), and when and why that was recorded.
 // Moved holds, oldest first, the upstream moved events it raised for the
-// chief of staff, one for each visible outcome; it is empty for a drift
+// manager, one for each visible outcome; it is empty for a drift
 // rebase with none.
 type DriftStatus struct {
 	Drift   int       `json:"drift"`
@@ -1179,7 +1179,7 @@ type DriftStatus struct {
 	Moved   []string  `json:"moved"`
 }
 
-// StatusView is one status revision as the chief of staff wrote it.
+// StatusView is one status revision as the manager wrote it.
 type StatusView struct {
 	Goal      string    `json:"goal"`
 	Attention string    `json:"attention"`
@@ -1212,7 +1212,7 @@ const (
 	InboxLoop         = "loop"
 	InboxBase         = "base"
 	// InboxRecovery asks the owner to approve one recovery move: a stall that
-	// neither Jev nor the chief of staff cleared, or a move that belongs to the
+	// neither Jev nor the manager cleared, or a move that belongs to the
 	// owner. The card pins the exact move.
 	InboxRecovery = "recovery"
 	// InboxDiscovery is a discovered piece of work whose disposition Jev
@@ -1226,11 +1226,11 @@ const (
 
 // InboxEntry is one open owner decision. Kind says which, and Answer how it
 // is answered. Number and Batch identify an escalation, the questions the
-// chief of staff sent the owner as one ask, and Asked holds its questions as
+// manager sent the owner as one ask, and Asked holds its questions as
 // their askers put them. Unit names a contested unit, or the unit an
 // amendment was filed from; Amendment names an amendment. Revision is the
-// revision of the record the decision is taken on. Question is the chief of
-// staff's rephrasing of an escalation, and the service's statement of the
+// revision of the record the decision is taken on. Question is the manager's
+// rephrasing of an escalation, and the service's statement of the
 // decision for the other kinds. A publication entry reports a publication
 // whose last attempts failed: it takes no decision, its Revision is the owner
 // approval being published and its Options are empty. A checks entry reports
@@ -1332,7 +1332,7 @@ type AnswerResponse struct {
 	At         time.Time           `json:"at"`
 }
 
-// SendRequest is an owner message to a workstream's chief of staff.
+// SendRequest is an owner message to a workstream's manager.
 type SendRequest struct {
 	Text string `json:"text"`
 }
@@ -1351,16 +1351,16 @@ const (
 	TurnStopped TurnState = "stopped"
 )
 
-// ConversationResponse lists a workstream's conversation with its chief of
-// staff, oldest first.
+// ConversationResponse lists a workstream's conversation with its manager,
+// oldest first.
 type ConversationResponse struct {
 	Workstream config.WorkstreamID `json:"workstream"`
 	Entries    []ConversationEntry `json:"entries"`
 }
 
-// ConversationEntry is an owner message (kind "message"), the chief of
-// staff's final response to it (kind "response"), or something the chief of
-// staff did on the owner's behalf (kind "action"), such as resolving a
+// ConversationEntry is an owner message (kind "message"), the manager's
+// final response to it (kind "response"), or something the manager
+// did on the owner's behalf (kind "action"), such as resolving a
 // contested unit. A message and its response carry the state of the turn that
 // answers the message, and At is when the message was accepted, the response
 // captured or the action recorded.
@@ -1373,7 +1373,7 @@ type ConversationEntry struct {
 	State        TurnState `json:"state"`
 }
 
-// WorkgroupFeedResponse lists shared chief entries and current member summaries.
+// WorkgroupFeedResponse lists shared manager entries and current member summaries.
 // Both single-member and multi-member workgroups can use this endpoint.
 type WorkgroupFeedResponse struct {
 	Workgroup config.WorkgroupID       `json:"workgroup"`
@@ -1393,7 +1393,7 @@ type WorkgroupMemberSummary struct {
 	PRLink       string              `json:"pr_link"`
 	Running      bool                `json:"running"`
 	Archived     bool                `json:"archived"`
-	// ArchivedBy names who archived the member, owner or chief_of_staff.
+	// ArchivedBy names who archived the member, owner or manager.
 	ArchivedBy string `json:"archived_by,omitempty"`
 }
 
@@ -1412,15 +1412,15 @@ type FeedImage struct {
 }
 
 // FeedEntry is one event of a workstream's feed. Kind "message", "response"
-// and "action" are the conversation with the chief of staff, as
+// and "action" are the conversation with the manager, as
 // ConversationEntry describes them, with Turn, Text and State. Kind "status"
-// is a status the chief of staff wrote, with Status. Kind "session" is an
+// is a status the manager wrote, with Status. Kind "session" is an
 // agent turn that started, with Session. Kind "transition" is any recorded
 // workflow state change, with Transition. Kind "unit_checks" summarizes a
 // unit check run, "final_checks" a final check attempt, and "final_review"
 // a final review outcome. Kind "image" carries attachment metadata in Image,
 // with a URL or an archived-member placeholder. Kind "brief" is the delivery
-// brief the chief of staff recorded for a final review, with Brief. Kind
+// brief the manager recorded for a final review, with Brief. Kind
 // "recovery" is a recovery card opened for the owner, with Recovery. At is when
 // the entry first became observable; sessions and final check attempts use
 // their recorded start time.

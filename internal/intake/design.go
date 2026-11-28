@@ -28,7 +28,7 @@ import (
 
 // Design session tool and document names. file_read, draft_brief, read_repo and
 // set_title are the only tools a design session's agent may ever reach; every
-// other tool a chief-of-staff turn can hold, including every write,
+// other tool a manager turn can hold, including every write,
 // version-control, credential or owner-gate tool, is narrowed away for it
 // (enforcement.go).
 const (
@@ -235,7 +235,7 @@ func RenderDesignView(project config.ProjectID, w trace.WorkstreamStatus) Design
 // with a design thread of its own and no feature state, wrapped in its own
 // one-workstream workgroup like every other workstream. It takes no spec, no
 // plan and no units, and the owner's conversation with it never reaches the
-// tools or the context an ordinary chief of staff has.
+// tools or the context an ordinary manager has.
 func (s *Controller) OpenDesign(ctx context.Context, req DesignOpenRequest) (DesignView, *APIError) {
 	if req.NewProject && req.Project == "" {
 		ids := s.Current().ProjectIDs()
@@ -449,7 +449,7 @@ const DesignRolePrompt = "## Your role\n" +
 	"- Choose the workstream kind with draft_brief kind, from the kinds listed under Workstream kinds in the turn context, and name the kind you chose in your reply. Omitting kind keeps the current kind, and a brief that never sets one is handed in as feature. " +
 	"The kind is fixed once the owner presses Start and the architect never chooses it, because the kind decides how the whole workstream runs. Stay within the chosen kind's limits: draft_brief refuses a brief that breaks them, and Start checks them again.\n\n" +
 	"## Your part of the state machine\n" +
-	"A design session is open until the owner presses Start. Start hands the latest brief and this conversation's transcript to a new chief of staff, who opens the workgroup from them; you are not resumed after that. Only your latest draft_brief call is handed in, and where the transcript differs from the brief, the brief wins. " +
+	"A design session is open until the owner presses Start. Start hands the latest brief and this conversation's transcript to a new manager, who opens the workgroup from them; you are not resumed after that. Only your latest draft_brief call is handed in, and where the transcript differs from the brief, the brief wins. " +
 	"Until Start, the conversation continues with each owner message.\n\n" +
 	"## Readiness pass\n" +
 	"Run a readiness pass before handoff. Ask the owner only about choices that are expensive to undo (contracts, data " +
@@ -697,7 +697,7 @@ func (s *Controller) DraftBriefTool(repository *trace.Repository, scope coreadap
 			k := revision + 1
 			at := now()
 			h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: DesignDraftDocument, Revision: k,
-				Project: repository.Project(), Workstream: stream, At: at, Actor: ChiefActor, Cause: DraftBriefToolName}
+				Project: repository.Project(), Workstream: stream, At: at, Actor: ManagerActor, Cause: DraftBriefToolName}
 			data, err := json.Marshal(brief)
 			if err != nil {
 				return nil, err
@@ -742,7 +742,7 @@ func DesignTitleTool(repository *trace.Repository, scope coreadapter.Scope, now 
 				return nil, fmt.Errorf("%s sets the title of an open design session only", DesignTitleToolName)
 			}
 			known := []string{string(repository.Project()), string(stream)}
-			for _, read := range []func(config.WorkstreamID) (trace.Thread, error){repository.DesignerThread, repository.ChiefOfStaffThread} {
+			for _, read := range []func(config.WorkstreamID) (trace.Thread, error){repository.DesignerThread, repository.ManagerThread} {
 				if th, err := read(stream); err == nil {
 					known = append(known, th.Identity.ThreadID, th.Session.ID)
 					for _, turn := range th.Turns {
@@ -765,7 +765,7 @@ func DesignTitleTool(repository *trace.Repository, scope coreadapter.Scope, now 
 			}
 			k := revision + 1
 			h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: DesignTitleDocument, Revision: k,
-				Project: repository.Project(), Workstream: stream, At: now(), Actor: ChiefActor, Cause: DesignTitleToolName}
+				Project: repository.Project(), Workstream: stream, At: now(), Actor: ManagerActor, Cause: DesignTitleToolName}
 			data, err := json.Marshal(designTitleRecord{Title: title})
 			if err != nil {
 				return nil, err
@@ -918,12 +918,12 @@ func DesignTranscript(repository *trace.Repository, stream config.WorkstreamID) 
 	return text, nil
 }
 
-// earlierDesignThread is the chief-of-staff thread a design session opened
+// earlierDesignThread is the manager thread a design session opened
 // before design sessions had a thread of their own held its conversation on.
 // It is empty for every other session. Nothing is sent to it any more; its
 // messages are still read.
 func earlierDesignThread(repository *trace.Repository, stream config.WorkstreamID) (trace.Thread, error) {
-	th, err := repository.ChiefOfStaffThread(stream)
+	th, err := repository.ManagerThread(stream)
 	if errors.Is(err, os.ErrNotExist) {
 		return trace.Thread{}, nil
 	}
@@ -945,8 +945,8 @@ func threadTranscript(th trace.Thread) string {
 
 // designHistoryContext carries a design session's earlier conversation into
 // the turns of its design thread until one of them has answered. A session
-// opened before the design thread existed holds its conversation on the chief
-// of staff's thread, where this thread's backend session never saw it, so the
+// opened before the design thread existed holds its conversation on the manager's
+// thread, where this thread's backend session never saw it, so the
 // agent reads the conversation and its latest brief here.
 func designHistoryContext(repository *trace.Repository, stream config.WorkstreamID, designer, earlier trace.Thread) (string, error) {
 	if slices.ContainsFunc(designer.Turns, func(q trace.QueuedTurn) bool { return q.Status() == "idle" }) {
@@ -972,7 +972,7 @@ func designHistoryContext(repository *trace.Repository, stream config.Workstream
 // StartDesignWorkgroup hands a design session's latest drafted brief to the
 // architect flow: it records the brief, with the conversation transcript
 // attached for reference, as the workstream's handed input, exactly as an
-// ordinary hand-in does. The workgroup's chief of staff opens a new thread
+// ordinary hand-in does. The workgroup's manager opens a new thread
 // from that brief and transcript and never resumes the design conversation. It is refused, recording
 // nothing, when the workstream is no longer a design session, a turn is
 // running, or the agent has not drafted a brief yet.
@@ -1098,7 +1098,7 @@ func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string, reque
 	if err := s.PreparePinnedDesignStart(ctx, repository, stream, intent); err != nil {
 		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
-	if err := repository.BeginFreshChiefOfStaff(ctx, stream); err != nil {
+	if err := repository.BeginFreshManager(ctx, stream); err != nil {
 		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if err := s.ResumeHandedDesign(ctx, repository, stream, intent.Handed); err != nil {

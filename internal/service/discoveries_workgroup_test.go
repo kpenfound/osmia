@@ -66,11 +66,11 @@ func openMemberDiscovery(t *testing.T) *memberDiscovery {
 	fixturekit.Must(t, err)
 
 	header := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_events_1", Revision: 1, Project: wg.Project(), Workstream: host, At: at, Actor: trace.Actor{Kind: "service", ID: "controller"}, Cause: "test", Depth: 1}
-	_, err = wg.EnqueueTurn(ctx, trace.TurnRequest{Header: header, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events_1", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, SystemPrompt: "test", Prompt: "test"})
+	_, err = wg.EnqueueTurn(ctx, trace.TurnRequest{Header: header, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "events_1", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, SystemPrompt: "test", Prompt: "test"})
 	fixturekit.Must(t, err)
-	_, err = wg.ClaimTurn(ctx, host, trace.ChiefOfStaff, "token_events_1", "/owned/events_1", at)
+	_, err = wg.ClaimTurn(ctx, host, trace.Manager, "token_events_1", "/owned/events_1", at)
 	fixturekit.Must(t, err)
-	scope := coreadapter.Scope{Project: string(wg.Project()), Workstream: string(host), Thread: trace.ChiefOfStaff, Turn: "events_1", Role: trace.ChiefOfStaff}
+	scope := coreadapter.Scope{Project: string(wg.Project()), Workstream: string(host), Thread: trace.Manager, Turn: "events_1", Role: trace.Manager}
 
 	return &memberDiscovery{wg: wg, r2: r2, m2: m2, id: id, scope: scope, now: now}
 }
@@ -85,7 +85,7 @@ func TestAnOpenDiscoveryOfAWorkgroupMemberHoldsTheMember(t *testing.T) {
 	}
 }
 
-func TestSharedChiefListsTheDiscoveriesOfAMember(t *testing.T) {
+func TestSharedManagerListsTheDiscoveriesOfAMember(t *testing.T) {
 	t.Parallel()
 	d := openMemberDiscovery(t)
 	raw, err := factoryContext(d.wg, d.scope).Handle(context.Background(), json.RawMessage(`{"path":"discoveries","workstream":"`+string(d.m2)+`"}`))
@@ -97,17 +97,17 @@ func TestSharedChiefListsTheDiscoveriesOfAMember(t *testing.T) {
 	}
 }
 
-func TestSharedChiefCannotReadAWorkstreamOutsideItsWorkgroup(t *testing.T) {
+func TestSharedManagerCannotReadAWorkstreamOutsideItsWorkgroup(t *testing.T) {
 	t.Parallel()
 	d := openMemberDiscovery(t)
 	raw, err := factoryContext(d.wg, d.scope).Handle(context.Background(), json.RawMessage(`{"workstream":"w_00000000000000000000000000000099"}`))
 	fixturekit.Must(t, err)
-	if !strings.Contains(string(raw), "does not share this chief of staff") {
+	if !strings.Contains(string(raw), "does not share this manager") {
 		t.Fatalf("a workstream outside the workgroup was read: %s", raw)
 	}
 }
 
-func TestSharedChiefDeclinesAMemberDiscoveryInTheMembersTrace(t *testing.T) {
+func TestSharedManagerDeclinesAMemberDiscoveryInTheMembersTrace(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	d := openMemberDiscovery(t)

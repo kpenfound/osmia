@@ -27,7 +27,7 @@ func policySection(title string, rules ...policyRule) string {
 
 // hasPolicy reports whether a role is given an operating policy.
 func hasPolicy(role string) bool {
-	return slices.Contains([]string{trace.ChiefOfStaff, masonRole, reviewerRole, architectRole, committeeRole}, role)
+	return slices.Contains([]string{trace.Manager, masonRole, reviewerRole, architectRole, committeeRole}, role)
 }
 
 // FactoryInstructions is the operating policy of a feature workstream's turn.
@@ -56,8 +56,8 @@ func FactoryInstructionsFor(scope coreadapter.Scope, kind kindreg.Kind) string {
 	}
 	var rules []string
 	switch scope.Role {
-	case trace.ChiefOfStaff:
-		rules = append(rules, chiefPolicy(units, planned)...)
+	case trace.Manager:
+		rules = append(rules, managerPolicy(units, planned)...)
 	case masonRole:
 		rules = append(rules, masonPolicy(units)...)
 	case reviewerRole:
@@ -68,7 +68,7 @@ func FactoryInstructionsFor(scope coreadapter.Scope, kind kindreg.Kind) string {
 	return "\n\n## Operating policy\nThis policy adds to your task. It never overrides a task-specific requirement or an owner decision." + policySection("Authority", authority) + strings.Join(rules, "") + "\n"
 }
 
-func chiefPolicy(units, planned bool) []string {
+func managerPolicy(units, planned bool) []string {
 	commission := policyRule{"Commission climb-spec revisions with route_amendment.", "the architect drafts against the recorded climb spec and the committee examines the draft before it is decided."}
 	decided := "a discovery's disposition (record_discovery) or a final review's blocking finding (triage_finding)"
 	if planned {
@@ -80,13 +80,13 @@ func chiefPolicy(units, planned bool) []string {
 	contest := policyRule{"Contest a decision again when new evidence calls for it: repeated contests have no owner retry quota, though budgets and the loop guard still apply.", "new evidence should not wait for the owner, and the budgets keep the cost bounded."}
 	escalate := policyRule{"Escalate intent decisions or a concrete operational limitation only after investigating them. Preserve explicit owner holds and rulings.", "the owner's attention is for what only the owner can decide, and a hold or ruling is the owner's decision."}
 	gates := policyRule{"Ratification, abandonment and approving a candidate stay the owner's, including a candidate produced by revisions you commissioned. A proposal for one waits on a card for the owner to decide.", "these are the owner's gates, and approving work you commissioned would be reviewing yourself."}
-	out := []string{policySection("Chief of staff: investigating and deciding", investigate, commission, decide, contest, escalate, gates)}
+	out := []string{policySection("Manager: investigating and deciding", investigate, commission, decide, contest, escalate, gates)}
 	if units {
-		out = append(out, policySection("Chief of staff: footprints and constraints",
+		out = append(out, policySection("Manager: footprints and constraints",
 			policyRule{"Footprints schedule work and never bind what a mason changes, so do not commission a revision only to widen one.", "a mason already changes whatever its outcome needs, so a revision that only widens a footprint costs a round and changes nothing."},
 			policyRule{"Write constraints only for the owner's hard limits, and put file-level instructions in guidance.", "constraints bind acceptance, while guidance can be revised as the work shows what is needed."}))
 	}
-	out = append(out, policySection("Chief of staff: final review and moving a workstream",
+	out = append(out, policySection("Manager: final review and moving a workstream",
 		policyRule{"Triage a final review's blocking findings one by one with decide and triage_finding: the ones that need code go into one revision, and the rest are left to the owner, who can accept them at delivery.", "one revision per review bounds the churn, and accepting a finding is the owner's call."},
 		policyRule{"When the state machine leaves the workstream itself stuck or wrong, propose a move with move_workstream: to assembled for a fresh final review, to building to repair an assembled branch or a delivered one whose pull request is open, to sketched for a redraft or to in-shed for another round of debate once debate concluded, or to delivered to return a reopened workstream.", "the service owns state transitions, so you propose and it routes."},
 		policyRule{"The service routes each proposal and its result says whether the workstream moved, stays where it is, is held, or has a pending owner decision on a card. A redraft, another round, a return to delivered and reopening after repeated blocking reviews stay unmade by default unless Jev finds the evidence in your note supports them.", "those moves discard or reopen finished work, so they need agreement on your evidence."},
@@ -98,7 +98,7 @@ func masonPolicy(units bool) []string {
 	rules := []policyRule{
 		{"Adapt implementation within your assigned outcome. Implementation guidance is revisable; observable acceptance and owner constraints remain binding.", "guidance records one way to reach the outcome, while acceptance and constraints record what the owner needs."},
 		{"Your footprint schedules the unit; it does not limit what you change. Make the supporting changes your outcome needs wherever they are, including small changes in code another unit's footprint names: another unit's responsibility is its outcome, not its files.", "a footprint predicts where work lands, and a needed change outside it is still part of your outcome."},
-		{"Record newly discovered necessary work with record_discovery and ask for coordination rather than taking another unit's outcome.", "work another unit owns needs the chief of staff to coordinate it, or two units end up changing the same outcome."},
+		{"Record newly discovered necessary work with record_discovery and ask for coordination rather than taking another unit's outcome.", "work another unit owns needs the manager to coordinate it, or two units end up changing the same outcome."},
 	}
 	if units {
 		rules = slices.Insert(rules, 1, policyRule{"Consult neighboring assignments before changing ownership.", "the plan assigns each outcome to one unit, and a change of ownership is a plan change."})
@@ -117,7 +117,7 @@ func reviewerPolicy(kind kindreg.Kind) []string {
 	}
 	rules = append(rules,
 		policyRule{footprint, "a footprint schedules the unit and never limits what the outcome may change."},
-		policyRule{"Record newly discovered necessary work with record_discovery and ask the chief to coordinate assignment changes.", "a reviewer finds work but does not reassign it."})
+		policyRule{"Record newly discovered necessary work with record_discovery and ask the manager to coordinate assignment changes.", "a reviewer finds work but does not reassign it."})
 	return []string{policySection("Reviewer", rules...), policySection("Reviewer: the check gate", policyRule{strings.TrimSpace(execution.CheckGateReviewInstructions), "the service-owned gate, not a reviewer's own run, decides test passing."})}
 }
 

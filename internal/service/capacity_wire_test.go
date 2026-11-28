@@ -19,19 +19,19 @@ func TestCapacityToolAndStatusSerializeUnboundedPools(t *testing.T) {
 	ctx := context.Background()
 	repo, err := s.repository(fixturekit.Project)
 	fixturekit.Must(t, err)
-	_, err = repo.EnsureChiefOfStaff(ctx, fixturekit.Stream, fixturekit.DemoStart, ownerActor)
+	_, err = repo.EnsureManager(ctx, fixturekit.Stream, fixturekit.DemoStart, ownerActor)
 	fixturekit.Must(t, err)
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_capacity", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "capacity", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Read the capacity"}
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_capacity", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "capacity", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Read the capacity"}
 	_, err = repo.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
-	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "claim", "/owned/capacity", fixturekit.DemoStart)
+	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.Manager, "claim", "/owned/capacity", fixturekit.DemoStart)
 	fixturekit.Must(t, err)
-	scope := coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(fixturekit.Stream), Thread: trace.ChiefOfStaff, Turn: "capacity", Role: trace.ChiefOfStaff}
+	scope := coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(fixturekit.Stream), Thread: trace.Manager, Turn: "capacity", Role: trace.Manager}
 	controls := &runtimeControls{}
 	controls.service.Store(s)
 
 	tool := controls.capacity(repo, scope)
-	for _, want := range []string{"config.toml", "reload", "not bounded factory-wide", "nothing to raise", "capacity.chief", "background chief-of-staff"} {
+	for _, want := range []string{"config.toml", "reload", "not bounded factory-wide", "nothing to raise", "capacity.manager", "background manager"} {
 		if !strings.Contains(tool.Description, want) {
 			t.Fatalf("capacity tool description lacks %q: %s", want, tool.Description)
 		}
@@ -45,7 +45,7 @@ func TestCapacityToolAndStatusSerializeUnboundedPools(t *testing.T) {
 	fromStatus := fixturekit.CapacityWire(t, status)
 
 	cfg := s.current().Capacity
-	for i, want := range map[int]int{0: cfg.Masons, 1: cfg.Reviewers, 2: cfg.Committee, 4: cfg.Checks, 5: cfg.Chief} {
+	for i, want := range map[int]int{0: cfg.Masons, 1: cfg.Reviewers, 2: cfg.Committee, 4: cfg.Checks, 5: cfg.Manager} {
 		for name, roles := range map[string][]map[string]any{"tool": fromTool, "status": fromStatus} {
 			if got := roles[i]["limit"]; got != float64(want) {
 				t.Fatalf("%s %v limit %v, want %d", name, roles[i]["role"], got, want)

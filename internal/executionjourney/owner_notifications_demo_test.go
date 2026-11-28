@@ -101,7 +101,7 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	}
 	masons.Mu.Unlock()
 
-	masons.Chief.Route("2", []string{"spec#1"}, "Resume from a durable checkpoint", "Acknowledgements are not durable")
+	masons.Manager.Route("2", []string{"spec#1"}, "Resume from a durable checkpoint", "Acknowledgements are not durable")
 	f.Answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "Acknowledgements are not durable, so resuming from the last one loses chunks. Should the spec say a durable checkpoint?"})
 		return err
@@ -120,7 +120,7 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		f.Engine.Turns[fmt.Sprintf("%s-owner-revise-%d", intake.MasonAgent("dedupe"), i)] = masons.Turn
 	}
-	chief := f.Engine.Turns["*"]
+	manager := f.Engine.Turns["*"]
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
@@ -134,7 +134,7 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 				problems.report("final report %s: %s: %v", req.Name, body, err)
 			}
 		default:
-			return chief(ctx, req, turn, tools)
+			return manager(ctx, req, turn, tools)
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}

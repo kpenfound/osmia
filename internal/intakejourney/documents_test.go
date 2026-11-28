@@ -51,6 +51,7 @@ func TestOwnerDraftEditPinsRevisionsAndIsRefusedOnceRatified(t *testing.T) {
 	spec.ID = "spec"
 	plan := trace.Document{Header: h, Path: "plan.json", Content: fixturekit.ValidPlan}
 	plan.ID = "plan"
+	plan.Actor = intake.ManagerActor
 	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{spec, plan}))
 	h.Schema, h.ID = "osmia.trace.transition", "sketch"
 	_, err = repo.SetFeatureState(ctx, h, "sketched", "Draft ready")
@@ -58,9 +59,12 @@ func TestOwnerDraftEditPinsRevisionsAndIsRefusedOnceRatified(t *testing.T) {
 	draftPath := api.Prefix + "/documents/" + string(handed.Workstream)
 	var docs map[string]trace.Document
 	fixturekit.Must(t, c.Do(ctx, http.MethodGet, draftPath, nil, &docs))
+	if docs["plan"].Actor.ID != trace.ManagerDisplay {
+		t.Fatalf("the manager's plan reads as %+v", docs["plan"].Actor)
+	}
 	draft := api.DraftEdit{SpecRevision: 1, PlanRevision: 1, Spec: fixturekit.ValidSpec + "\nAn owner note.\n", Plan: fixturekit.ValidPlan}
 	fixturekit.Must(t, c.Do(ctx, http.MethodPut, draftPath, draft, &docs))
-	if docs["spec"].Revision != 2 || docs["plan"].Revision != 1 {
+	if docs["spec"].Revision != 2 || docs["plan"].Revision != 1 || docs["plan"].Actor.ID != trace.ManagerDisplay {
 		t.Fatalf("saved draft: %+v", docs)
 	}
 	fixturekit.AssertCode(t, c.Do(ctx, http.MethodPut, draftPath, draft, nil), api.Conflict)

@@ -68,7 +68,7 @@ func TestArchiveActorSurvivesRestartAndCleanupUpdates(t *testing.T) {
 	in := fixture(t)
 	store := open(t, in)
 	at := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
-	a := Archive{Project: pid, Workstream: w1, Actor: ArchiveActorChief, Resolved: true, ResolutionEvidence: "merged", State: "delivered", Title: "Merged PR", ArchivedAt: at}
+	a := Archive{Project: pid, Workstream: w1, Actor: ArchiveActorManager, Resolved: true, ResolutionEvidence: "merged", State: "delivered", Title: "Merged PR", ArchivedAt: at}
 	must(t, store.SetArchived(a))
 	update := a
 	update.Actor, update.CleanedAt = "", at.Add(time.Minute)
@@ -83,7 +83,7 @@ func TestArchiveActorSurvivesRestartAndCleanupUpdates(t *testing.T) {
 		t.Fatal("an unknown archive actor was accepted")
 	}
 	must(t, reopened.SetArchived(Archive{Project: pid, Workstream: w2, State: "abandoned", Title: "Owner", ArchivedAt: at}))
-	must(t, reopened.SetArchived(Archive{Project: pid, Workstream: w2, Actor: ArchiveActorChief, State: "abandoned", Title: "Owner", ArchivedAt: at.Add(time.Hour)}))
+	must(t, reopened.SetArchived(Archive{Project: pid, Workstream: w2, Actor: ArchiveActorManager, State: "abandoned", Title: "Owner", ArchivedAt: at.Add(time.Hour)}))
 	state, _ = reopened.Snapshot()
 	for _, got := range state.Archived {
 		if got.Workstream == w2 && (got.Actor != "" || !got.ArchivedAt.Equal(at)) {

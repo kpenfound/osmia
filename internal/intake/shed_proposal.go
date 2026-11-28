@@ -11,7 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// ShedProposal is a proposal of the chief of staff to ask the architect for a
+// ShedProposal is a proposal of the manager to ask the architect for a
 // redraft of the spec and the plan, or to run another round of debate, after
 // debate concluded.
 type ShedProposal struct {
@@ -27,14 +27,14 @@ func proposer(actor trace.Actor) string {
 	if actor == trace.JevActor {
 		return "Jev"
 	}
-	return "the chief of staff"
+	return "the manager"
 }
 
 // ShedProposalExit returns the exit of the proposal on the workstream whose id
 // is raw. Leaving the decision to the owner is the default: the owner asks for
-// a redraft or another round, and the chief of staff does so only by a
+// a redraft or another round, and the manager does so only by a
 // departure the router takes at the strict bar. Entering a target records what
-// the owner's command records, with the chief of staff's note.
+// the owner's command records, with the manager's note.
 func (s *Controller) ShedProposalExit(raw string, in ShedProposal) (router.Exit, *APIError) {
 	o, api := s.ShedAction(raw, InShedState)
 	if api != nil {
@@ -96,14 +96,14 @@ func (s *Controller) ShedProposalExit(raw string, in ShedProposal) (router.Exit,
 		return router.Effect{Documents: []trace.Document{doc}, Events: []trace.Event{trace.Notice(p.TransitionID, "owner", reason)}, Reason: reason}, nil
 	}
 	stay := router.Target{Name: TargetWait, Stay: true, NoMove: true,
-		Description: "Leave the decision to the owner: the chief of staff does not ask for a redraft or another round by default, and the owner can ask for either."}
+		Description: "Leave the decision to the owner: the manager does not ask for a redraft or another round by default, and the owner can ask for either."}
 	asked := router.Target{Name: name, State: enters, Description: description, Bar: router.BarStrict, Works: true}
 	x := router.Exit{
 		Repo: repo, Project: o.Project, Workstream: stream, Machine: WorkstreamMachine,
 		Subject: OwnerSubject, From: o.Owner.Value, Version: o.Owner.Version,
 		Trigger: TriggerMoveProposal, Cause: cause, Actor: in.Actor, Note: note, Turn: in.Turn, At: in.At, Proposed: name,
 		Default: TargetWait, Targets: []router.Target{stay, asked},
-		Authority:    &router.Authority{Kind: router.AuthorityChief, Target: name},
+		Authority:    &router.Authority{Kind: router.AuthorityManager, Target: name},
 		Questions:    []router.Question{ask("proposal_fits", "The proposed move fits the evidence."), ask("evidence_supports", "The history and the standing dissent support the move.")},
 		TransitionID: func(t router.Target) string { return cause + "-" + t.Name },
 		Enter: func(_ context.Context, p router.Plan) (router.Effect, error) {

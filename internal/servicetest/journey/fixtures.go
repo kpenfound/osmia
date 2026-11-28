@@ -73,20 +73,20 @@ func BackendOf(t *testing.T, f *ShedFixture, stream config.WorkstreamID) string 
 	return intakefixture.BackendOf(t, f.Opts.Config, f.Project, stream)
 }
 
-// ChiefAnswers has the real chief-of-staff answer tool record a ruling for
-// question id, citing cite, through a queued and claimed chief-of-staff
+// ManagerAnswers has the real manager answer tool record a ruling for
+// question id, citing cite, through a queued and claimed manager
 // turn, and delivers it to the asker's thread through the service's own
-// Deliverer: the production question path a running service's chief uses.
-func ChiefAnswers(t *testing.T, f *ShedFixture, repository *trace.Repository, stream config.WorkstreamID, id, text, cite string) {
+// Deliverer: the production question path a running service's manager uses.
+func ManagerAnswers(t *testing.T, f *ShedFixture, repository *trace.Repository, stream config.WorkstreamID, id, text, cite string) {
 	t.Helper()
-	ChiefRecordsAnswer(t, f, repository, stream, id, text, cite)
+	ManagerRecordsAnswer(t, f, repository, stream, id, text, cite)
 	fixturekit.Must(t, f.S.Answers(f.S.Current(), repository).Pass(context.Background()))
 }
 
-// ChiefRecordsAnswer records the production answer without running delivery.
-func ChiefRecordsAnswer(t *testing.T, f *ShedFixture, repository *trace.Repository, stream config.WorkstreamID, id, text, cite string) {
+// ManagerRecordsAnswer records the production answer without running delivery.
+func ManagerRecordsAnswer(t *testing.T, f *ShedFixture, repository *trace.Repository, stream config.WorkstreamID, id, text, cite string) {
 	t.Helper()
-	f.SharedTurns().ChiefRecordsAnswer(t, repository, stream, id, text, cite)
+	f.SharedTurns().ManagerRecordsAnswer(t, repository, stream, id, text, cite)
 }
 
 // CompleteMasonTurn runs the next queued turn of the unit's mason as a
@@ -287,7 +287,7 @@ func RaiseFixtureContest(t *testing.T, r *trace.Repository, stream config.Workst
 	intakefixture.RaiseFixtureContest(t, r, stream, unit, func() (trace.Header, bool, error) {
 		c, found, err := execution.UnitContest(r, stream, unit)
 		return c.Header, found, err
-	}, intake.ChiefActor, execution.EscalateContest, execution.ChiefContestPath)
+	}, intake.ManagerActor, execution.EscalateContest, execution.ManagerContestPath)
 }
 
 // RecordBuild publishes the sealed documents and unit states atomically so
@@ -405,7 +405,7 @@ func NewConfiguredProductionDesignFixture(t *testing.T, configuration Production
 			configuration.Options(&opts)
 		}
 		af := &ArchitectFixture{Opts: opts, Clone: clone, Engine: engine, Sessions: sessions}
-		f := &ProductionDesignFixture{CrossRepoRatifyFixture: &CrossRepoRatifyFixture{ArchitectFixture: af}, Clock: clock, Dispatch: &intakefixture.ProductionChiefDispatch{}, Configuration: configuration}
+		f := &ProductionDesignFixture{CrossRepoRatifyFixture: &CrossRepoRatifyFixture{ArchitectFixture: af}, Clock: clock, Dispatch: &intakefixture.ProductionManagerDispatch{}, Configuration: configuration}
 		return intakefixture.ProductionDesignStart[*ProductionDesignFixture]{
 			Fixture: f, Scenario: f.SharedDesign(), Threads: opts.Threads, Hooks: &f.Hook,
 			Unwrap: func(turns coreadapter.Turns) *isolation.Turns {
@@ -439,7 +439,7 @@ type ProductionDesignFixture struct {
 	Repos         []intakefixture.ProductionDesignRepo
 	Owner         api.ConversationEntry
 	OwnerAddress  config.WorkstreamID
-	Dispatch      *intakefixture.ProductionChiefDispatch
+	Dispatch      *intakefixture.ProductionManagerDispatch
 	Configuration ProductionDesignConfiguration
 }
 
@@ -469,8 +469,8 @@ func (f *ProductionDesignFixture) SharedDesign() *intakefixture.ProductionDesign
 		Client:     func() intakefixture.ProductionDesignClient { return f.C },
 		Config:     func() *config.Config { return f.S.Current() },
 		Repository: func(p config.ProjectID) (*trace.Repository, error) { return f.S.Repository(p) },
-		ChiefRepository: func(ctx context.Context, r *trace.Repository, w config.WorkstreamID) (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error) {
-			return f.S.ChiefRepository(ctx, r, w)
+		ManagerRepository: func(ctx context.Context, r *trace.Repository, w config.WorkstreamID) (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error) {
+			return f.S.ManagerRepository(ctx, r, w)
 		},
 		Feed:  func(w string) (api.FeedResponse, *api.APIError) { return f.S.FeedList(w) },
 		Ready: func() bool { return f.S.Ready.Load() }, Done: func() <-chan struct{} { return f.S.Done },

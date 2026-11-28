@@ -318,7 +318,7 @@ Recording a flake changes no outcome: the run passes, fails or stays incomplete
 exactly as it does without anything below. What follows applies only to a
 project with `flake_fixes = true`
 ([configuration](configuration.md#project-settings)); with the default it is off,
-nothing is recorded or sent, and the chief of staff's `flake_fix` tool refuses.
+nothing is recorded or sent, and the manager's `flake_fix` tool refuses.
 
 **Groups and occurrences.** Flakes are grouped by flake group, not by exact
 test link. A test-level check groups with its enclosing package or collection
@@ -351,21 +351,21 @@ catching up after a restart, so it does not depend on the unit still checking or
 the final review still in progress.
 
 **The per-run notice.** For a run that does not belong to a flake-fix
-workstream, the originating workgroup's chief of staff receives exactly one
+workstream, the originating workgroup's manager receives exactly one
 notice, whatever mix of groups the run has. It lists every occurrence with its
 group, flaky links and run record. Occurrences whose group has no open flake-fix
 workstream are awaiting a decision, with how to open or decline each through
 `flake_fix`. Occurrences that joined an open flake-fix workstream are
 informational and name it.
 
-**Open or decline.** The chief of staff calls `flake_fix` for an occurrence. It
+**Open or decline.** The manager calls `flake_fix` for an occurrence. It
 cannot hand in anything else, and Jev is not asked whether to open.
 
 - `open` hands in a flake-fix workstream from a hand-in the service writes from
-  the occurrence's evidence plus the chief's notes. It is an ordinary hand-in of
+  the occurrence's evidence plus the manager's notes. It is an ordinary hand-in of
   the project whose check flaked: upstream base, normal priority, debate not
   skipped, the architect, the committee and the owner's ratification, and the
-  owner's delivery approval. Its records name the chief of staff as having
+  owner's delivery approval. Its records name the manager as having
   opened it and the originating workstream. The hand-in frames the flaky link as
   where the flakiness showed up and asks for the cause to be found and fixed,
   with the reasoning and evidence recorded. It requires no change to the named
@@ -374,7 +374,7 @@ cannot hand in anything else, and Jev is not asked whether to open.
   test is unchanged or the flake did not reproduce on demand. A cause outside the
   repository takes the existing "no change needed" escalation.
 - `decline` requires a reason, which is recorded in the originating workstream's
-  trace and feed. A later flake in the same group notifies the chief again.
+  trace and feed. A later flake in the same group notifies the manager again.
 
 Each occurrence has one durable decision: opened (naming the workstream), joined
 (naming the workstream) or declined (with the reason). It is final: calling the
@@ -393,7 +393,7 @@ An occurrence decided earlier never opens another.
 
 **Surfacing to an open workstream.** A flake in a group whose flake-fix
 workstream is open, the same test or a sibling, joins it. The run's links in
-that group go to the open workstream's chief of staff as new evidence, once per
+that group go to the open workstream's manager as new evidence, once per
 open workstream per run, and no new workstream opens.
 
 **No cascade.** A flake found by a flake-fix workstream's own check runs is
@@ -401,7 +401,7 @@ added to the flake record but sends no notice, surfaces nothing and opens
 nothing.
 
 **The originating workstream is never held.** Its units and final review
-continue exactly as they would without this, whether the chief opens, declines
+continue exactly as they would without this, whether the manager opens, declines
 or has not acted, and whether recording or notifying succeeds, is delayed or
 temporarily fails, since a failed step is retried later. Once an occurrence is
 opened, joined or declined, the originating workstream's feed names the
@@ -410,17 +410,17 @@ flake-fix workstream is open for a flaky check's group names that workstream.
 
 **Announcements are reconciled.** A decision is committed before it is
 announced, so the flake recorder's periodic pass announces every decided
-occurrence, whether the chief decided it or the recorder joined it, until each
+occurrence, whether the manager decided it or the recorder joined it, until each
 destination is written. The destinations are independent and each is marked in
 the flake record only after its own write: the decision transition in the
 originating workstream's trace, which its feed shows, and, for a joined
-occurrence, the surfacing to the open workstream's chief of staff. A failure at
+occurrence, the surfacing to the open workstream's manager. A failure at
 one destination or one occurrence leaves only that destination owed and is
 retried by later passes and after a restart, with no further tool call, and the
 single transition and surfacing it writes are keyed so nothing is written
 twice. A delivered or abandoned originating workstream still takes its
 transition. A destination whose workstream was archived, by the owner or by the
-chief of staff through archive-on-merge, is closed as moot, because archiving
+manager through archive-on-merge, is closed as moot, because archiving
 deletes that trace and feed: the flake record notes who archived it, the
 occurrence's decision stays as committed, and its other destination is still
 owed. None of this holds back the originating workstream, its archive-on-merge
@@ -480,7 +480,7 @@ cloud, and why: `timeout` for an escalation after a local timeout,
 reported failed check, or `memory` when routed by memory. A run with the
 fallback off records only local invocations. The selection description, the
 evidence given to unit reviewers and the final reader, and the pass, fail,
-incomplete and contest transition reasons the chief of staff reads say when
+incomplete and contest transition reasons the manager reads say when
 cloud was used and what ran there. A session check run's thread entry says so
 too. The output of a run that used cloud heads each engine's report with
 `== local engine ==` or `== cloud engine ==`.

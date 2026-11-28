@@ -55,12 +55,12 @@ func TestAutoArchiveSoloWorkstreamAndItsConversationUntilCleanup(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("the chief of staff did not archive the merged workstream")
+			t.Fatal("the manager did not archive the merged workstream")
 		}
 		changes()
 	}
 	gate.Await(t)
-	if a.Actor != runtime.ArchiveActorChief || a.State != intake.DeliveredState || a.DeliveryLink != publication.URL || a.ResolutionEvidence != "merged" || !a.Resolved ||
+	if a.Actor != runtime.ArchiveActorManager || a.State != intake.DeliveredState || a.DeliveryLink != publication.URL || a.ResolutionEvidence != "merged" || !a.Resolved ||
 		a.Publication != (runtime.ArchivePublication{Upstream: "owner/osmia", Fork: "owner/fork", Branch: intake.FeatureBranch(member), Commit: "feature-tip", PullRequest: 7}) ||
 		a.MergeCommit != "solo-merge" || a.MergeReference != "owner/osmia#7" {
 		t.Fatalf("automatic archive=%+v", a)
@@ -71,7 +71,7 @@ func TestAutoArchiveSoloWorkstreamAndItsConversationUntilCleanup(t *testing.T) {
 
 	view, err := c.Status(ctx, member)
 	fixturekit.Must(t, err)
-	if !view.Archived || view.ArchivedBy != api.ArchivedByChief {
+	if !view.Archived || view.ArchivedBy != api.ArchivedByManager {
 		t.Fatalf("status=%+v", view)
 	}
 	conversation, err := c.Conversation(ctx, member)
@@ -94,7 +94,7 @@ func TestAutoArchiveSoloWorkstreamAndItsConversationUntilCleanup(t *testing.T) {
 	if _, err := c.Conversation(ctx, member); err == nil {
 		t.Fatal("the conversation survived archive cleanup")
 	}
-	if a.Actor != runtime.ArchiveActorChief || archiveCount(s.Store, member) != 1 {
+	if a.Actor != runtime.ArchiveActorManager || archiveCount(s.Store, member) != 1 {
 		t.Fatalf("archive after cleanup=%+v", a)
 	}
 	if host.lookups(intake.FeatureBranch(member)) != 1 {

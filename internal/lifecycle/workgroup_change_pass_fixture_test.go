@@ -96,7 +96,7 @@ func newChangePass(t *testing.T, kind string, affectsRetired bool, raceStep stri
 	fixturekit.Must(t, err)
 	f.AwaitApproved(t)
 	repo := c.survivorRepo(t)
-	wt, host, _, closeAuthority, err := f.S.Lifecycle().ChiefRepository(ctx, repo, c.survivor)
+	wt, host, _, closeAuthority, err := f.S.Lifecycle().ManagerRepository(ctx, repo, c.survivor)
 	fixturekit.Must(t, err)
 	approval, approvalDoc, found, err := trace.ReadGroupApproval(wt, host)
 	fixturekit.Must(t, err)
@@ -227,7 +227,7 @@ func (c *changePass) scriptChangeTurns() {
 			_, err = fixturekit.CallTool(ctx, tools, lifecycle.RequestChangeTool, toolMap(lifecycle.ChangeRequest{Key: changeKey, Kind: c.kind, Scope: scope, Workstream: c.survivor, Change: "Cancel the selected work or add diagnostic refusal checks to its selected slices."}))
 			return intakefixture.QuestionResult(req, "session-request", "The impact will be presented here."), err
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Following the original shared conversation."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Following the original shared conversation."), nil
 	}
 }
 
@@ -503,17 +503,17 @@ func (c *changePass) requireOneImpactPromptAndOwnerDecision(t *testing.T) {
 func (c *changePass) requireDesignConversationUnchanged(t *testing.T) {
 	t.Helper()
 	repo := c.survivorRepo(t)
-	authority, _, _, closeAuthority, err := c.f.S.Lifecycle().ChiefRepository(context.Background(), repo, c.survivor)
+	authority, _, _, closeAuthority, err := c.f.S.Lifecycle().ManagerRepository(context.Background(), repo, c.survivor)
 	fixturekit.Must(t, err)
-	chief, err := authority.Thread(c.host, trace.ChiefOfStaff)
+	manager, err := authority.Thread(c.host, trace.Manager)
 	closeAuthority()
 	fixturekit.Must(t, err)
-	if !intakefixture.EqualJSONTest(c.f.Before.Identity, chief.Identity) {
-		c.f.Before = trace.Thread{Identity: chief.Identity}
+	if !intakefixture.EqualJSONTest(c.f.Before.Identity, manager.Identity) {
+		c.f.Before = trace.Thread{Identity: manager.Identity}
 	}
 	before := c.f.Before
-	if !intakefixture.EqualJSONTest(before.Identity, chief.Identity) || len(chief.Turns) < len(before.Turns) || !intakefixture.EqualJSONTest(before.Turns, chief.Turns[:len(before.Turns)]) {
-		t.Fatalf("retirement changed original conversation or design turns: before=%+v turns=%d chief=%+v turns=%d", before.Identity, len(before.Turns), chief.Identity, len(chief.Turns))
+	if !intakefixture.EqualJSONTest(before.Identity, manager.Identity) || len(manager.Turns) < len(before.Turns) || !intakefixture.EqualJSONTest(before.Turns, manager.Turns[:len(before.Turns)]) {
+		t.Fatalf("retirement changed original conversation or design turns: before=%+v turns=%d manager=%+v turns=%d", before.Identity, len(before.Turns), manager.Identity, len(manager.Turns))
 	}
 	origin, err := c.f.S.Repository(c.f.Project)
 	fixturekit.Must(t, err)

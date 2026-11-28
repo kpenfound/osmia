@@ -66,7 +66,7 @@ func TestKindSkillsLoadOnlyOnTheTurnsTheKindLists(t *testing.T) {
 			t.Errorf("%s: %v", turn, got)
 		}
 	}
-	for _, turn := range []kinds.Turn{"attempt-mason", "attempt-reviewer", "chief", "committee", ""} {
+	for _, turn := range []kinds.Turn{"attempt-mason", "attempt-reviewer", "events", "committee", ""} {
 		if got := c.KindTurnSkills(kinds.HillClimb, turn); len(got) != 0 {
 			t.Errorf("%s: %v", turn, got)
 		}
@@ -112,7 +112,7 @@ func TestOnlyTheEvaluatorUnitsMasonAndReviewerLoadTheKindSkills(t *testing.T) {
 			t.Errorf("a feature workstream's %s: %v", role, got.Skills)
 		}
 	}
-	for _, role := range []string{"chief_of_staff", "architect", "committee", "session"} {
+	for _, role := range []string{DeprecatedManagerRole, "architect", "committee", "session"} {
 		if got := c.WithUnitKindSkills(base, kinds.HillClimb, role, kinds.EvaluatorUnit); len(got.Skills) != 0 {
 			t.Errorf("role %s: %v", role, got.Skills)
 		}

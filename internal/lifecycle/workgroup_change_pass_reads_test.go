@@ -161,12 +161,12 @@ func TestChangePassLocalGroupRoutesOnlyLeader(t *testing.T) {
 	groups, _, err := trace.Workgroups(f.local)
 	fixturekit.Must(t, err)
 	for _, stream := range g.Members {
-		host, err := f.local.ChiefOfStaffHost(stream)
+		host, err := f.local.ManagerHost(stream)
 		fixturekit.Must(t, err)
 		scanned, scanOK := trace.WorkgroupOf(groups, stream)
 		routed, routeOK := trace.WorkgroupOf(groups, host)
 		if !scanOK || !routeOK || !reflect.DeepEqual(scanned, routed) {
-			t.Fatalf("local member %s and chief host %s resolve differently: %+v %+v", stream, host, scanned, routed)
+			t.Fatalf("local member %s and manager host %s resolve differently: %+v %+v", stream, host, scanned, routed)
 		}
 		wt, routed, _, close, err := f.controller.ChangeContext(context.Background(), string(stream))
 		fixturekit.Must(t, err)

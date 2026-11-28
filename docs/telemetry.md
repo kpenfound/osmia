@@ -96,7 +96,7 @@ single identifier-shaped word, is dropped before the span is sent.
 | `osmia.record.id` | the trace record the span came from | turns, check runs, `osmia.loop_guard.trip` |
 | `osmia.client.id` | the client that ran the turn or whose slot the interval covers: the tailnet node's stable ID of an `osmia client`, or `local` for the server's own machine. A wait span carries it only when the turn waits for one client, as a resumed turn waits for the client holding its session | turns, slot spans of turns |
 | `osmia.state`, `osmia.next_state` | state names; on a route span `osmia.next_state` is the state the subject is in once the exit is decided (a held subject stays where it is) | `osmia.workstream.state`, `osmia.unit.state`, `osmia.transition.route` |
-| `osmia.decided_by` | see [routing values](#routing-values): `code`, `jev`, `fallback`, `owner`, `jev_gate`, `reviewer` | `osmia.workstream.state`, `osmia.unit.state`, only when the transition router chose the transition that ended the state |
+| `osmia.decided_by` | see [routing values](#routing-values): `code`, `jev`, `fallback`, `owner`, `jev_gate`, `manager`, `reviewer` | `osmia.workstream.state`, `osmia.unit.state`, only when the transition router chose the transition that ended the state |
 | `osmia.default_state` | the state the default would have entered | the same spans, and `osmia.transition.route` |
 | `osmia.deviated` | `true` when the transition entered a state other than its default, `false` when it entered the default | `osmia.workstream.state`, `osmia.unit.state`, only when the transition recorded its default |
 | `osmia.trigger` | see [triggers](#triggers) | `osmia.transition.route` |
@@ -104,7 +104,7 @@ single identifier-shaped word, is dropped before the span is sent.
 | `osmia.judgment` | the ID of the Jev judgment record behind the decision | `osmia.transition.route`, only when a judgment record is behind it |
 | `osmia.cause` | see [causes](#cause-values) | state spans, the root, stopped or failed turns |
 | `osmia.outcome` | see [outcomes](#outcome-values) | the root, turns, check runs, slot spans, pool limit spans, pauses, uptime, `osmia.transition.route` |
-| `osmia.role` | `mason`, `reviewer`, `committee`, `architect`, `checks`, `chief_of_staff` | turns, slot spans, role pauses |
+| `osmia.role` | `mason`, `reviewer`, `committee`, `architect`, `checks`, `manager` | turns, slot spans, role pauses |
 | `osmia.backend`, `osmia.model`, `osmia.profile` | names | turns |
 | `osmia.slot_wait_ms` | milliseconds from the turn's request to its runner's claim | turns |
 | `osmia.cost_known`, `osmia.cost_usd` | `cost_usd` only when the backend reported a cost; otherwise `cost_known=false` and no cost | turns |
@@ -140,8 +140,8 @@ at one pinned version, **semantic conventions 1.40.0**. The name is
 | GenAI attribute | Value |
 | --- | --- |
 | `gen_ai.operation.name` | `invoke_agent` |
-| `gen_ai.agent.name` | the role |
-| `gen_ai.agent.id` | the thread ID of the agent |
+| `gen_ai.agent.name` | the role; `manager` for a manager turn |
+| `gen_ai.agent.id` | the thread ID of the agent; `manager` for the manager's thread |
 | `gen_ai.provider.name` | the backend |
 | `gen_ai.request.model` | the model |
 
@@ -173,7 +173,7 @@ is an error with no description.
 | `landed` | to `merged` |
 | `amendment-wait` | to `waiting` |
 | `amendment-resolved` | from `waiting` to `implementing` |
-| `moved` | by the owner or the chief of staff |
+| `moved` | by the owner or the manager |
 | `other` | any other transition |
 
 A unit **bounces back to the mason** when its span ends in `osmia.next_state =
@@ -181,7 +181,7 @@ implementing` with cause `review-rejected`, `checks-failed`, `rebase-conflict`
 or `contest-ruled`.
 
 On a workstream state span `osmia.cause` is who moved the workstream out of the
-state: `owner` (so an owner gate was ended by the owner), `chief`, `agent` or
+state: `owner` (so an owner gate was ended by the owner), `manager`, `agent` or
 `service`. The last state span and the root carry `archived` or `removed`.
 
 A turn that was stopped or failed carries `osmia.cause`: the stop cause
@@ -207,6 +207,7 @@ before the router existed, carries none of the three attributes.
 | `fallback` | the router committing the default because Jev could not answer (timeout, cool-down, outage or a request too large) | never |
 | `owner` | an owner decision, applied as given | never |
 | `jev_gate` | one of Jev's existing gate decisions, applied as given | always |
+| `manager` | a manager move or ruling, applied as given | never |
 | `reviewer` | a satisfactory reviewer verdict for the current candidate, which authorised the move | optional |
 
 `osmia.deviated` is `true` when the transition entered a state other than the
@@ -272,6 +273,10 @@ exit:
 | Contests and objections | `contest.owner_ruling`, `contest.jev_ruling`, `contest.chief_ruling`, `objection.chief_decision` |
 | Dependency waits | `dep.edge_wait`, `dep.edge_resolved`, `dep.upstream_terminal`, `dep.upstream_integrated`, `dep.base_unavailable`, `dep.base_available`, `dep.base_integrated` |
 | Drift | `drift.requested`, `drift.clean`, `drift.review_approved`, `drift.review_rejected`, `drift.turn_failed`, `drift.held` |
+
+The `contest.chief_ruling` and `objection.chief_decision` triggers are stored
+names of the manager role: saved routing records hold them, so they keep their
+old spelling.
 
 A span for a trigger, outcome or band outside these lists is not sent.
 

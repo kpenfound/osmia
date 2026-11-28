@@ -110,7 +110,7 @@ func SpecSummary(content string) string {
 }
 
 // WorkstreamTitle is the title shown to the owner and used as the pull
-// request title: the chief of staff's latest status goal, the value
+// request title: the manager's latest status goal, the value
 // archiveTitle and status also use; when none is recorded, a fallback
 // derived from recorded documents (the sealed spec's first heading, or the
 // handed issue's title) before the bare workstream ID. It is bounded to the

@@ -58,7 +58,7 @@ func TestOwnerMovesACheckingUnitBackToImplementing(t *testing.T) {
 		t.Fatalf("unit %s after %+v", state.Value, moved)
 	}
 	if !strings.Contains(intakefixture.NoticeOf(t, repo, stream, moved.ID), "owner moved unit resume from checking to implementing") {
-		t.Fatal("the move did not tell the chief of staff")
+		t.Fatal("the move did not tell the manager")
 	}
 
 	m := journey.NewMasonController(f.S, repo)
@@ -84,6 +84,41 @@ func TestOwnerMovesACheckingUnitBackToImplementing(t *testing.T) {
 	fixturekit.Must(t, m.Pass(ctx))
 	if state := intakefixture.UnitWorkflow(t, repo, stream, "resume"); state.Value != execution.UnitChecking {
 		t.Fatalf("the revised unit is %s, not checking", state.Value)
+	}
+}
+
+func TestAManagerMoveBackToImplementingTellsTheMasonTheManagerMovedIt(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f, stream, repo := newCheckingFixture(t, "move-manager")
+	reported := lastTurn(t, repo, stream, intake.MasonAgent("resume"))
+	note := "Split the shadow writer out before the checks run again."
+	out, apiErr := f.S.Execution().MoveUnit(ctx, repo, stream, "resume", api.UnitMoveRequest{To: intake.UnitImplementing, Note: note}, intake.ManagerActor, "events_1")
+	if apiErr != nil {
+		t.Fatal(apiErr.Message)
+	}
+	if out.Move.By != trace.ManagerDisplay {
+		t.Fatalf("move %+v", out.Move)
+	}
+	docs, err := trace.Read[trace.Document](repo, stream)
+	fixturekit.Must(t, err)
+	var saved []api.UnitMove
+	for _, d := range docs {
+		if strings.HasPrefix(d.Path, execution.MovePrefix("resume")) {
+			var move api.UnitMove
+			fixturekit.Must(t, json.Unmarshal([]byte(d.Content), &move))
+			saved = append(saved, move)
+		}
+	}
+	if len(saved) != 1 || saved[0].By != trace.ManagerRulerName {
+		t.Fatalf("the saved moves %+v", saved)
+	}
+
+	m := journey.NewMasonController(f.S, repo)
+	fixturekit.Must(t, m.Pass(ctx))
+	turn := lastTurn(t, repo, stream, intake.MasonAgent("resume"))
+	if turn.Sequence <= reported.Sequence || !strings.Contains(turn.Request.Prompt, "The manager moved this unit from checking back to implementing") || !strings.Contains(turn.Request.Prompt, note) || strings.Contains(turn.Request.Prompt, trace.ManagerRulerName) {
+		t.Fatalf("the mason's next turn %s: %s", turn.Request.TurnID, turn.Request.Prompt)
 	}
 }
 
@@ -182,20 +217,20 @@ func TestMoveRefusals(t *testing.T) {
 	}
 }
 
-func TestChiefOfStaffRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
+func TestManagerRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	m := journey.NewMoveFixture(t, "chief-moves")
+	m := journey.NewMoveFixture(t, "manager-moves")
 	if out := intakefixture.Handle(t, m.Move, `{"unit":"resume","to":"checking","note":"Run the checks again.","owner_decided":true}`); !strings.Contains(out, "only for a move the owner asked for") {
 		t.Fatalf("an event turn recorded an owner move: %s", out)
 	}
-	if out := intakefixture.Handle(t, m.Move, `{"unit":"resume","to":"checking","note":"Run the checks again."}`); !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"by":"chief of staff"`) {
+	if out := intakefixture.Handle(t, m.Move, `{"unit":"resume","to":"checking","note":"Run the checks again."}`); !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"by":"manager"`) {
 		t.Fatalf("move_unit: %s", out)
 	}
 	if out := intakefixture.Handle(t, m.Move, `{"unit":"resume","to":"reviewing","note":"Review it again."}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("move_unit: %s", out)
 	}
-	if left, err := execution.ChiefRulingsLeft(m.Repo, m.Stream, "resume"); err != nil || left != -1 {
+	if left, err := execution.ManagerRulingsLeft(m.Repo, m.Stream, "resume"); err != nil || left != -1 {
 		t.Fatalf("rulings left after two moves: %d %v", left, err)
 	}
 	if out := intakefixture.Handle(t, m.Move, `{"unit":"resume","to":"implementing","note":"Revise it."}`); !strings.Contains(out, `"recorded":true`) {
@@ -211,7 +246,7 @@ func TestChiefOfStaffRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 		t.Fatalf("held unit raised %t with %q", raised, note)
 	}
 	if out := m.Resolve(t, `{"unit":"resume","decision":"review","note":"Review it."}`); !strings.Contains(out, "moved to contested for the owner") {
-		t.Fatalf("the chief of staff ruled on the owner's contest: %s", out)
+		t.Fatalf("the manager ruled on the owner's contest: %s", out)
 	}
 	entry, ok, err := journey.InspectForTest(m.F.S).ContestedEntry(m.Repo, m.Stream, "resume")
 	fixturekit.Must(t, err)
@@ -219,7 +254,7 @@ func TestChiefOfStaffRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 		t.Fatalf("inbox entry %+v", entry)
 	}
 
-	if entry.Question != "Unit resume is contested: the chief of staff moved it here from implementing for you to rule on." {
+	if entry.Question != "Unit resume is contested: the manager moved it here from implementing for you to rule on." {
 		t.Fatalf("inbox question %q", entry.Question)
 	}
 	out, apiErr := recordContestedRuling(m.F.S, ctx, m.Repo, m.Stream, "resume", api.ContestedRulingRequest{Decision: "revise", Note: "Close the gap the reviews keep finding."}, intake.OwnerActor)
@@ -229,30 +264,30 @@ func TestChiefOfStaffRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 	if state := intakefixture.UnitWorkflow(t, m.Repo, m.Stream, "resume"); state.Value != intake.UnitImplementing || out.Ruling.Contest != contest.ID {
 		t.Fatalf("ruled unit is %s with %+v", state.Value, out.Ruling)
 	}
-	if left, err := execution.ChiefRulingsLeft(m.Repo, m.Stream, "resume"); err != nil || left != execution.ChiefContestLimit {
+	if left, err := execution.ManagerRulingsLeft(m.Repo, m.Stream, "resume"); err != nil || left != execution.ManagerContestLimit {
 		t.Fatalf("rulings left after the owner's ruling: %d %v", left, err)
 	}
-	actions, err := service.ChiefActions(m.Repo, m.Stream)
+	actions, err := service.ManagerActions(m.Repo, m.Stream)
 	fixturekit.Must(t, err)
 	if len(actions) != 4 || actions[0].Text != "Moved unit resume from reviewing to checking. Run the checks again." || actions[3].Text != "Held unit resume for you, from implementing: "+hold || actions[3].Turn != "events_1" {
 		t.Fatalf("conversation actions %+v", actions)
 	}
 }
 
-func TestChiefOfStaffRecordsTheOwnersMove(t *testing.T) {
+func TestManagerRecordsTheOwnersMove(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f, stream, repo := newCheckingFixture(t, "chief-owner-move")
-	_, err := repo.EnsureChiefOfStaff(ctx, stream, fixturekit.DemoStart, intake.ServiceActor)
+	f, stream, repo := newCheckingFixture(t, "manager-owner-move")
+	_, err := repo.EnsureManager(ctx, stream, fixturekit.DemoStart, intake.ServiceActor)
 	fixturekit.Must(t, err)
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_message_1", Revision: 1, Project: f.Project, Workstream: stream, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: "owner-message"},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "message_1", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "chief", Prompt: "Send resume back to the mason."})
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "message_1", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "manager", Prompt: "Send resume back to the mason."})
 	fixturekit.Must(t, err)
-	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token-message", filepath.Join(t.TempDir(), "message"), fixturekit.DemoStart)
+	_, err = repo.ClaimTurn(ctx, stream, trace.Manager, "token-message", filepath.Join(t.TempDir(), "message"), fixturekit.DemoStart)
 	fixturekit.Must(t, err)
 	controls := &journey.RuntimeControls{}
 	controls.Service.Store(f.S)
-	tool := controls.Execution().MoveUnit(repo, (coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "message_1"}))
+	tool := controls.Execution().MoveUnit(repo, (coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: "message_1"}))
 	out, err := tool.Handle(ctx, json.RawMessage(`{"unit":"resume","to":"implementing","note":"Send it back to the mason.","owner_decided":true}`))
 	fixturekit.Must(t, err)
 	if !strings.Contains(string(out), `"by":"owner"`) {

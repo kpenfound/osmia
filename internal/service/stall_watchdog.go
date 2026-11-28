@@ -364,7 +364,7 @@ func (w stallWatch) exit(stream config.WorkstreamID, unit string, state trace.Wo
 		Repo: w.repository, Stream: stream, Unit: unit, Trigger: execution.TriggerStalled, Cause: cause, State: state,
 		Default: execution.TargetWait, Targets: execution.StalledTargets(state.Value), Actor: stallActor, Note: reason,
 		Evidence: evidence, ID: id, HeaderCause: cause, Reason: reason, Active: true,
-		Events: []trace.Event{trace.Notice(id, "chief", body)},
+		Events: []trace.Event{trace.Notice(id, trace.ManagerKey, body)},
 	})
 	if err != nil {
 		return nil, err
@@ -429,7 +429,7 @@ func readStallProgress(repository *trace.Repository, stream config.WorkstreamID)
 			if r.Unit != "" && (strings.HasPrefix(r.Subject, "unit-") || strings.HasPrefix(r.Subject, "unit_")) {
 				out.names[r.Subject] = r.Unit
 			}
-			if r.Actor == chiefActor || router.IsJournal(r.Subject) {
+			if r.Actor == managerActor || router.IsJournal(r.Subject) {
 				continue
 			}
 			switch {
@@ -503,7 +503,7 @@ func (w stallWatch) readTurns(r *stallReading, stream config.WorkstreamID) error
 	}
 	r.live, r.done = map[string]time.Time{}, map[string]time.Time{}
 	for _, t := range threads {
-		if trace.ChiefLike(t.Identity.Role) {
+		if trace.ManagerLike(t.Identity.Role) {
 			continue
 		}
 		for _, q := range t.Turns {

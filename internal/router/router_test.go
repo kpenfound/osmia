@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/agentcore/jev/systemone"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/recordspans"
@@ -258,11 +259,34 @@ func TestOneLegalTargetIsFollowedWithoutARequest(t *testing.T) {
 	}
 }
 
+func TestTheHistoryJevReadsNamesTheManagerAsManager(t *testing.T) {
+	f := newFx(t, &jevfixture.Transitions{})
+	f.seed("implementing")
+	subject := trace.UnitSubject(unitID)
+	state, err := f.repo.Workflow(streamID, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "manager-move", Revision: 1, Project: projectID, Workstream: streamID, Unit: unitID, At: epoch, Actor: trace.Actor{Kind: "agent", ID: trace.Manager}, Cause: "seed"}
+	if _, err := f.repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: "checking", Reason: "moved", DecidedBy: trace.DecidedByManager, DefaultTo: "checking"}}); err != nil {
+		t.Fatal(err)
+	}
+	route(t, f, f.exit())
+	summary, _ := request(t, f.provider, 0)
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := string(encoded); !strings.Contains(s, `"decided_by":"manager"`) || strings.Contains(s, trace.Manager) {
+		t.Fatalf("the summary Jev reads: %s", s)
+	}
+}
+
 func TestNoCandidateFiltersOnlyTargetsThatNeedOne(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("contested")
 	x := f.exit()
-	x.Trigger, x.Default = "contest.chief_ruling", "revise"
+	x.Trigger, x.Default = execution.TriggerManagerRuling, "revise"
 	x.Targets = []router.Target{
 		{Name: "revise", Description: "Revise the unit with its mason."},
 		{Name: "review", Description: "Review the candidate again.", NeedsCandidate: true},
@@ -390,7 +414,7 @@ func TestOwnerGatesOpenOnlyOnAnOwnerOrGateDecision(t *testing.T) {
 	f.track("implementing", "abandoned", "approved")
 	proposal := f.exit()
 	proposal.Trigger = "unit.move_proposal"
-	proposal.Actor = trace.Actor{Kind: "agent", ID: "chief-of-staff"}
+	proposal.Actor = trace.Actor{Kind: "agent", ID: "manager-of-staff"}
 	route(t, f, proposal)
 	_, options := request(t, f.provider, 0)
 	if slices.Contains(options, "abandoned") || slices.Contains(options, "approved") {
@@ -1076,22 +1100,22 @@ func TestAPauseHoldsAnExitUntilItLifts(t *testing.T) {
 	})
 }
 
-func TestAChiefMoveIsPinnedButOpensNoOwnerGate(t *testing.T) {
+func TestAManagerMoveIsPinnedButOpensNoOwnerGate(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("checking")
 	f.track("implementing")
 	x := f.exit()
 	x.Trigger, x.Default = "unit.move_proposal", "implementing"
-	x.Actor = trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
-	x.Authority = &router.Authority{Kind: router.AuthorityChief, Target: "implementing"}
+	x.Actor = trace.Actor{Kind: "agent", ID: trace.Manager}
+	x.Authority = &router.Authority{Kind: router.AuthorityManager, Target: "implementing"}
 	res := route(t, f, x)
 	if !res.Committed || res.State != "implementing" || res.Outcome != "followed" || res.Rule != "pinned" || f.ran("implementing") != 1 {
 		t.Fatalf("result = %+v", res)
 	}
 	if n := len(f.provider.Requests()); n != 0 {
-		t.Fatalf("a chief move made %d requests", n)
+		t.Fatalf("a manager move made %d requests", n)
 	}
-	if m := f.moves()[0]; m.DecidedBy != trace.DecidedByChief || m.Judgment != "" || !trace.ValidRouting(m.To, m.Routing()) {
+	if m := f.moves()[0]; m.DecidedBy != trace.DecidedByManager || m.Judgment != "" || !trace.ValidRouting(m.To, m.Routing()) {
 		t.Fatalf("transition = %+v", m)
 	}
 
@@ -1101,8 +1125,8 @@ func TestAChiefMoveIsPinnedButOpensNoOwnerGate(t *testing.T) {
 		g.track(target)
 		y := g.exit()
 		y.Trigger, y.Default = "unit.move_proposal", target
-		y.Actor = trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
-		y.Authority = &router.Authority{Kind: router.AuthorityChief, Target: target}
+		y.Actor = trace.Actor{Kind: "agent", ID: trace.Manager}
+		y.Authority = &router.Authority{Kind: router.AuthorityManager, Target: target}
 		if res := route(t, g, y); res.Committed || g.ran(target) != 0 || g.state().Value != "checking" {
 			t.Fatalf("%s: result = %+v", target, res)
 		}

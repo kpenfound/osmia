@@ -127,7 +127,7 @@ func TestFailedCloudRunRecordsEachFailedChecksTraceAndShowsItToTheFinalReader(t 
 	if records := f.traceRecordFiles(); len(records) != 3 {
 		t.Fatalf("records %v", slices.Sorted(maps.Keys(records)))
 	}
-	tool := checkrun.TraceTool(checkrun.TraceFetcher{Repository: f.repo, Runner: checkrun.DaggerChecks{Program: f.traceProgram, CloudToken: cloudToken}, Now: f.clock.Now}, f.chief("trace"), fixturekit.ServiceActor, trace.ChiefOfStaff)
+	tool := checkrun.TraceTool(checkrun.TraceFetcher{Repository: f.repo, Runner: checkrun.DaggerChecks{Program: f.traceProgram, CloudToken: cloudToken}, Now: f.clock.Now}, f.manager("trace"), fixturekit.ServiceActor, trace.Manager)
 	same := f.call(tool, `{"trace_id":"`+traceA+`","check":"test:a"}`)
 	if same["recorded"] != true || same["path"] != checkrun.TraceDocumentPath(traceA, "test:a") || len(cliCalls(t, log)) != 3 {
 		t.Fatalf("action for a recorded check: %v, CLI ran %d times", same, len(cliCalls(t, log)))

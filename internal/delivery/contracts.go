@@ -90,7 +90,7 @@ const Validation = api.Validation
 
 var abandonActor = intake.AbandonActor
 
-var chiefActor = intake.ChiefActor
+var managerActor = intake.ManagerActor
 
 var abandoned = intake.Abandoned
 

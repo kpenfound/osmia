@@ -15,7 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// InboxEntry is one escalation: the batch of questions the chief of staff
+// InboxEntry is one escalation: the batch of questions the manager
 // sent the owner as one ask, which may span every member of a shared
 // workgroup a genuine gap affects, consolidated into this one entry.
 // Number is the escalation's inbox number, unique in the project and never
@@ -195,7 +195,7 @@ var ruleInterrupt func(config.WorkstreamID) error
 // Rule records text as the owner's ruling on inbox entry number: revision 1 of
 // the ruling of every not-yet-ruled question in the batch, each such
 // question's move from escalated to ruled, in one commit per member
-// workstream the batch touches, with one notice for the chief of staff
+// workstream the batch touches, with one notice for the manager
 // overall. It returns the entry as it was ruled on. An unknown number fails
 // with ErrInboxEntry, an entry whose workstream's feature state is one of
 // refused with ErrFeatureState and the entry, and an entry that is no longer
@@ -222,7 +222,7 @@ func (r *Repository) Rule(ctx context.Context, number int, text string, owner Ac
 // RuleDecided is Rule for a decision that may be Jev's: a non-empty judgment
 // names the Jev judgment record the ruling comes from, and actor must then be
 // the Jev actor. The ruling records Jev as its decider, and the notice to the
-// chief of staff says Jev ruled, for the chief to relay as it relays the
+// manager says Jev ruled, for the manager to relay as it relays the
 // owner's. A retry with the same text completes the members not yet ruled, as
 // Rule does.
 func (r *Repository) RuleDecided(ctx context.Context, number int, text string, owner Actor, judgment string, at time.Time, refused ...string) (InboxEntry, error) {
@@ -411,11 +411,11 @@ func (r *Repository) RuleDecided(ctx context.Context, number int, text string, o
 // is refused with "already answered" regardless of text.
 func (r *Repository) RelayRuling(ctx context.Context, agent string, scope coreadapter.Scope, id, text, reach string, at time.Time) ([]string, error) {
 	project := r
-	member, localID, err := r.ChiefQuestionTarget(config.WorkstreamID(scope.Workstream), id)
+	member, localID, err := r.ManagerQuestionTarget(config.WorkstreamID(scope.Workstream), id)
 	if err != nil {
 		return nil, err
 	}
-	hr, turn, err := project.chiefTurnOn(ctx, agent, scope, config.WorkstreamID(scope.Workstream), at)
+	hr, turn, err := project.managerTurnOn(ctx, agent, scope, config.WorkstreamID(scope.Workstream), at)
 	if err != nil {
 		return nil, err
 	}
@@ -548,7 +548,7 @@ func (r *Repository) RelayRuling(ctx context.Context, agent string, scope coread
 					return err
 				}
 				relayed = append(relayed, next)
-				txs = append(txs, questionTransition(v, next.Header, qid, QuestionRuled, QuestionAnswered, fmt.Sprintf("The chief of staff relayed the owner's ruling on question %s with scope %s", qid, reach)))
+				txs = append(txs, questionTransition(v, next.Header, qid, QuestionRuled, QuestionAnswered, fmt.Sprintf("The manager relayed the owner's ruling on question %s with scope %s", qid, reach)))
 			}
 			files, _, err := tr.stage(ctx, ws, log, v, relayed, txs...)
 			if err != nil {
@@ -562,7 +562,7 @@ func (r *Repository) RelayRuling(ctx context.Context, agent string, scope coread
 		}(); err != nil {
 			return nil, err
 		}
-		if err := project.afterQuestionCommit(ws, "chief-relay-member"); err != nil {
+		if err := project.afterQuestionCommit(ws, "manager-relay-member"); err != nil {
 			return nil, err
 		}
 		if relayInterrupt != nil {

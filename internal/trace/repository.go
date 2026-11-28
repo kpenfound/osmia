@@ -197,7 +197,7 @@ func (r *Repository) scoped(id config.WorkstreamID) (*Repository, error) {
 // ProjectFor resolves the repo handle holding stream's knowledge base and
 // entity map and charter. r must be unscoped. Ordinary repo receivers return
 // themselves; a cross-repo workgroup returns the member's borrowed repo
-// handle, even if its workstream history is retired. The shared chief host
+// handle, even if its workstream history is retired. The shared manager host
 // uses the first live member's repo context. Project data is never duplicated
 // into the workgroup trace.
 func (r *Repository) ProjectFor(stream config.WorkstreamID) (*Repository, error) {
@@ -838,8 +838,8 @@ func (r *Repository) CreateWorkstream(ctx context.Context, id config.WorkstreamI
 // repository, under the Osmia root and outside every target repository,
 // whose manifest records the workspace backend it is created on,
 // config.WorkspacesGit, config.WorkspacesJujutsu or none, and then creates
-// its chief-of-staff thread. An error from the thread write leaves the
-// workstream committed; EnsureChiefOfStaff creates the missing thread. An
+// its manager thread. An error from the thread write leaves the
+// workstream committed; EnsureManager creates the missing thread. An
 // existing workstream is refused with ErrConflict.
 func (r *Repository) CreateWorkstreamOn(ctx context.Context, id config.WorkstreamID, workspaces string, at time.Time, actor Actor) error {
 	return r.CreateWorkstreamKind(ctx, id, workspaces, "", at, actor)
@@ -868,7 +868,7 @@ func (r *Repository) CreateWorkstreamKind(ctx context.Context, id config.Workstr
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err = s.ensureChiefOfStaff(ctx, id, at, actor)
+	_, err = s.ensureManager(ctx, id, at, actor)
 	return err
 }
 
@@ -952,7 +952,7 @@ func createWorkstreamTrace(ctx context.Context, root config.Root, project config
 // CreateSessionWorkstream commits a new session workstream in its own
 // dedicated trace: its kind, its fixed profile, the base commit it
 // opened from, its branch and its optional title. It creates no
-// chief-of-staff thread: a session has none. An existing workstream is
+// manager thread: a session has none. An existing workstream is
 // refused with ErrConflict.
 func (r *Repository) CreateSessionWorkstream(ctx context.Context, id config.WorkstreamID, profile, base, branch, title string, at time.Time, actor Actor) error {
 	if r.stream != "" {

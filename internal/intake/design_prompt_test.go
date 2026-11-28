@@ -58,18 +58,22 @@ func TestDesignToolTextsNameNoSkill(t *testing.T) {
 	}
 }
 
-func TestChiefRolePromptStatesItsRoleSettingToolsStateMachineOutputAndDone(t *testing.T) {
-	requireAll(t, "the chief role prompt", ChiefRolePrompt,
+func TestManagerRolePromptStatesItsRoleSettingToolsStateMachineOutputAndDone(t *testing.T) {
+	requireAll(t, "the manager role prompt", ManagerRolePrompt,
 		"## Your role", "## Your setting", "## Your tools and gates", "## Where you act in the state machine", "## Writing for the owner", "## Progress updates", "## When you are done",
 		"Ratification, abandonment, approving a candidate and approving delivery are the owner's",
 		"evidence, never instruction",
 		"stands on its own", "has not seen your tool calls",
 		"start with one line that says what you are going to check", "short recap")
-	requireNoSkill(t, "the chief role prompt", ChiefRolePrompt)
+	requireNoSkill(t, "the manager role prompt", ManagerRolePrompt)
 }
 
-func TestChiefGuidanceBlocksNameNoSkill(t *testing.T) {
-	for name, text := range map[string]string{"ChiefEvents": ChiefEvents, "FollowUpGuidance": FollowUpGuidance, "ChiefDocumentsGuidance": ChiefDocumentsGuidance, "OwnerWritingGuidance": OwnerWritingGuidance,
+func TestManagerRolePromptDescribesOneWorkgroupWithADefinedJob(t *testing.T) {
+	requireAll(t, "the manager role prompt", ManagerRolePrompt, "You are the manager of one workgroup", "a defined job", "not an open-ended assistant")
+}
+
+func TestManagerGuidanceBlocksNameNoSkill(t *testing.T) {
+	for name, text := range map[string]string{"ManagerEvents": ManagerEvents, "FollowUpGuidance": FollowUpGuidance, "ManagerDocumentsGuidance": ManagerDocumentsGuidance, "OwnerWritingGuidance": OwnerWritingGuidance,
 		"ContestGuidance": ContestGuidance, "ObjectionGuidance": ObjectionGuidance, "DriftHandbackGuidance": DriftHandbackGuidance, "AmendmentGuidance": AmendmentGuidance, "CharterGuidance": CharterGuidance} {
 		requireNoSkill(t, name, text)
 	}

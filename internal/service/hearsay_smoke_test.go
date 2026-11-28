@@ -256,10 +256,10 @@ func TestHearsaySmokeRun(t *testing.T) {
 	f.ask(stream, "1", "Is the upload cap 10 MiB or unbounded?", hr(1))
 	f.escalate(stream, "1", "Is the upload cap 10 MiB or unbounded?", hr(2))
 	f.ruling(stream, "1", 1, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Cap uploads at 10 MiB."}, hr(3), trace.Actor{Kind: "owner", ID: "local"})
-	f.ruling(stream, "1", 2, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Cap uploads at 10 MiB.", ReturnedAnswer: "RELAYED-TO-THE-ASKERS", Scope: trace.ScopeLocal}, hr(4), chiefActor)
+	f.ruling(stream, "1", 2, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Cap uploads at 10 MiB.", ReturnedAnswer: "RELAYED-TO-THE-ASKERS", Scope: trace.ScopeLocal}, hr(4), managerActor)
 	const assumption = "Treat the 10 MiB cap as inclusive."
-	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":%q,"actor":{"kind":"agent","id":"chief_of_staff"},"thread":"chief","turn":"t1","at":%q}]}`, string(stream), assumption, hr(5).Format(time.RFC3339))
-	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(5), chiefActor)
+	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":%q,"actor":{"kind":"agent","id":"`+trace.Manager+`"},"thread":"manager","turn":"t1","at":%q}]}`, string(stream), assumption, hr(5).Format(time.RFC3339))
+	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(5), managerActor)
 
 	res, err := f.s.publishPass(context.Background(), f.repo, f.s.current())
 	fixturekit.Must(t, err)
@@ -311,7 +311,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 			assumptionPost = &sent[i]
 		}
 	}
-	if assumptionPost == nil || assumptionPost.Source != smokeWork || assumptionPost.Author != "" || assumptionPost.Decider != "chief_of_staff" {
+	if assumptionPost == nil || assumptionPost.Source != smokeWork || assumptionPost.Author != "" || assumptionPost.Decider != trace.Manager {
 		t.Errorf("the assumption was not posted on the work source without an author: %+v", assumptionPost)
 	}
 	for _, p := range sent {
@@ -319,7 +319,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 			t.Errorf("an owner-source decision beyond the ruling was posted: %v", p.Raw)
 		}
 		if strings.Contains(fmt.Sprint(p.Raw), "RELAYED-TO-THE-ASKERS") {
-			t.Errorf("the chief's relay was posted: %v", p.Raw)
+			t.Errorf("the manager's relay was posted: %v", p.Raw)
 		}
 		if p.Kind != "project" && p.Repos != nil {
 			t.Errorf("%s carries repos: %v", p.Kind, p.Raw)
@@ -380,7 +380,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 	}
 	readLog.take()
 
-	roles := []struct{ role, class string }{{"mason", "worker"}, {"chief_of_staff", "orchestrator"}, {sessionRole, "observer"}}
+	roles := []struct{ role, class string }{{"mason", "worker"}, {trace.Manager, "orchestrator"}, {sessionRole, "observer"}}
 	for _, r := range roles {
 		name := r.class
 		names := map[string]bool{}
@@ -418,7 +418,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 		if g := got[string(stream)+"-ruling-1"]; g != (smokeLogged{"ratified", "owner", "current", "Cap uploads at 10 MiB."}) {
 			t.Errorf("%s: the ruling is served as %+v", name, g)
 		}
-		if g := got[assumptionID]; g != (smokeLogged{"inferred", "chief_of_staff", "current", assumption}) {
+		if g := got[assumptionID]; g != (smokeLogged{"inferred", trace.Manager, "current", assumption}) {
 			t.Errorf("%s: the assumption is served as %+v", name, g)
 		}
 		if len(got) != 2 {

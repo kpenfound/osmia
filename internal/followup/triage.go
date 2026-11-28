@@ -12,8 +12,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// TriageDocumentID and TriagePath name the document that records the chief of
-// staff's triage of a final review's blocking findings. Each revision holds
+// TriageDocumentID and TriagePath name the document that records the manager's
+// triage of a final review's blocking findings. Each revision holds
 // every decision recorded so far.
 const (
 	TriageDocumentID = "final-triage"
@@ -38,7 +38,7 @@ type Triage struct {
 	// and why it is mistaken or not worth building for one left to the owner.
 	Note string `json:"note"`
 	Turn string `json:"turn,omitempty"`
-	// DecidedBy is empty for the chief of staff's own decision, or
+	// DecidedBy is empty for the manager's own decision, or
 	// trace.DecidedByJev with the Jev judgment record it comes from.
 	DecidedBy string `json:"decided_by,omitempty"`
 	Judgment  string `json:"judgment,omitempty"`
@@ -90,7 +90,7 @@ func TriageOf(repo *trace.Repository, stream config.WorkstreamID, review int, fi
 
 // RecordTriage records the decision on a finding as a new revision of the
 // triage document. It is refused for a finding already decided. A decision Jev
-// made is written by the Jev actor, any other by the chief of staff.
+// made is written by the Jev actor, any other by the manager.
 func RecordTriage(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, t Triage, at time.Time) error {
 	if t.Outcome != TriageCode && t.Outcome != TriageOwner {
 		return fmt.Errorf("a triage outcome is %s or %s", TriageCode, TriageOwner)
@@ -105,7 +105,7 @@ func RecordTriage(ctx context.Context, repo *trace.Repository, stream config.Wor
 	if slices.ContainsFunc(all, func(x Triage) bool { return x.Review == t.Review && x.Finding == t.Finding }) {
 		return fmt.Errorf("finding %s of final review %d is already triaged", t.Finding, t.Review)
 	}
-	actor := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	actor := trace.Actor{Kind: "agent", ID: trace.Manager}
 	if t.ByJev() {
 		actor = trace.JevActor
 	}
@@ -159,5 +159,5 @@ func Carry(ctx context.Context, repo *trace.Repository, stream config.Workstream
 			next[i].Amendment = amendment
 		}
 	}
-	return write(ctx, repo, stream, next, revision+1, trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}, "amendment-"+amendment, at)
+	return write(ctx, repo, stream, next, revision+1, trace.Actor{Kind: "agent", ID: trace.Manager}, "amendment-"+amendment, at)
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/redact"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // PublisherToken reads the publisher agent's token from its configured
@@ -38,7 +39,7 @@ func PublisherToken(h config.Hearsay, lookup func(string) string) string {
 // Class maps Osmia roles to Hearsay's grant classes.
 func Class(role string) string {
 	switch role {
-	case "chief_of_staff":
+	case trace.Manager:
 		return "orchestrator"
 	case "architect", "committee", "mason", "reviewer":
 		return "worker"

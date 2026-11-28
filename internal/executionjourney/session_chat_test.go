@@ -344,7 +344,7 @@ func TestSessionStopKeepsWorktreeChangesAndReturnsIdle(t *testing.T) {
 	}
 }
 
-func TestSessionTurnInterruptedByRestartIsRecoveredLikeAChiefOfStaffTurn(t *testing.T) {
+func TestSessionTurnInterruptedByRestartIsRecoveredLikeAManagerTurn(t *testing.T) {
 	t.Parallel()
 	s, c, project, stream, engine, _ := newSessionChatFixture(t)
 	root := s.Cfg.Root.String()
@@ -655,7 +655,7 @@ func newConfinementFixture(t *testing.T) (*journey.Service, *journey.Client, con
 	return s, c, added.Project.ID, engine
 }
 
-func confinementChiefTurn(t *testing.T, s *journey.Service, c *journey.Client, engine *confinementEngine) (resume, prompt string) {
+func confinementManagerTurn(t *testing.T, s *journey.Service, c *journey.Client, engine *confinementEngine) (resume, prompt string) {
 	t.Helper()
 	repository := s.Sole().Repository
 	streams, err := repository.Workstreams()
@@ -666,21 +666,21 @@ func confinementChiefTurn(t *testing.T, s *journey.Service, c *journey.Client, e
 	engine.mu.Lock()
 	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		if req.ResumeID != "" {
-			t.Errorf("chief-of-staff first turn asked to resume %q", req.ResumeID)
+			t.Errorf("manager first turn asked to resume %q", req.ResumeID)
 		}
-		return &agent.Result{ClaudeID: "chief-session-1", ResultText: "First chief reply"}, nil
+		return &agent.Result{ClaudeID: "manager-session-1", ResultText: "First manager reply"}, nil
 	}
 	engine.mu.Unlock()
-	_, err = c.Send(context.Background(), other, "first chief message")
+	_, err = c.Send(context.Background(), other, "first manager message")
 	fixturekit.Must(t, err)
 	awaitConversationOn(t, c, other, func(l api.ConversationResponse) bool { return len(l.Entries) == 2 })
 	engine.mu.Lock()
 	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		resume, prompt = req.ResumeID, req.Prompt
-		return &agent.Result{ClaudeID: "chief-session-1", ResultText: "Second chief reply"}, nil
+		return &agent.Result{ClaudeID: "manager-session-1", ResultText: "Second manager reply"}, nil
 	}
 	engine.mu.Unlock()
-	_, err = c.Send(context.Background(), other, "second chief message")
+	_, err = c.Send(context.Background(), other, "second manager message")
 	fixturekit.Must(t, err)
 	awaitConversationOn(t, c, other, func(l api.ConversationResponse) bool { return len(l.Entries) == 4 })
 	return resume, prompt
@@ -714,18 +714,18 @@ func TestResumeConfinedToSessionTurns(t *testing.T) {
 		t.Fatalf("the session's own second turn did not resume through the heuristic fallback: %q", sessionResumed)
 	}
 
-	chiefResume, chiefPrompt := confinementChiefTurn(t, s, c, engine)
-	if chiefResume != "" {
-		t.Fatalf("a chief-of-staff turn resumed although only the session role may: %q", chiefResume)
+	managerResume, managerPrompt := confinementManagerTurn(t, s, c, engine)
+	if managerResume != "" {
+		t.Fatalf("a manager turn resumed although only the session role may: %q", managerResume)
 	}
-	if !strings.Contains(chiefPrompt, "second chief message") {
-		t.Fatalf("chief-of-staff turn input: %q", chiefPrompt)
+	if !strings.Contains(managerPrompt, "second manager message") {
+		t.Fatalf("manager turn input: %q", managerPrompt)
 	}
 
 	s2, c2, _, engine2 := newConfinementFixture(t)
-	_, basePrompt := confinementChiefTurn(t, s2, c2, engine2)
-	if normalizeReplayPrompt(basePrompt) != normalizeReplayPrompt(chiefPrompt) {
-		t.Fatalf("chief-of-staff turn input with a session present %q, without one %q", chiefPrompt, basePrompt)
+	_, basePrompt := confinementManagerTurn(t, s2, c2, engine2)
+	if normalizeReplayPrompt(basePrompt) != normalizeReplayPrompt(managerPrompt) {
+		t.Fatalf("manager turn input with a session present %q, without one %q", managerPrompt, basePrompt)
 	}
 }
 
@@ -774,7 +774,7 @@ func runLandingWithSession(t *testing.T, withSession bool) (masonResume, masonPr
 		masonResume, masonPrompt = req.ResumeID, req.Prompt
 		return masons.Turn(ctx, req, verified, tools)
 	}
-	chiefFallback := f.Engine.Turns["*"]
+	managerFallback := f.Engine.Turns["*"]
 	var sessionResumeIDs []string
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, "message_") {
@@ -784,7 +784,7 @@ func runLandingWithSession(t *testing.T, withSession bool) (masonResume, masonPr
 		if strings.HasPrefix(req.Name, intake.ReviewerAgent("resume")+"-review-") {
 			reviewResume, reviewPrompt = req.ResumeID, req.Prompt
 		}
-		return chiefFallback(ctx, req, verified, tools)
+		return managerFallback(ctx, req, verified, tools)
 	}
 	f.Engine.Mu.Unlock()
 
@@ -823,7 +823,7 @@ func TestResumeRoleGateCoversEveryRole(t *testing.T) {
 		t.Fatal("no resumable-roles gate is configured")
 	}
 	for role, want := range map[string]bool{
-		service.SessionAgentID: true, trace.ChiefOfStaff: false, intake.MasonRole: false, intake.ReviewerRole: false,
+		service.SessionAgentID: true, trace.Manager: false, intake.MasonRole: false, intake.ReviewerRole: false,
 	} {
 		if got := d.Runner.ResumableRoles(role); got != want {
 			t.Errorf("ResumableRoles(%q) = %v, want %v", role, got, want)

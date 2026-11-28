@@ -20,7 +20,7 @@ func TestRoutedAmendmentFreesSlotForAnotherUnit(t *testing.T) {
 	t.Parallel()
 	f, masons := journey.NewParallelMasonFixture(t, 1, 1, journey.ParallelPlan)
 	defer f.Stop(t)
-	masons.Chief.Route("1", []string{"spec#1", "plan#resume"}, "Clarify restart state", "The task needs another state")
+	masons.Manager.Route("1", []string{"spec#1", "plan#resume"}, "Clarify restart state", "The task needs another state")
 	masons.Play[execution.MasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		listed, err := tools.ListTools(ctx, nil)
 		if err != nil {
@@ -50,7 +50,7 @@ func TestRoutedAmendmentFreesSlotForAnotherUnit(t *testing.T) {
 		t.Fatalf("entangled unit state %q: %v", state, err)
 	}
 	var requests []trace.Amendment
-	f.S.Until(t, "the chief of staff to route the question", func() bool {
+	f.S.Until(t, "the manager to route the question", func() bool {
 		var err error
 		requests, err = trace.Read[trace.Amendment](f.Repository(), stream)
 		if err != nil {
@@ -61,7 +61,7 @@ func TestRoutedAmendmentFreesSlotForAnotherUnit(t *testing.T) {
 	if len(requests) != 1 {
 		t.Fatalf("requests %+v", requests)
 	}
-	if requests[0].Unit != "resume" || requests[0].Role != trace.ChiefOfStaff || requests[0].Requester.ID != intake.MasonAgent("resume") || requests[0].QuestionID != "1" {
+	if requests[0].Unit != "resume" || requests[0].Role != trace.Manager || requests[0].Requester.ID != intake.MasonAgent("resume") || requests[0].QuestionID != "1" {
 		t.Fatalf("request %+v", requests[0])
 	}
 	masons.Check(t)

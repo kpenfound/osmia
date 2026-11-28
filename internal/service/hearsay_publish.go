@@ -399,7 +399,7 @@ func (st *publishStream) sealRatifiers(numbers []int, latest map[int]trace.Docum
 		by, ok := st.amendmentDeciderOf(id)
 		switch {
 		case !ok:
-		case by == byChief:
+		case by == byManager:
 			inherits[a.To.Seal] = true
 		default:
 			byAmendment[a.To.Seal] = by
@@ -410,7 +410,7 @@ func (st *publishStream) sealRatifiers(numbers []int, latest map[int]trace.Docum
 	for _, n := range numbers {
 		by := byOwner
 		switch {
-		case byAmendment[n] != byChief:
+		case byAmendment[n] != byManager:
 			by = byAmendment[n]
 		case inherits[n]:
 			by = previous

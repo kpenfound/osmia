@@ -12,12 +12,12 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestEventDeliveryRechecksChiefTransferredAfterResolution(t *testing.T) {
+func TestEventDeliveryRechecksManagerTransferredAfterResolution(t *testing.T) {
 	t.Parallel()
 	for _, transfer := range []bool{true, false} {
-		name := "unexplained-missing-chief"
+		name := "unexplained-missing-manager"
 		if transfer {
-			name = "transferred-chief"
+			name = "transferred-manager"
 		}
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
@@ -31,7 +31,7 @@ func TestEventDeliveryRechecksChiefTransferredAfterResolution(t *testing.T) {
 			defer wt.Close()
 			f.notify(t, repo, "join-notice")
 			f.clock.Advance(time.Minute)
-			d, err := New(repo, Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil }, ChiefTarget: func(context.Context, config.WorkstreamID) (*trace.Repository, func(), error) {
+			d, err := New(repo, Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil }, ManagerTarget: func(context.Context, config.WorkstreamID) (*trace.Repository, func(), error) {
 				id, err := repo.CrossRepoWorkgroupOf(stream)
 				if err != nil {
 					return nil, func() {}, err
@@ -44,18 +44,18 @@ func TestEventDeliveryRechecksChiefTransferredAfterResolution(t *testing.T) {
 			must(t, err)
 			fired := false
 			d.boundary = func(step string) error {
-				if step != "chief-target-resolved" || fired {
+				if step != "manager-target-resolved" || fired {
 					return nil
 				}
 				fired = true
 				if transfer {
 					return repo.JoinCrossRepoWorkgroup(ctx, stream, g.ID, f.clock.Now(), owner, "draft-workgroup")
 				}
-				return repo.RetractChiefOfStaff(ctx, stream)
+				return repo.RetractManager(ctx, stream)
 			}
 			err = d.Pass(ctx)
 			if !fired {
-				t.Fatal("delivery did not resolve its chief")
+				t.Fatal("delivery did not resolve its manager")
 			}
 			if !transfer {
 				if !errors.Is(err, os.ErrNotExist) {
@@ -70,15 +70,15 @@ func TestEventDeliveryRechecksChiefTransferredAfterResolution(t *testing.T) {
 				t.Fatalf("transfer lost its retryable event: %+v", out)
 			}
 			must(t, d.Pass(ctx))
-			chief, err := wt.ChiefOfStaffThread(stream)
+			manager, err := wt.ManagerThread(stream)
 			must(t, err)
-			if len(chief.Turns) != 1 {
-				t.Fatalf("shared delivery count = %d", len(chief.Turns))
+			if len(manager.Turns) != 1 {
+				t.Fatalf("shared delivery count = %d", len(manager.Turns))
 			}
 			must(t, d.Pass(ctx))
-			chief, err = wt.ChiefOfStaffThread(stream)
+			manager, err = wt.ManagerThread(stream)
 			must(t, err)
-			if len(chief.Turns) != 1 {
+			if len(manager.Turns) != 1 {
 				t.Fatal("shared delivery repeated")
 			}
 		})

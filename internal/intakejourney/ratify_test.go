@@ -55,10 +55,10 @@ func TestPacketPresentsTheDecisionAndTheOverruleUnblocksIt(t *testing.T) {
 		t.Fatalf("notice %q, want %q", notice, intake.Presentation(blocked)+intake.DecideFirst(packet.Dissent))
 	}
 	if entries := f.InboxEntries(t, stream, api.InboxRatification); len(entries) != 0 {
-		t.Fatalf("inbox entries before the chief of staff decided %+v", entries)
+		t.Fatalf("inbox entries before the manager decided %+v", entries)
 	}
-	f.ChiefDecides(t, stream, veto, shed.Escalate, "The veto cites a rule the plan may break.")
-	f.ChiefDecides(t, stream, advice, shed.Escalate, "The plan order is a judgement call.")
+	f.ManagerDecides(t, stream, veto, shed.Escalate, "The veto cites a rule the plan may break.")
+	f.ManagerDecides(t, stream, advice, shed.Escalate, "The plan order is a judgement call.")
 	_, presented := f.AwaitDecided(t, stream)
 
 	if entries := f.InboxEntries(t, stream, api.InboxRatification); len(entries) != 1 || entries[0].Revision != presented || entries[0].Recommendation != blocked || entries[0].Options == nil || len(entries[0].Options) != 0 ||
@@ -335,7 +335,7 @@ func TestSketchedWorkstreamIsNotRatified(t *testing.T) {
 	if !slices.ContainsFunc(outbox, func(e trace.OutboxEntry) bool {
 		return e.TransitionID == intake.SkipTransition && strings.Contains(e.Event.Body, intake.Presentation("ratify: no objection stands"))
 	}) {
-		t.Fatalf("the chief of staff was not told of the skipped debate: %+v", outbox)
+		t.Fatalf("the manager was not told of the skipped debate: %+v", outbox)
 	}
 	content := fixturekit.HandedDesign
 	out, err := f.C.HandIn(ctx, api.HandInRequest{Project: f.Project, Key: "design", Stdin: &content})

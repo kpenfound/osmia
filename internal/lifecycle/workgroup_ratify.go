@@ -78,12 +78,12 @@ func (d ProjectSpecDraft) ProjectSpec(members []config.WorkstreamID, content fun
 // workstreams, one per repo, each already handed into its own active
 // project. It records on each member's own trace a locator pointing to the
 // workgroup, and returns its ID. This call only creates the workgroup and
-// its shared chief-of-staff thread; drafting its project spec starts once
+// its shared manager thread; drafting its project spec starts once
 // every member is sketched.
 //
 // Readiness is checked for every member before anything is written: a
 // member may point at no cross-repo workgroup other than the one this call
-// is resuming, and may carry no chief-of-staff turn of its own, so a
+// is resuming, and may carry no manager turn of its own, so a
 // refusal leaves nothing recorded on any member.
 //
 // A retry after an interruption between members reopens the workgroup
@@ -142,12 +142,12 @@ func (s *Controller) DraftWorkgroup(ctx context.Context, members []config.Workst
 		if group, ok := trace.WorkgroupOf(groups, m.Workstream); ok && len(group.Members) != 1 {
 			return "", &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s already belongs to a multi-member local workgroup", m.Workstream)}
 		}
-		th, err := m.Project.ChiefOfStaffThread(m.Workstream)
+		th, err := m.Project.ManagerThread(m.Workstream)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the chief-of-staff thread of workstream %s: %v", m.Workstream, err)}
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the manager thread of workstream %s: %v", m.Workstream, err)}
 		}
 		if err == nil && len(th.Turns) > 0 {
-			return "", &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s already has chief-of-staff turns of its own; it cannot join a cross-repo workgroup", m.Workstream)}
+			return "", &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s already has manager turns of its own; it cannot join a cross-repo workgroup", m.Workstream)}
 		}
 	}
 	var wt *trace.Repository
@@ -233,7 +233,7 @@ func (s *Controller) DraftWorkgroup(ctx context.Context, members []config.Workst
 			return "", &APIError{Code: Internal, Message: err.Error()}
 		}
 		if err := m.Project.JoinCrossRepoWorkgroup(ctx, m.Workstream, g.ID, s.Now(), ownerActor, "draft-workgroup"); err != nil {
-			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot join workstream %s to the shared chief: %v", m.Workstream, err)}
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot join workstream %s to the shared manager: %v", m.Workstream, err)}
 		}
 		if err := s.Step("workgroup-member-routed"); err != nil {
 			return "", &APIError{Code: Internal, Message: err.Error()}
@@ -434,7 +434,7 @@ func projectSpecDraftStopped(wt *trace.Repository, host config.WorkstreamID, tur
 	return false, nil
 }
 
-// ReportProjectSpecDraftFailure tells the chief of staff, through the
+// ReportProjectSpecDraftFailure tells the manager, through the
 // workgroup leader's own events, that the workgroup's project spec draft was
 // refused failures times in a row and that the next draft waits for its
 // request. guarded is true for a contract redraft of a recorded project spec,
@@ -447,9 +447,9 @@ func (s *Controller) ReportProjectSpecDraftFailure(ctx context.Context, members 
 	return s.NoticeWorkgroupLeader(ctx, members, failure.ID+"-reported", failure.ID, failure.Reason, body)
 }
 
-// ReportProjectSpecDraftRecorded tells the chief of staff, through the
+// ReportProjectSpecDraftRecorded tells the manager, through the
 // workgroup leader's own events, that the latest project spec draft is
-// recorded, when the chief was told that the drafts before it were refused.
+// recorded, when the manager was told that the drafts before it were refused.
 // It is recorded once per recorded draft.
 func (s *Controller) ReportProjectSpecDraftRecorded(ctx context.Context, wt *trace.Repository, host config.WorkstreamID, members []trace.CrossRepoMember) error {
 	transitions, err := trace.Read[trace.Transition](wt, host)
@@ -504,19 +504,19 @@ func WorkgroupLeaderOf(members []trace.CrossRepoMember) (config.WorkstreamID, *t
 	return leader, members[i].Project
 }
 
-// NoticeWorkgroupLeader writes body as a notice for the chief of staff to the
+// NoticeWorkgroupLeader writes body as a notice for the manager to the
 // workgroup leader's own events, which the event delivery path carries to the
 // shared thread. id identifies the notice: the leader's trace keeps it as the
 // state of the project spec drafting subject, and it is written once.
 func (s *Controller) NoticeWorkgroupLeader(ctx context.Context, members []trace.CrossRepoMember, id, cause, reason, body string) error {
 	leader, repo := WorkgroupLeaderOf(members)
-	return s.NoticeChief(ctx, repo, leader, ProjectSpecDraftSubject, id, cause, reason, body, ProjectSpecDraftActor)
+	return s.NoticeManager(ctx, repo, leader, ProjectSpecDraftSubject, id, cause, reason, body, ProjectSpecDraftActor)
 }
 
-// NoticeChief writes body as a notice for the chief of staff to stream's own
+// NoticeManager writes body as a notice for the manager to stream's own
 // events with a transition of subject to id, once: a notice whose transition
 // is recorded is not written again.
-func (s *Controller) NoticeChief(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, subject, id, cause, reason, body string, by trace.Actor) error {
+func (s *Controller) NoticeManager(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, subject, id, cause, reason, body string, by trace.Actor) error {
 	transitions, err := trace.Read[trace.Transition](repo, stream)
 	if err != nil {
 		return err
@@ -530,7 +530,7 @@ func (s *Controller) NoticeChief(ctx context.Context, repo *trace.Repository, st
 	}
 	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: s.Now(), Actor: by, Cause: cause}, Subject: subject, From: state.Value, To: id, Reason: reason},
-		Events:     []trace.Event{trace.Notice(id, "chief", body)}})
+		Events:     []trace.Event{trace.Notice(id, trace.ManagerKey, body)}})
 	if errors.Is(err, trace.ErrConflict) {
 		return nil
 	}
@@ -650,7 +650,7 @@ func (s *Controller) RequestProjectSpecDraftAgain(ctx context.Context, id config
 	return "the architect drafts the workgroup spec again with your note on the next service pass; each member's committee review starts once it is recorded", nil
 }
 
-// RequestProjectSpecDraft creates the workgroup's shared chief-of-staff
+// RequestProjectSpecDraft creates the workgroup's shared manager
 // thread's architect counterpart if missing, and records the drafting
 // transition with the turn's pinned input. by is the service for a draft it
 // asks for on its own, or whoever asked for another draft with a note.

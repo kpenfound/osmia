@@ -20,13 +20,13 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 	if api != nil {
 		return FeedResponse{}, api
 	}
-	chief, _, _, closeChief, err := s.chiefRepositoryForRead(context.Background(), repository, stream)
+	manager, _, _, closeManager, err := s.managerRepositoryForRead(context.Background(), repository, stream)
 	if err != nil {
 		return FeedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
 	}
-	defer closeChief()
+	defer closeManager()
 	entries, err := readview.Consistent(func() ([]FeedEntry, error) {
-		out, err := FeedEntries(repository, chief, stream)
+		out, err := FeedEntries(repository, manager, stream)
 		if err != nil {
 			return nil, err
 		}
@@ -37,14 +37,14 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 		out = append(out, recoveries...)
 		slices.SortStableFunc(out, func(a, b FeedEntry) int { return a.At.Compare(b.At) })
 		return out, nil
-	}, repository.Generation, chief.Generation)
+	}, repository.Generation, manager.Generation)
 	if err != nil {
 		return FeedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the feed of workstream %s; check the trace repository", stream)}
 	}
 	return FeedResponse{Workstream: stream, Entries: entries}, nil
 }
 
-func FeedEntries(repository, chief *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
+func FeedEntries(repository, manager *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
 	group, err := paneWorkgroup(repository, stream)
 	if err != nil {
 		return nil, err
@@ -52,7 +52,7 @@ func FeedEntries(repository, chief *trace.Repository, stream config.WorkstreamID
 	shared := group != nil && len(group.Members) > 1
 	out := []FeedEntry{}
 	if !shared {
-		out, err = chiefFeedEntries(chief, stream)
+		out, err = managerFeedEntries(manager, stream)
 		if err != nil {
 			return nil, err
 		}
@@ -65,14 +65,14 @@ func FeedEntries(repository, chief *trace.Repository, stream config.WorkstreamID
 		if router.IsJournal(t.Subject) {
 			continue
 		}
-		out = append(out, FeedEntry{Kind: "transition", At: t.At, Transition: &api.FeedTransition{Subject: t.Subject, Unit: t.Unit, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + t.Actor.ID, Reason: t.Reason, DecidedBy: t.DecidedBy, Judgment: t.Judgment, DefaultTo: t.DefaultTo, Departed: t.Departed()}})
+		out = append(out, FeedEntry{Kind: "transition", At: t.At, Transition: &api.FeedTransition{Subject: t.Subject, Unit: t.Unit, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + trace.DisplayRole(t.Actor.ID), Reason: t.Reason, DecidedBy: trace.DisplayRole(t.DecidedBy), Judgment: t.Judgment, DefaultTo: t.DefaultTo, Departed: t.Departed()}})
 	}
 	threads, err := repository.Threads(stream)
 	if err != nil {
 		return nil, err
 	}
 	for _, th := range threads {
-		if shared && (trace.ChiefLike(th.Identity.ID) || trace.ChiefLike(th.Identity.Role)) {
+		if shared && (trace.ManagerLike(th.Identity.ID) || trace.ManagerLike(th.Identity.Role)) {
 			continue
 		}
 		for _, q := range th.Turns {
@@ -127,8 +127,8 @@ func briefEntries(repository *trace.Repository, stream config.WorkstreamID) ([]F
 	return out, nil
 }
 
-func chiefFeedEntries(chief *trace.Repository, stream config.WorkstreamID, earlier ...[][]ConversationEntry) ([]FeedEntry, error) {
-	conversation, err := ConversationEntries(chief, stream, earlier...)
+func managerFeedEntries(manager *trace.Repository, stream config.WorkstreamID, earlier ...[][]ConversationEntry) ([]FeedEntry, error) {
+	conversation, err := ConversationEntries(manager, stream, earlier...)
 	if err != nil {
 		return nil, err
 	}
@@ -136,11 +136,11 @@ func chiefFeedEntries(chief *trace.Repository, stream config.WorkstreamID, earli
 	for _, e := range conversation {
 		out = append(out, FeedEntry{Kind: e.Kind, At: e.At, Turn: e.Turn, Text: e.Text, State: e.State, QueuedReason: e.QueuedReason})
 	}
-	host, err := chief.ChiefOfStaffHost(stream)
+	host, err := manager.ManagerHost(stream)
 	if err != nil {
 		return nil, err
 	}
-	statuses, err := trace.Read[trace.Status](chief, host)
+	statuses, err := trace.Read[trace.Status](manager, host)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +151,7 @@ func chiefFeedEntries(chief *trace.Repository, stream config.WorkstreamID, earli
 }
 
 func feedSession(th trace.Thread, q trace.QueuedTurn) *FeedSession {
-	out := &FeedSession{Agent: th.Identity.ID, Role: th.Identity.Role, Unit: string(q.Request.Unit), Turn: q.Request.TurnID, Profile: q.Request.Profile.Name, StartedAt: q.Claim.At}
+	out := &FeedSession{Agent: trace.DisplayRole(th.Identity.ID), Role: trace.DisplayRole(th.Identity.Role), Unit: string(q.Request.Unit), Turn: q.Request.TurnID, Profile: q.Request.Profile.Name, StartedAt: q.Claim.At}
 	if n := len(q.Attempts); n > 0 {
 		out.Profile = q.Attempts[n-1].Profile.Name
 	}

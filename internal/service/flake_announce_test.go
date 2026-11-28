@@ -95,7 +95,7 @@ func (l *flakeFixLive) awaitEntry(t *testing.T, o flakes.Occurrence) trace.Trans
 
 func (l *flakeFixLive) decide(t *testing.T, stream config.WorkstreamID, name, input string) flakeFixAnswer {
 	t.Helper()
-	a := callFlakeFix(t, l.chief(t, stream, name), input)
+	a := callFlakeFix(t, l.manager(t, stream, name), input)
 	if a.refused() {
 		t.Fatalf("the flake_fix tool refused %s: %+v", input, a)
 	}
@@ -149,9 +149,9 @@ func (l *flakeFixLive) settledFootprint(t *testing.T, target config.WorkstreamID
 
 func TestFlakeDecisionIsAnnouncedAfterAMissedWrite(t *testing.T) {
 	t.Parallel()
-	for _, decision := range []string{"opened", "declined", "joined by the recorder", "joined by the chief"} {
+	for _, decision := range []string{"opened", "declined", "joined by the recorder", "joined by the manager"} {
 		for _, how := range []string{"write fails", "service restarts"} {
-			if decision == "joined by the chief" && how == "service restarts" {
+			if decision == "joined by the manager" && how == "service restarts" {
 				continue
 			}
 			t.Run(decision+"/"+how, func(t *testing.T) {
@@ -186,7 +186,7 @@ func TestFlakeDecisionIsAnnouncedAfterAMissedWrite(t *testing.T) {
 					run := recordUnitFlakyRun(t, l.repository(), l.stream, "extra", 1, flakyTraceOther)
 					decided = l.awaitState(t, l.occurrence(t, l.stream, run), flakes.Joined)
 					target, reasonPart = want, string(want)
-				case "joined by the chief":
+				case "joined by the manager":
 					run := recordUnitFlakyRun(t, l.repository(), l.stream, "extra", 1, flakyTraceOther)
 					second := l.occurrence(t, l.stream, run)
 					l.awaitNoticeOf(t, l.stream, second.ID)
@@ -220,7 +220,7 @@ func TestFlakeDecisionIsAnnouncedAfterAMissedWrite(t *testing.T) {
 				}
 
 				entry := l.awaitEntry(t, decided)
-				if entry.To != strings.Fields(decision)[0] || !strings.Contains(entry.Reason, reasonPart) || entry.Actor != chiefActor || !strings.Contains(entry.Reason, decided.ID) {
+				if entry.To != strings.Fields(decision)[0] || !strings.Contains(entry.Reason, reasonPart) || entry.Actor != managerActor || !strings.Contains(entry.Reason, decided.ID) {
 					t.Fatalf("the decision entry: %+v", entry)
 				}
 				intakefixture.Soon(t, "the announcement of "+decided.ID+" to be marked", func() bool {
@@ -486,13 +486,13 @@ func TestFlakeJoinedDecisionOfAnOwnerArchivedOriginStillSurfacesToTheOpenWorkstr
 	if _, err := a.l.c.Archive(ctx, a.other); err != nil {
 		t.Fatal(err)
 	}
-	if archive := a.awaitCleaned(t); archive.Actor == runtime.ArchiveActorChief {
+	if archive := a.awaitCleaned(t); archive.Actor == runtime.ArchiveActorManager {
 		t.Fatalf("archive %+v", archive)
 	}
 	a.recovers(t, api.ArchivedByOwner, "the owner")
 }
 
-func TestFlakeDecisionOfAWorkstreamTheChiefArchivedOnMergeClosesAsMoot(t *testing.T) {
+func TestFlakeDecisionOfAWorkstreamTheManagerArchivedOnMergeClosesAsMoot(t *testing.T) {
 	t.Parallel()
 	a := newArchivedOrigin(t, "flake-announce-merge-archive")
 	repo := a.l.repository()
@@ -500,13 +500,13 @@ func TestFlakeDecisionOfAWorkstreamTheChiefArchivedOnMergeClosesAsMoot(t *testin
 	fixturekit.ResolutionDocument(t, repo, a.other, delivery.OwnPullRequestOutcomeDocument, delivery.OwnPullRequestOutcomePath,
 		delivery.OwnPullRequestOutcome{PullRequest: 7, Outcome: delivery.OwnPullRequestOutcomeMerged, MergeCommit: "merge-commit"}, time.Now().UTC(), ownerActor)
 	archive := a.awaitCleaned(t)
-	if archive.Actor != runtime.ArchiveActorChief || archivedBy(archive) != api.ArchivedByChief {
-		t.Fatalf("archive %+v, want the chief of staff's archive-on-merge", archive)
+	if archive.Actor != runtime.ArchiveActorManager || archivedBy(archive) != api.ArchivedByManager {
+		t.Fatalf("archive %+v, want the manager's archive-on-merge", archive)
 	}
 	if n := len(flakeSurfacings(t, a.l.repository(), a.want)); n != 0 {
 		t.Fatalf("%d surfacings before reconciliation was allowed", n)
 	}
-	a.recovers(t, api.ArchivedByChief, "the chief of staff")
+	a.recovers(t, trace.Manager, "the manager")
 }
 
 // While announcements fail, the originating workstream's units and transitions

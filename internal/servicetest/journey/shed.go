@@ -294,8 +294,8 @@ func (f *ShedFixture) StillInShed(t *testing.T, stream config.WorkstreamID) {
 	}
 }
 
-// Concluded returns the notice the conclusion after round n told the chief of
-// staff with.
+// Concluded returns the notice the conclusion after round n told the manager
+// with.
 func (f *ShedFixture) Concluded(t *testing.T, stream config.WorkstreamID, n int) trace.OutboxEntry {
 	t.Helper()
 	id := fmt.Sprintf("shed-concluded-%d", n)
@@ -397,9 +397,9 @@ func (f *ShedFixture) RunCLI(t *testing.T, args ...string) string {
 	return out.String()
 }
 
-// ChiefDecides records the chief of staff's decision on one committee
+// ManagerDecides records the manager's decision on one committee
 // objection, as its resolve_objection tool records it.
-func (f *ShedFixture) ChiefDecides(t *testing.T, stream config.WorkstreamID, objection string, decision shed.Decide, note string) shed.Entry {
+func (f *ShedFixture) ManagerDecides(t *testing.T, stream config.WorkstreamID, objection string, decision shed.Decide, note string) shed.Entry {
 	t.Helper()
 	entry, apiErr := f.S.DecideObjection(context.Background(), f.Repository(), stream, intake.ObjectionDecisionRequest{Objection: objection, Decision: decision, Note: note, Turn: "events_1"})
 	if apiErr != nil {
@@ -409,7 +409,7 @@ func (f *ShedFixture) ChiefDecides(t *testing.T, stream config.WorkstreamID, obj
 }
 
 // AwaitDecided waits until the packet the API serves carries a decision of
-// the chief of staff or a disposition on every committee objection of its
+// the manager or a disposition on every committee objection of its
 // dissent record, and returns it with its revision.
 func (f *ShedFixture) AwaitDecided(t *testing.T, stream config.WorkstreamID) (shed.Packet, int) {
 	t.Helper()
@@ -431,12 +431,12 @@ func (f *ShedFixture) AwaitDecided(t *testing.T, stream config.WorkstreamID) (sh
 	}
 }
 
-// ChiefObjectionTool claims a chief-of-staff turn of the workstream and
+// ManagerObjectionTool claims a manager turn of the workstream and
 // returns its resolve_objection tool.
-func (f *ShedFixture) ChiefObjectionTool(t *testing.T, stream config.WorkstreamID) coreadapter.Tool {
+func (f *ShedFixture) ManagerObjectionTool(t *testing.T, stream config.WorkstreamID) coreadapter.Tool {
 	t.Helper()
 	repo := f.Repository()
-	scope := intakefixture.ClaimChiefTurn(t, repo, f.Project, stream, f.Clock.Now, intakefixture.ChiefTurnInput{
+	scope := intakefixture.ClaimManagerTurn(t, repo, f.Project, stream, f.Clock.Now, intakefixture.ManagerTurnInput{
 		Turn: "events_1", Prompt: "Debate concluded.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-events", Directory: "events",
 	})
 	controls := &RuntimeControls{}
@@ -451,12 +451,12 @@ func (f *ShedFixture) ObjectionDecided(t *testing.T, stream config.WorkstreamID,
 	jevfixture.Fallback(f.Repository(), f.Project, stream, jev.KindObjection, jev.ObjectionKey(objection))
 }
 
-// ChiefDecideTool claims a chief-of-staff turn of the workstream and returns
+// ManagerDecideTool claims a manager turn of the workstream and returns
 // the service's decide tool.
-func (f *ShedFixture) ChiefDecideTool(t *testing.T, stream config.WorkstreamID, turn string) coreadapter.Tool {
+func (f *ShedFixture) ManagerDecideTool(t *testing.T, stream config.WorkstreamID, turn string) coreadapter.Tool {
 	t.Helper()
 	repo := f.Repository()
-	scope := intakefixture.ClaimChiefTurn(t, repo, f.Project, stream, f.Clock.Now, intakefixture.ChiefTurnInput{
+	scope := intakefixture.ClaimManagerTurn(t, repo, f.Project, stream, f.Clock.Now, intakefixture.ManagerTurnInput{
 		Turn: turn, Prompt: "Debate concluded.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-" + turn, Directory: turn,
 	})
 	return service.InspectForTest(f.S.Service).DecideTool(repo, scope)
@@ -611,7 +611,7 @@ func BuiltForAmendment(t *testing.T, rounds int) (*ShedFixture, config.Workstrea
 	return f, f.BuildFixture().Amendment(t)
 }
 
-// PresentAmendment plants amendment 1 as the chief of staff presents it: the
+// PresentAmendment plants amendment 1 as the manager presents it: the
 // requester of the given role asked for it from its turn filing on unit
 // resume, which waits for it, the architect proposed spec and graph, the
 // given committee records make its first round, and packet.json revision 1

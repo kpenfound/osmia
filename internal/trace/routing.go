@@ -15,7 +15,7 @@ package trace
 //     given; Judgment names the judgment record.
 //   - DecidedByReviewer: a satisfactory reviewer verdict for the current
 //     candidate authorised the move.
-//   - DecidedByChief: the chief of staff's own move or ruling, applied as it
+//   - DecidedByManager: the manager's own move or ruling, applied as it
 //     was given.
 const (
 	DecidedByCode     = "code"
@@ -75,7 +75,7 @@ func ValidRouting(to string, r Routing) bool {
 		return r.Judgment != "" && r.DefaultTo != "" && r.DefaultTo != to
 	case DecidedByJevGate:
 		return r.Judgment != ""
-	case DecidedByOwner, DecidedByFallback, DecidedByChief:
+	case DecidedByOwner, DecidedByFallback, DecidedByManager:
 		return r.Judgment == ""
 	case DecidedByCode, DecidedByReviewer:
 		return true

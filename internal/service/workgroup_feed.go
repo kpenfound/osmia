@@ -17,7 +17,7 @@ import (
 )
 
 type workgroupFeedAuthority struct {
-	chief        *trace.Repository
+	manager      *trace.Repository
 	host, bundle config.WorkstreamID
 	members      []trace.CrossRepoMember
 	close        func()
@@ -44,9 +44,9 @@ func (s *Service) openWorkgroupFeedForRead(ctx context.Context, raw string) (wor
 }
 
 func (s *Service) openWorkgroupFeedMode(ctx context.Context, raw string, needContext bool) (workgroupFeedAuthority, *APIError) {
-	chiefRepository := s.chiefRepository
+	managerRepository := s.managerRepository
 	if !needContext {
-		chiefRepository = s.chiefRepositoryForRead
+		managerRepository = s.managerRepositoryForRead
 	}
 	id, err := config.ParseWorkgroupID(raw)
 	if err != nil {
@@ -79,11 +79,11 @@ func (s *Service) openWorkgroupFeedMode(ctx context.Context, raw string, needCon
 			if !live && needContext {
 				return workgroupFeedAuthority{}, workgroupAuthorityError(lifecycle.ErrNoLiveWorkgroupContext)
 			}
-			chief, host, bundle, close, err := chiefRepository(ctx, active.repository, group.Members[0])
+			manager, host, bundle, close, err := managerRepository(ctx, active.repository, group.Members[0])
 			if err != nil {
 				return workgroupFeedAuthority{}, workgroupAuthorityError(err)
 			}
-			return workgroupFeedAuthority{chief, host, bundle, members, close}, nil
+			return workgroupFeedAuthority{manager, host, bundle, members, close}, nil
 		}
 	}
 	for _, active := range projects {
@@ -125,21 +125,21 @@ func (s *Service) openWorkgroupFeedMode(ctx context.Context, raw string, needCon
 			if api != nil {
 				return workgroupFeedAuthority{}, workgroupAuthorityError(apiErrAsError{Api: api})
 			}
-			chief, host, bundle, close, err := chiefRepository(ctx, origin, group.Conversation.Workstream)
+			manager, host, bundle, close, err := managerRepository(ctx, origin, group.Conversation.Workstream)
 			if err != nil {
 				return workgroupFeedAuthority{}, workgroupAuthorityError(err)
 			}
-			return workgroupFeedAuthority{chief, host, bundle, members, close}, nil
+			return workgroupFeedAuthority{manager, host, bundle, members, close}, nil
 		}
 		for _, m := range members {
 			if m.Workstream != member {
 				continue
 			}
-			chief, host, bundle, close, err := chiefRepository(ctx, m.Project, member)
+			manager, host, bundle, close, err := managerRepository(ctx, m.Project, member)
 			if err != nil {
 				return workgroupFeedAuthority{}, workgroupAuthorityError(err)
 			}
-			return workgroupFeedAuthority{chief, host, bundle, members, close}, nil
+			return workgroupFeedAuthority{manager, host, bundle, members, close}, nil
 		}
 		return workgroupFeedAuthority{}, workgroupAuthorityError(errWorkgroupJoining)
 	}
@@ -147,12 +147,12 @@ func (s *Service) openWorkgroupFeedMode(ctx context.Context, raw string, needCon
 }
 
 func (s *Service) workgroupSend(ctx context.Context, raw string, req SendRequest) (ConversationEntry, *APIError) {
-	return s.sendChief(ctx, "", req, func() (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error) {
+	return s.sendManager(ctx, "", req, func() (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error) {
 		a, api := s.openWorkgroupFeed(ctx, raw)
 		if api != nil {
 			return nil, "", "", nil, apiErrAsError{Api: api}
 		}
-		return a.chief, a.host, a.bundle, a.close, nil
+		return a.manager, a.host, a.bundle, a.close, nil
 	})
 }
 
@@ -162,16 +162,16 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 		return WorkgroupFeedResponse{}, api
 	}
 	defer a.close()
-	generations := []func() uint64{a.chief.Generation, s.storeGeneration}
+	generations := []func() uint64{a.manager.Generation, s.storeGeneration}
 	for _, m := range a.members {
 		generations = append(generations, m.Project.Generation)
 	}
 	out, err := readview.Consistent(func() (WorkgroupFeedResponse, error) {
-		designed, err := s.designHistory(a.chief, a.host)
+		designed, err := s.designHistory(a.manager, a.host)
 		if err != nil {
 			return WorkgroupFeedResponse{}, err
 		}
-		entries, err := chiefFeedEntries(a.chief, a.host, designed...)
+		entries, err := managerFeedEntries(a.manager, a.host, designed...)
 		if err != nil {
 			return WorkgroupFeedResponse{}, err
 		}
@@ -179,7 +179,7 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 		for _, m := range a.members {
 			repos[m.Workstream] = m.Project.Project()
 		}
-		thread, err := a.chief.ChiefOfStaffThread(a.host)
+		thread, err := a.manager.ManagerThread(a.host)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return WorkgroupFeedResponse{}, err
 		}
@@ -218,10 +218,10 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 			}
 			entries = append(entries, FeedEntry{Kind: e.Kind, At: e.At, Turn: e.Turn, Text: e.Text, State: e.State, Workstream: member, Repo: repos[member]})
 		}
-		if _, err := chiefActionsWithIdentity(a.chief, a.host, emit); err != nil {
+		if _, err := managerActionsWithIdentity(a.manager, a.host, emit); err != nil {
 			return WorkgroupFeedResponse{}, err
 		}
-		for _, archive := range chiefArchiveActionsOf(s.memberArchives(), func(archived runtime.Archive) bool {
+		for _, archive := range managerArchiveActionsOf(s.memberArchives(), func(archived runtime.Archive) bool {
 			return slices.Contains(workstreamsOf(a.members), archived.Workstream)
 		}) {
 			emit(archive.ConversationEntry, archive.Workstream)
@@ -236,7 +236,7 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 			if summary.Archived {
 				continue
 			}
-			if _, err := chiefActionsWithIdentity(a.chief, m.Workstream, emit); err != nil {
+			if _, err := managerActionsWithIdentity(a.manager, m.Workstream, emit); err != nil {
 				return WorkgroupFeedResponse{}, err
 			}
 			briefs, err := briefEntries(m.Project, m.Workstream)
@@ -248,7 +248,7 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 				entries = append(entries, b)
 			}
 		}
-		refs, err := trace.Read[trace.ImageReference](a.chief, a.host)
+		refs, err := trace.Read[trace.ImageReference](a.manager, a.host)
 		if err != nil {
 			return WorkgroupFeedResponse{}, err
 		}
@@ -322,7 +322,7 @@ func (s *Service) workgroupMemberSummary(m trace.CrossRepoMember) (WorkgroupMemb
 			summary.Units[u.State]++
 		}
 		for _, a := range w.Agents {
-			if !trace.ChiefLike(a.Role) && (a.State == "running" || a.State == "captured") {
+			if !trace.ManagerLike(a.Role) && (a.State == "running" || a.State == "captured") {
 				summary.Running = true
 			}
 		}
@@ -349,7 +349,7 @@ func (s *Service) workgroupMemberSummary(m trace.CrossRepoMember) (WorkgroupMemb
 const addressedNote = "The owner addressed workstream "
 
 // addressedMember reports whether the owner's message addressed a member of the
-// workgroup, and which one, from the note the chief's turn carries. The note
+// workgroup, and which one, from the note the manager's turn carries. The note
 // leads the request's context; a request saved before it moved there carries it
 // in the first line of its system prompt. The ID is empty when the note names
 // no valid workstream.

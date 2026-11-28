@@ -189,10 +189,10 @@ func TestAutoArchiveMergedWorkgroupMemberThroughBackgroundPasses(t *testing.T) {
 	fixturekit.Must(t, err)
 	journey.RecordResolutionMerge(t, second, g.Stream2)
 	g.merge(t)
-	journey.LifecycleAwait(t, g.ProductionDesignFixture, "the chief of staff archives the merged member", func() bool { _, ok := g.archive(); return ok })
+	journey.LifecycleAwait(t, g.ProductionDesignFixture, "the manager archives the merged member", func() bool { _, ok := g.archive(); return ok })
 	g.gate.Await(t)
 	a, _ := g.archive()
-	if a.Actor != runtime.ArchiveActorChief || a.State != intake.DeliveredState || a.DeliveryLink != g.pubs[0].URL || a.ResolutionEvidence != "merged" || !a.Resolved ||
+	if a.Actor != runtime.ArchiveActorManager || a.State != intake.DeliveredState || a.DeliveryLink != g.pubs[0].URL || a.ResolutionEvidence != "merged" || !a.Resolved ||
 		a.Publication.PullRequest != g.pubs[0].PullRequest || a.Publication.Branch != g.pubs[0].Branch || a.MergeCommit != "upstream-merge" || a.MergeReference != g.pubs[0].Upstream+"#101" || a.Workgroup != group.Workgroup.ID {
 		t.Fatalf("automatic archive=%+v", a)
 	}
@@ -209,20 +209,20 @@ func TestAutoArchiveMergedWorkgroupMemberThroughBackgroundPasses(t *testing.T) {
 
 	view, err := g.C.Status(ctx, g.member)
 	fixturekit.Must(t, err)
-	if !view.Archived || view.ArchivedBy != api.ArchivedByChief {
+	if !view.Archived || view.ArchivedBy != api.ArchivedByManager {
 		t.Fatalf("archived row=%+v", view)
 	}
 	list, err := g.C.Statuses(ctx)
 	fixturekit.Must(t, err)
 	for _, row := range list.Workstreams {
-		if want := row.Workstream == g.member; row.Archived != want || want && row.ArchivedBy != api.ArchivedByChief || !want && row.ArchivedBy != "" {
+		if want := row.Workstream == g.member; row.Archived != want || want && row.ArchivedBy != api.ArchivedByManager || !want && row.ArchivedBy != "" {
 			t.Fatalf("pane row=%+v", row)
 		}
 	}
 	var feed api.WorkgroupFeedResponse
 	fixturekit.Must(t, g.C.Do(ctx, "GET", api.Prefix+"/workgroups/"+string(group.Workgroup.ID)+"/feed", nil, &feed))
 	for _, m := range feed.Members {
-		if want := m.Workstream == g.member; m.Archived != want || want && m.ArchivedBy != api.ArchivedByChief {
+		if want := m.Workstream == g.member; m.Archived != want || want && m.ArchivedBy != api.ArchivedByManager {
 			t.Fatalf("member summary=%+v", m)
 		}
 	}
@@ -299,7 +299,7 @@ func TestAutoArchiveSurvivesAnInterruptionBeforeTheEntryIsVisible(t *testing.T) 
 	g.steps.hold("member-archive-recorded")
 	g.merge(t)
 	g.steps.await(t, "the committed archive")
-	if a, ok := g.archive(); !ok || a.Actor != runtime.ArchiveActorChief {
+	if a, ok := g.archive(); !ok || a.Actor != runtime.ArchiveActorManager {
 		t.Fatalf("archive before the interruption=%+v ok=%v", a, ok)
 	}
 	g.f().Stop(t)
@@ -346,7 +346,7 @@ func TestAutoArchiveAfterARestartBetweenTheMergeAndTheArchive(t *testing.T) {
 	journey.LifecycleAwait(t, g.f(), "the archive after restart", func() bool { _, ok := g.archive(); return ok })
 	g.gate.Release()
 	journey.LifecycleAwait(t, g.f(), "the member's cleanup", func() bool { a, ok := g.archive(); return ok && !a.CleanedAt.IsZero() })
-	if a, _ := g.archive(); archiveCount(g.S.Store, g.member) != 1 || a.Actor != runtime.ArchiveActorChief {
+	if a, _ := g.archive(); archiveCount(g.S.Store, g.member) != 1 || a.Actor != runtime.ArchiveActorManager {
 		t.Fatalf("archive=%+v", a)
 	}
 }
@@ -379,7 +379,7 @@ func TestAutoArchiveWritesNothingWhileAWorkgroupChangeHoldsTheArchive(t *testing
 		t.Fatalf("announced a refused archive: %+v", conversation.Entries)
 	}
 	release()
-	journey.LifecycleAwait(t, g.f(), "the archive once the hold lifts", func() bool { a, ok := g.archive(); return ok && a.Actor == runtime.ArchiveActorChief })
+	journey.LifecycleAwait(t, g.f(), "the archive once the hold lifts", func() bool { a, ok := g.archive(); return ok && a.Actor == runtime.ArchiveActorManager })
 	if archiveCount(g.S.Store, g.member) != 1 {
 		t.Fatal("the archive was duplicated")
 	}

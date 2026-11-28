@@ -102,7 +102,7 @@ var Routes = []Route{
 	{Method: http.MethodGet, Path: api.Prefix + "/design/{workstream}/conversation", Summary: "List a design session's conversation with its agent", Response: api.ConversationResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/design/{workstream}/message", Summary: "Send a message to a design session's agent; refused as busy while a turn is running", Request: api.DesignMessageRequest{}, Response: api.ConversationEntry{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/design/{workstream}/projects", Summary: "Choose projects for an unselected handed design start held after an upgrade", Request: api.ProjectSelectionRequest{}, Response: api.DesignStartResponse{}},
-	{Method: http.MethodPost, Path: api.Prefix + "/design/{workstream}/start", Summary: "Start a workgroup from a design session's drafted brief; the chief of staff opens a new thread from the brief and the design transcript", Request: api.DesignStartRequest{}, Response: api.DesignStartResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/design/{workstream}/start", Summary: "Start a workgroup from a design session's drafted brief; the manager opens a new thread from the brief and the design transcript", Request: api.DesignStartRequest{}, Response: api.DesignStartResponse{}},
 
 	{Method: http.MethodPost, Path: api.Prefix + "/handin", Summary: "Hand in work to one project or an ordered list of projects", Request: api.HandInRequest{}, Response: api.HandInResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/status", Summary: "List workstreams with capacity, usage and diagnostics", Response: api.StatusResponse{}},
@@ -119,10 +119,10 @@ var Routes = []Route{
 	{Method: http.MethodGet, Path: api.Prefix + "/documents/{workstream}", Summary: "Read a workstream's handed document, spec and plan", Response: map[string]trace.Document{}},
 	{Method: http.MethodPut, Path: api.Prefix + "/documents/{workstream}", Summary: "Save edits to a workstream's spec and plan", Request: api.DraftEdit{}, Response: map[string]trace.Document{}},
 
-	{Method: http.MethodGet, Path: api.Prefix + "/conversation/{workstream}", Summary: "List a workstream's conversation with the chief of staff", Response: api.ConversationResponse{}},
-	{Method: http.MethodPost, Path: api.Prefix + "/conversation/{workstream}", Summary: "Send a message to a workstream's chief of staff", Request: api.SendRequest{}, Response: api.ConversationEntry{}},
-	{Method: http.MethodGet, Path: api.Prefix + "/feed/{workstream}", Summary: "List member sessions, state changes, unit, final and session checks and final reviews; shared chief entries and turns are included only for single-member workgroups", Response: api.FeedResponse{}},
-	{Method: http.MethodGet, Path: api.Prefix + "/workgroups/{id}/feed", Summary: "List shared chief conversation, statuses, actions and member summaries for a single-member or multi-member workgroup", Response: api.WorkgroupFeedResponse{}},
+	{Method: http.MethodGet, Path: api.Prefix + "/conversation/{workstream}", Summary: "List a workstream's conversation with the manager", Response: api.ConversationResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/conversation/{workstream}", Summary: "Send a message to a workstream's manager", Request: api.SendRequest{}, Response: api.ConversationEntry{}},
+	{Method: http.MethodGet, Path: api.Prefix + "/feed/{workstream}", Summary: "List member sessions, state changes, unit, final and session checks and final reviews; shared manager entries and turns are included only for single-member workgroups", Response: api.FeedResponse{}},
+	{Method: http.MethodGet, Path: api.Prefix + "/workgroups/{id}/feed", Summary: "List shared manager conversation, statuses, actions and member summaries for a single-member or multi-member workgroup", Response: api.WorkgroupFeedResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/workgroups/{id}/conversation", Summary: "Durably enqueue an owner message to a single-member or multi-member workgroup without a member-address note", Request: api.SendRequest{}, Response: api.ConversationEntry{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/inbox", Summary: "List open owner decisions", Response: api.InboxResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/inbox/{number}", Summary: "Answer an inbox entry", Request: api.AnswerRequest{}, Response: api.AnswerResponse{}},

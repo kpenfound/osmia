@@ -194,7 +194,7 @@ func (r *Repository) crossRepoProjectSpecSnapshot(id config.WorkgroupID) (snap *
 // most once per revision, through a handle on the workgroup's trace that r's
 // project instance keeps until it closes (or ReleaseWorkgroupTraces), so the
 // read answers promptly even while a long call such as a dispatched
-// chief-of-staff turn holds that same instance open elsewhere. It needs no
+// manager turn holds that same instance open elsewhere. It needs no
 // real member's own repository open: a project spec and a workgroup's
 // membership list are both project-level documents of the workgroup's own
 // trace, never scoped to one workstream. r is used only to resolve where the

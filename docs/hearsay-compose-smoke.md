@@ -60,7 +60,7 @@ at the end.
 feature workstream, and then:
 
 - seals a spec, records an owner ruling on an escalated question and the
-  chief of staff's relay of that ruling, and records a chief logged assumption;
+  manager's relay of that ruling, and records a manager logged assumption;
 - runs the service's own publisher pass (`publishPass`) against the connectors
   through a recording relay, and checks every post was accepted, was made with
   the publisher's token, and went to the source and with the `author` the
@@ -71,14 +71,14 @@ feature workstream, and then:
 - runs a second pass with nothing changed and checks it sent no request;
 - reads the project's `work:` entity and the workstream's through Osmia's read
   path, as each of the three class agents acting for the owner: the
-  `worker` (a mason), the `orchestrator` (the chief of staff) and the
+  `worker` (a mason), the `orchestrator` (the manager) and the
   `observer` (an exploratory session). Each read uses the role's tools
   (`get_bundle` with no scope for the project default, `get_bundle` and
   `traverse` on the workstream entity, `get_l1` on the spec) and the bundle
   provider that assembles a turn's context, which must request exactly the
   project and workstream entities. It checks the ruling is served `ratified`
   with decider `owner`, the assumption `inferred` with decider
-  `chief_of_staff`, the relay is not a decision, and the spec is a `spec`
+  `chief_of_staff` (the manager's stored name, which Hearsay accepts), the relay is not a decision, and the spec is a `spec`
   document from the owner source. It checks the observer is offered no `assert`;
 - checks that every read carried the owner's token with the owner as principal
   and a class agent's id and token, and none carried the publisher's;
@@ -118,7 +118,7 @@ stub. The evidence directory's `RESULT.txt` names the full Hearsay revision.
 | Spec, ruling | on the owner source, `author` the owner principal |
 | Assumption | on the work source, no `author` |
 | Second pass, nothing changed | 0 posts, 0 requests |
-| Worker, orchestrator and observer class agents acting for the owner | each reads the ruling `ratified` (decider `owner`), the assumption `inferred` (decider `chief_of_staff`), the spec as a `spec` document, through `get_bundle` and `traverse` |
+| Worker, orchestrator and observer class agents acting for the owner | each reads the ruling `ratified` (decider `owner`), the assumption `inferred` (decider `chief_of_staff`, the manager's stored name), the spec as a `spec` document, through `get_bundle` and `traverse` |
 | Turn bundle for a workstream-tied turn | requests the project and the workstream entity, mode `hearsay`, for all three classes |
 | Credentials on the 21 reads | the owner's token and principal with the class agent's id and token; never the publisher's |
 | `smoke-outsider`, directly and through each class agent | the unknown-scope bundle for both entities; `traverse` answers 404 |

@@ -117,7 +117,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 			case <-relayed:
 
 				f.Mu.Unlock()
-				return intakefixture.QuestionResult(req, "session-chief", "Already relayed"), nil
+				return intakefixture.QuestionResult(req, "session-manager", "Already relayed"), nil
 			default:
 			}
 			if strings.Contains(req.Prompt, "<<< osmia:owner_response") {
@@ -144,19 +144,19 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 			if !strings.Contains(req.Prompt, "## Notices\n"+notice) {
 				f.Problem("event turn context lacks the notice:\n%s", req.Prompt)
 			}
-			return intakefixture.QuestionResult(req, "session-chief", "Relayed"), f.Use(ctx, tools, "relay-local", "relay_ruling", map[string]any{"question": "1", "text": "Add no dependency.", "scope": "local"})
+			return intakefixture.QuestionResult(req, "session-manager", "Relayed"), f.Use(ctx, tools, "relay-local", "relay_ruling", map[string]any{"question": "1", "text": "Add no dependency.", "scope": "local"})
 		case strings.Contains(req.Prompt, "Where does state live?") && strings.Contains(req.Prompt, "Is the log format fixed?") && strings.Contains(req.Prompt, "is open"):
 			defer f.Mu.Unlock()
-			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), f.Use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1", "2"},
+			return intakefixture.QuestionResult(req, "session-manager", "Escalated"), f.Use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1", "2"},
 				"rephrasing": "Are state files and the log format part of the contract?", "blocked": "The upload unit and its review.", "options": []string{"Both fixed", "Both free"}, "recommendation": "Both fixed."})
 		case strings.Contains(req.Prompt, "is open, asked by the mason: May I add a dependency?"):
 			defer f.Mu.Unlock()
-			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), f.Use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1"},
+			return intakefixture.QuestionResult(req, "session-manager", "Escalated"), f.Use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1"},
 				"rephrasing": "May the index unit add a dependency?", "blocked": "The index unit.", "options": []string{}, "recommendation": "No."})
 		}
-		f.Problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
+		f.Problem("unexpected manager turn:\n%s", req.Prompt)
 		f.Mu.Unlock()
-		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Nothing to do"), nil
 	}
 
 	states := func(r *trace.Repository, ws config.WorkstreamID) map[string]string {
@@ -310,7 +310,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 			waiting = false
 		case <-deadline:
 			s.Close()
-			t.Fatalf("chief of staff did not relay the ruling; runs %v, fake agents saw %v", runs(), f.Problems)
+			t.Fatalf("manager did not relay the ruling; runs %v, fake agents saw %v", runs(), f.Problems)
 		}
 	}
 	if got := states(repo, fixturekit.Stream); !reflect.DeepEqual(got, map[string]string{"1": trace.QuestionAnswered, "2": trace.QuestionAnswered}) {
@@ -447,7 +447,7 @@ func TestInboxLeavesOutAbandonedWorkstreams(t *testing.T) {
 		fixturekit.Must(t, repo.CreateThread(ctx, identity))
 		_, err := repo.Ask(ctx, fixturekit.DemoAgent, fixturekit.ClaimTurn(t, repo, home, ws, fixturekit.DemoAgent, fixturekit.DemoThread, "build", clock.Now()), "Where does state live?", clock.Now())
 		fixturekit.Must(t, err)
-		_, err = repo.EscalateQuestions(ctx, trace.ChiefOfStaff, fixturekit.ClaimTurn(t, repo, home, ws, trace.ChiefOfStaff, trace.ChiefOfStaff, "events", clock.Now()),
+		_, err = repo.EscalateQuestions(ctx, trace.Manager, fixturekit.ClaimTurn(t, repo, home, ws, trace.Manager, trace.Manager, "events", clock.Now()),
 			trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "Where should state live?", Blocked: "The unit.", Recommendation: "In files."}, clock.Now())
 		fixturekit.Must(t, err)
 	}
@@ -535,7 +535,7 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 	fixturekit.Must(t, repository.CreateThread(ctx, trace.Agent{Header: header(escalating, "osmia.trace.agent", fixturekit.DemoAgent, at, intake.OwnerActor), Role: fixturekit.DemoRole, ThreadID: fixturekit.DemoThread}))
 	_, err := repository.Ask(ctx, fixturekit.DemoAgent, claim(escalating, fixturekit.DemoAgent, fixturekit.DemoThread, "build"), "Where does state live?", tick(1))
 	fixturekit.Must(t, err)
-	_, err = repository.EscalateQuestions(ctx, trace.ChiefOfStaff, claim(escalating, trace.ChiefOfStaff, trace.ChiefOfStaff, "events"),
+	_, err = repository.EscalateQuestions(ctx, trace.Manager, claim(escalating, trace.Manager, trace.Manager, "events"),
 		trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "Where should state live?", Blocked: "The unit.", Options: []string{"Files", "A database"}, Recommendation: "In files."}, tick(1))
 	fixturekit.Must(t, err)
 

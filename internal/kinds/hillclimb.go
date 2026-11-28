@@ -190,8 +190,8 @@ var hillClimb = Kind{
 	Progress: func(r Reading) Progress {
 		return Progress{Panel: "climb", Summary: climbSummary(r.Climb), Spark: climbSpark(r.Climb)}
 	},
-	SkillTurns: []Turn{TurnArchitect, TurnMetricRound, TurnEvaluatorMason, TurnEvaluatorReviewer},
-	ChiefTools: []string{"climb_steer", "climb_conclude"},
+	SkillTurns:   []Turn{TurnArchitect, TurnMetricRound, TurnEvaluatorMason, TurnEvaluatorReviewer},
+	ManagerTools: []string{"climb_steer", "climb_conclude"},
 	Settings: Settings{
 		Validate: func(table map[string]any) error {
 			_, err := ParseHillClimb(table)

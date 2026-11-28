@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	wire "github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 func TestTraceLabelsDecisionsJevMade(t *testing.T) {
@@ -27,7 +28,7 @@ func TestTraceLabelsDecisionsJevMade(t *testing.T) {
 		json.NewEncoder(w).Encode(wire.UnitTrace{Workstream: stream, Unit: "a", Feature: "building", Rulings: []wire.TraceRuling{
 			{Kind: "contested", Decision: "review", DecidedBy: "jev", Judgment: "judgment_ab12"},
 			{Kind: "contested", Decision: "revise", DecidedBy: "owner"},
-			{Kind: "question", Decision: "answer", DecidedBy: "chief_of_staff"},
+			{Kind: "question", Decision: "answer", DecidedBy: trace.Manager},
 		}})
 	})}
 	go server.Serve(listener)

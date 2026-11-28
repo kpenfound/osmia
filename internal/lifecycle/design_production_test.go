@@ -40,9 +40,9 @@ func awaitOwnerTurnRunning(f *journey.ProductionDesignFixture, t *testing.T, sen
 	defer closeWait()
 	repo, err := f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	chief, host, _, closeChief, err := f.S.Lifecycle().ChiefRepository(context.Background(), repo, f.Origin)
+	manager, host, _, closeManager, err := f.S.Lifecycle().ManagerRepository(context.Background(), repo, f.Origin)
 	fixturekit.Must(t, err)
-	defer closeChief()
+	defer closeManager()
 	type memberTrace struct {
 		repo   *trace.Repository
 		stream config.WorkstreamID
@@ -56,24 +56,24 @@ func awaitOwnerTurnRunning(f *journey.ProductionDesignFixture, t *testing.T, sen
 		member, err := f.S.Repository(project)
 		fixturekit.Must(t, err)
 		members = append(members, memberTrace{member, address})
-		target, routedHost, _, release, err := f.S.Lifecycle().ChiefRepository(context.Background(), member, address)
+		target, routedHost, _, release, err := f.S.Lifecycle().ManagerRepository(context.Background(), member, address)
 		fixturekit.Must(t, err)
-		same := target == chief && routedHost == host
+		same := target == manager && routedHost == host
 		t.Logf("owner address=%s project=%s authoritative-project=%s host=%s shared-handle=%v", address, project, target.Project(), routedHost, same)
 		release()
 		if !same {
-			t.Fatal("continued owner address and members do not share the authoritative chief")
+			t.Fatal("continued owner address and members do not share the authoritative manager")
 		}
 	}
 	diagnose := func() {
 		t.Helper()
-		th, err := chief.Thread(host, trace.ChiefOfStaff)
+		th, err := manager.Thread(host, trace.Manager)
 		if err != nil {
 			t.Logf("owner turn=%s shared thread error=%v", sent.Turn, err)
 			return
 		}
 		q, ready := lifecycle.NextReadyTurn(th)
-		t.Logf("owner turn=%s now=%v shared-project=%s host=%s thread=%s status=%s active=%s parked=%v next=%s ready=%v", sent.Turn, f.Clock.Now(), chief.Project(), host, th.Identity.ThreadID, th.Status, th.Active, th.Parked(), q.Request.TurnID, ready)
+		t.Logf("owner turn=%s now=%v shared-project=%s host=%s thread=%s status=%s active=%s parked=%v next=%s ready=%v", sent.Turn, f.Clock.Now(), manager.Project(), host, th.Identity.ThreadID, th.Status, th.Active, th.Parked(), q.Request.TurnID, ready)
 		for _, turn := range th.Turns {
 			if turn.Request.TurnID == sent.Turn {
 				t.Logf("sent request=%s revision=%d project=%s host=%s actor=%+v accepted=%v prompt-matches=%v claim=%+v completed=%v", turn.Request.ID, turn.Request.Revision, turn.Request.Project, turn.Request.Workstream, turn.Request.Actor, turn.Request.At, turn.Request.Prompt == sent.Text, turn.Claim, turn.CompletedAt)
@@ -82,11 +82,11 @@ func awaitOwnerTurnRunning(f *journey.ProductionDesignFixture, t *testing.T, sen
 				}
 			}
 		}
-		op, err := thread.TurnOperation(chief.Project(), "workgroup-chief-"+sent.Turn, thread.TurnInput{Workstream: host, Agent: trace.ChiefOfStaff, Turn: sent.Turn})
+		op, err := thread.TurnOperation(manager.Project(), "workgroup-manager-"+sent.Turn, thread.TurnInput{Workstream: host, Agent: trace.Manager, Turn: sent.Turn})
 		fixturekit.Must(t, err)
-		observed, err := (thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: chief}}).Inspect(context.Background(), op)
-		t.Logf("owner dispatch operation=%s observation=%+v error=%v; shared chief dispatch applies directly without an operation retry timer", op.ID, observed, err)
-		f.SharedDesign().LogTurns(t, chief, host)
+		observed, err := (thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: manager}}).Inspect(context.Background(), op)
+		t.Logf("owner dispatch operation=%s observation=%+v error=%v; shared manager dispatch applies directly without an operation retry timer", op.ID, observed, err)
+		f.SharedDesign().LogTurns(t, manager, host)
 	}
 	diagnose()
 	deadline := time.Now().Add(fixturekit.DemoTimeout)
@@ -398,7 +398,7 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 		}
 		if strings.Contains(req.Prompt, ruling) && relayed.CompareAndSwap(false, true) {
 			_, err := fixturekit.CallTool(ctx, tools, questions.RelayRulingTool, map[string]any{"question": string(f.Stream1) + ":1", "text": ruling, "scope": "local"})
-			return intakefixture.QuestionResult(req, "session-chief", "Ruling relayed."), err
+			return intakefixture.QuestionResult(req, "session-manager", "Ruling relayed."), err
 		}
 		_, err = fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Implement resumable uploads.", "note": "The offset contract remains agreed.", "agents": []string{}})
 		if err != nil {
@@ -407,7 +407,7 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 		if strings.Contains(req.Prompt, "affected-one") && strings.Contains(req.Prompt, "affected-two") && escalated.CompareAndSwap(false, true) {
 			_, err = fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{string(f.Stream1) + ":1", string(f.Stream2) + ":1"}, "rephrasing": escalation, "blocked": "Both asking origins.", "options": []string{"Keep", "Change"}, "recommendation": "Keep."})
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "The service is following the agreed design."), err
+		return intakefixture.QuestionResult(req, "session-manager", "The service is following the agreed design."), err
 	}
 	f.Engine.Turns["affected-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		question := "affected-one: may the offset contract change?"
@@ -415,7 +415,7 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 			question = "affected-two: may the offset contract change?"
 		}
 		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
-		return intakefixture.QuestionResult(req, "session-worker", "Asked the chief."), err
+		return intakefixture.QuestionResult(req, "session-worker", "Asked the manager."), err
 	}
 	f.Engine.Turns["unaffected-work"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		unaffectedRuns.Add(1)
@@ -640,9 +640,9 @@ func TestDesignProductionSingleAffectedRepoKeepsOrdinaryRatification(t *testing.
 	})
 	repo, err := f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	chief, err := repo.ChiefOfStaffThread(f.Origin)
+	manager, err := repo.ManagerThread(f.Origin)
 	fixturekit.Must(t, err)
-	if !intakefixture.EqualJSONTest(chief.Identity, f.Before.Identity) || !intakefixture.EqualJSONTest(chief.Turns[:len(f.Before.Turns)], f.Before.Turns) {
+	if !intakefixture.EqualJSONTest(manager.Identity, f.Before.Identity) || !intakefixture.EqualJSONTest(manager.Turns[:len(f.Before.Turns)], f.Before.Turns) {
 		t.Fatal("single-member continuation changed")
 	}
 	groups, _, err := trace.Workgroups(repo)
@@ -674,7 +674,7 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 			<-ctx.Done()
 			return nil, ctx.Err()
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Following the approved contract."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Following the approved contract."), nil
 	}
 	f.Engine.Mu.Unlock()
 	sent, err := f.C.Send(ctx, f.Origin, message)
@@ -683,14 +683,14 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 	awaitOwnerTurnRunning(f, t, sent, reached)
 	repo, err := f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	chief, host, _, close, err := f.S.Lifecycle().ChiefRepository(ctx, repo, f.Stream1)
+	manager, host, _, close, err := f.S.Lifecycle().ManagerRepository(ctx, repo, f.Stream1)
 	fixturekit.Must(t, err)
-	before, err := chief.Thread(host, trace.ChiefOfStaff)
+	before, err := manager.Thread(host, trace.Manager)
 	close()
 	fixturekit.Must(t, err)
 	index := slices.IndexFunc(before.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == sent.Turn })
 	if index < 0 || before.Active != sent.Turn || before.Turns[index].Claim == nil || before.Turns[index].Response != nil || !before.Turns[index].CompletedAt.IsZero() {
-		t.Logf("continued chief status=%s active=%s sent=%s queue-index=%d", before.Status, before.Active, sent.Turn, index)
+		t.Logf("continued manager status=%s active=%s sent=%s queue-index=%d", before.Status, before.Active, sent.Turn, index)
 		t.Fatal("continued pending owner turn was not the durably claimed active request")
 	}
 	request := before.Turns[index].Request
@@ -706,24 +706,24 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 			_, err := fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Continue resumable uploads.", "note": "Restart retained the owner status request.", "agents": []string{}})
 			return intakefixture.QuestionResult(req, "session-recovered", "Status continued after restart."), err
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Following the approved contract."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Following the approved contract."), nil
 	}
 	f.Engine.Mu.Unlock()
 	f.Start(t)
 	f.Wait(t, "pending owner turn replay", func() bool { return replayed.Load() })
 	repo, err = f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	chief, host, _, close, err = f.S.Lifecycle().ChiefRepository(ctx, repo, f.Stream1)
+	manager, host, _, close, err = f.S.Lifecycle().ManagerRepository(ctx, repo, f.Stream1)
 	fixturekit.Must(t, err)
 	defer close()
 	f.Wait(t, "recovery turn completion", func() bool {
-		recovered, err := chief.Thread(host, trace.ChiefOfStaff)
+		recovered, err := manager.Thread(host, trace.Manager)
 		fixturekit.Must(t, err)
 		return recovered.Active == "" && slices.ContainsFunc(recovered.Turns, func(q trace.QueuedTurn) bool {
 			return q.Request.Actor == intake.RecoveryActor && strings.Contains(q.Request.Prompt, message) && q.Response != nil && !q.CompletedAt.IsZero()
 		})
 	})
-	recovered, err := chief.Thread(host, trace.ChiefOfStaff)
+	recovered, err := manager.Thread(host, trace.Manager)
 	fixturekit.Must(t, err)
 	q := recovered.Turns[index]
 	if !intakefixture.EqualJSONTest(q.Request, request) || q.Response == nil || q.Response.RequestID != request.ID || q.Response.RequestRevision != request.Revision {

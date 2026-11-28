@@ -21,19 +21,19 @@ Startup resumes an interrupted project registration and gives every workstream a
 
 A project is exactly one repo with its own charter, upstream, optional fork, clone, base branch, landing style, caps and entity map. Its `p_…` ID identifies it in the project registry and in API requests. Its authoritative charter is `charter.md` in `projects/<project-id>/trace.db`, edited with `osmia edit charter <project-id>` or the web UI. Charters and entity maps are independent for every project.
 
-A workgroup represents one feature across any number of selected active projects. It has one member workstream per project, one shared chief, one workgroup spec, contracts and graph, and one ratification. The workgroup appears under each member's project card and sidebar group row, with members labelled by project name. Briefs, workgroup specs, slices and all factory state stay outside target repositories. File-based context supports the whole flow without Hearsay.
+A workgroup represents one feature across any number of selected active projects. It has one member workstream per project, one shared manager, one workgroup spec, contracts and graph, and one ratification. The workgroup appears under each member's project card and sidebar group row, with members labelled by project name. Briefs, workgroup specs, slices and all factory state stay outside target repositories. File-based context supports the whole flow without Hearsay.
 
-Each member's own charter governs its slice, plan and units. The workgroup spec and contracts must satisfy every member's charter; the architect, committee and chief receive them all. `charter#n` means the citing member's rule, and `<project>/charter#n` names another project's rule. Unknown projects or rules are refused. Conflicting charters go to the owner and cannot be dismissed by the chief. A proposed charter amendment is recorded and decided in the project whose rule it changes.
+Each member's own charter governs its slice, plan and units. The workgroup spec and contracts must satisfy every member's charter; the architect, committee and manager receive them all. `charter#n` means the citing member's rule, and `<project>/charter#n` names another project's rule. Unknown projects or rules are refused. Conflicting charters go to the owner and cannot be dismissed by the manager. A proposed charter amendment is recorded and decided in the project whose rule it changes.
 
-The owner chooses an ordered project list at hand-in: API `projects` (`project` alone is a one-element shorthand), repeatable CLI `--with <project-id>`, or the web multi-select of all active projects. The first project is home for the shared chief and conversation. Go rejects an empty or duplicate list and inactive projects; paused projects are allowed. Several projects allocate and join one member each without an architect selection turn. One project retains the ordinary workflow. The list stays fixed until ratification; changing it requires abandoning and handing in again. After ratification, amend and cancel retain their existing rules. A selected project judged to need no change is escalated to the owner rather than dropped.
+The owner chooses an ordered project list at hand-in: API `projects` (`project` alone is a one-element shorthand), repeatable CLI `--with <project-id>`, or the web multi-select of all active projects. The first project is home for the shared manager and conversation. Go rejects an empty or duplicate list and inactive projects; paused projects are allowed. Several projects allocate and join one member each without an architect selection turn. One project retains the ordinary workflow. The list stays fixed until ratification; changing it requires abandoning and handing in again. After ratification, amend and cancel retain their existing rules. A selected project judged to need no change is escalated to the owner rather than dropped.
 
-The design agent is the `designer` role ([Roles](#roles)). It runs on `roles.designer`'s profile, sandbox, image and skills, and on a design thread of its own, never on the chief of staff's thread or settings. Its tools are exactly `file_read`, `read_repo`, `draft_brief` and `set_title`, without write, VCS or credential access; Go enforces them at run time whichever prompt it is given. `set_title` sets the open session's title and nothing else. It sees a catalog of every active project's name, upstream and in-brief status. Brief projects' charter and entity map are in context; other active projects' are files in its view. `read_repo` reads any active project and refuses others.
+The design agent is the `designer` role ([Roles](#roles)). It runs on `roles.designer`'s profile, sandbox, image and skills, and on a design thread of its own, never on the manager's thread or settings. Its tools are exactly `file_read`, `read_repo`, `draft_brief` and `set_title`, without write, VCS or credential access; Go enforces them at run time whichever prompt it is given. `set_title` sets the open session's title and nothing else. It sees a catalog of every active project's name, upstream and in-brief status. Brief projects' charter and entity map are in context; other active projects' are files in its view. `read_repo` reads any active project and refuses others.
 
 A session's brief starts with its own project, including a brief without a list. Optional `draft_brief.projects` replaces the list under the hand-in validation rules; omitting it retains the list. The session's own project can be removed while another remains. An owner request confirms the change; inferred changes require a readiness question and owner agreement. The web's read-only Brief panel shows the latest revision, project names with home marked and collapsed text above Start, updating live. Design read returns `brief_revision`, `brief`, `projects` and, once the agent has set one, `title`; CLI read prints the revision and list, and CLI start reads and prints them before sending the pin. Start sends the displayed/read `brief_revision`; a stale pin returns `conflict` and allocates nothing. The web surfaces the conflict and refreshes the panel.
 
-Start durably binds the handed brief text, revision, workstream kind and ordered project list. Recovery completes that exact start once with stable members, or leaves it safely retryable without allocation. The chief of staff opens a new thread from the brief and the design transcript attached to it and never resumes the design session's backend session. The session's project retains the conversation and the shared chief even when it is not a member. A session opened before the design agent had a thread of its own keeps working: its earlier messages stay on the chief of staff's thread, where design read and the web conversation still show them, and its next turn goes to the design thread under the same limits, carrying the earlier conversation and the latest brief in that turn's context. See [design sessions](cli.md#design-sessions).
+Start durably binds the handed brief text, revision, workstream kind and ordered project list. Recovery completes that exact start once with stable members, or leaves it safely retryable without allocation. The manager opens a new thread from the brief and the design transcript attached to it and never resumes the design session's backend session. The session's project retains the conversation and the shared manager even when it is not a member. A session opened before the design agent had a thread of its own keeps working: its earlier messages stay on the manager's thread, where design read and the web conversation still show them, and its next turn goes to the design thread under the same limits, carrying the earlier conversation and the latest brief in that turn's context. See [design sessions](cli.md#design-sessions).
 
-The shared design is called the **workgroup spec**. Stored document paths such as `project-specs.json`, API fields such as `project_spec` and `project_spec_revision`, and the CLI flag `--project-spec-revision` keep their names. These names do not introduce another project grouping model.
+The shared design is called the **workgroup spec**. Stored document paths such as `project-specs.json`, API fields such as `project_spec` and `project_spec_revision`, and the CLI flag `--project-spec-revision` keep their names. These names do not introduce another project grouping model. The manager role follows the same rule: its stored identity and thread directories stay `chief_of_staff`, and its saved decision documents keep their `chief` keys (the shed `chief.json` and the contest `chief-…` paths and IDs). Its other stored names are the ruler name `chief of staff` (the `by` of the manager's move documents, contest rulings and drift handbacks), the drop cause `chief-drop` (of a dependency drop the manager asked for), the short key `chief` as the `by` of its follow-up records and climb steering notes and in the event IDs of its notices, and the router triggers `contest.chief_ruling` and `objection.chief_decision`. They are stored names, not display names; everything shown to you says manager.
 
 Edges are recorded in the ratified workgroup graph, not configured in TOML.
 A contract edge resolves on its ratified contract; hard-block and merge-order
@@ -102,7 +102,7 @@ configuration list; they belong to persisted workstream manifests.
 <root>/projects/<repo-id>/trace.db             project charter, entity map and lasting decisions
 <root>/projects/<repo-id>/osmia.lock           the trace's process lock
 <root>/workstreams/<repo-id>/<workstream-id>/  the workstream's own trace.db and osmia.lock, separate from projects/<repo-id>/
-<root>/workgroups/<workgroup-id>/              trace.db and osmia.lock: cross-repo record, workgroup spec, shared chief and group decisions
+<root>/workgroups/<workgroup-id>/              trace.db and osmia.lock: cross-repo record, workgroup spec, shared manager and group decisions
 <root>/workstreams-staging/                    a new workstream's trace is built here before an atomic rename publishes it
 <root>/workstreams-deleting/<repo-id>/      a workstream's trace archive cleanup has moved aside, durably marked for removal
 <root>/branches/<repo-id>/<workstream-id>  the workstream's feature branch, a workspace of the clone
@@ -129,7 +129,7 @@ state writers must protect against concurrent symlink replacement.
 
 At startup every non-session workstream without a workgroup, whether building,
 delivered, abandoned or archived, is put in its own workgroup with its existing
-chief thread. This also repairs a crash between a workstream's creation and the
+manager thread. This also repairs a crash between a workstream's creation and the
 record of its workgroup. Exploratory sessions keep their kind and thread outside
 workgroups and stay excluded from factory passes. Repeated starts do not
 duplicate records or move existing member traces.
@@ -295,7 +295,7 @@ masons = 4
 reviewers = 2
 committee = 3
 checks = 2
-chief = 3
+manager = 3
 per_workstream = 2
 # Model sessions the server's own machine runs at once, whatever their role.
 # Unset adds no cap beyond the role limits; 0 runs no session here.
@@ -434,23 +434,25 @@ Tailnet membership is the boundary: there is no in-app authentication
 ([tailnet listener](running.md#tailnet-listener)). All capacity and shed values
 must be positive integers, except `capacity.local_slots`, which may be 0. `events.window` is a positive Go duration: how long
 an undelivered event of a workstream waits before the service delivers it, with
-every other ready event, as one chief-of-staff turn. `events.progress_window`
+every other ready event, as one manager turn. `events.progress_window`
 is how long an event of routine progress waits instead: a unit starting,
 passing its checks, being approved or sent back, or landing, or the workstream
 changing state. It goes out sooner with any other event. It must be no shorter
 than `events.window`, and defaults to the longer of `15m` and `events.window`.
-The notice that asks the chief of staff to title work started from a design is not routine progress: it waits `events.window`. While an event turn of a workstream is queued or running, its new events wait
+The notice that asks the manager to title work started from a design is not routine progress: it waits `events.window`. While an event turn of a workstream is queued or running, its new events wait
 for the next turn. A workstream cap may exceed global mason capacity:
 the global pool still limits concurrent execution.
 
-`capacity.chief` must be positive, defaults to 3 and limits how many background
-chief-of-staff turns run at once across every workstream and project. Event,
+`capacity.manager` must be positive, defaults to 3 and limits how many background
+manager turns run at once across every workstream and project. It replaces
+`capacity.chief`, which stays accepted as a deprecated alias with the same
+effect ([Deprecated manager keys](#deprecated-manager-keys)). Event,
 follow-up, check-back, contest, amendment and answer-delivery turns of a
-workstream's chief and of a shared workgroup chief each take a slot while they
+workstream's manager and of a shared workgroup manager each take a slot while they
 run; every exit releases it, including a turn that ends `waiting`. Turns you
 start take no slot and never wait for one: your messages and replies, and
 design and session conversations. With every slot held, a background turn stays
-queued in its thread, in order, with the reason "waiting for a chief slot", and
+queued in its thread, in order, with the reason "waiting for a manager slot", and
 masons, reviewers, checks, other projects and your own turns keep running. A
 freed slot goes to the oldest eligible waiting turn across the factory: one
 that is the oldest unfinished turn of its thread and that nothing else holds.
@@ -460,15 +462,15 @@ exception follows your message: when you message a workstream whose oldest
 unfinished turn is a background turn waiting for a slot, that turn runs at once
 without a slot and your turn follows it, so the limit can be exceeded by one
 turn for each workstream you are messaging. Notice waves and turns resumed after
-a restart stay capped, and a restart begins with no slots held. Chief turns
+a restart stay capped, and a restart begins with no slots held. Manager turns
 still ignore owner pauses; provider limits and abandonment still stop them.
-Chief slots are independent of the mason, reviewer, committee, checks and
+Manager slots are independent of the mason, reviewer, committee, checks and
 per-workstream limits. Reloading applies a changed limit to new admissions while
 running turns finish.
 
 `capacity.local_slots` is the number of model sessions the server's own machine,
 the built-in local client, runs at once, for any role: masons, reviewers,
-committee members, architects, the chief of staff and design sessions alike. A
+committee members, architects, the manager and design sessions alike. A
 turn starts only when its role has room under the `capacity.*` limits above
 and the client it is placed on has a free slot, so these limits stay ceilings
 across the local client and every [client](running.md) that connects. Unset,
@@ -526,7 +528,7 @@ It must not be negative, and `0` turns the guard off.
 without progress before the stall watchdog raises a `stalled` exit for it to
 the transition router, which asks Jev only what to do about it. The default is
 `45m`; `"0"` turns the watchdog off, and a negative value is refused. Progress
-is the same as the loop guard counts, except that nothing the chief of staff
+is the same as the loop guard counts, except that nothing the manager
 does counts and neither does a drift rebase. The watchdog raises nothing while
 something legitimate explains the quiet: an open owner card about the subject,
 a pause that covers the subject, a running or queued turn younger than
@@ -541,8 +543,8 @@ own cause is one of those. A router hold whose window passes is a stall. The
 same window is how long after its first failure a landing, rebase or
 publication that keeps failing is retried before it is ended; with `"0"` that
 window stays `45m`, so operations still end. It is also how long after an
-action of the chief of staff that started no work, or a turn on a stall notice
-that ended without one, the service gives the chief a follow-up turn to check
+action of the manager that started no work, or a turn on a stall notice
+that ended without one, the service gives the manager a follow-up turn to check
 back; with `"0"` that too stays `45m`.
 
 `workspaces` picks the backend of the workspaces the agents work in for each
@@ -567,11 +569,11 @@ the cap as the debate's round limit.
 
 The architect pool has no factory-wide limit and no
 `capacity.*` key: each runs at most one turn per workstream. The capacity view
-(the status API's `capacity` and the chief of staff's `capacity` tool) shows
+(the status API's `capacity` and the manager's `capacity` tool) shows
 them as unbounded, with no numeric `limit`, and a note saying so; only the
-mason, reviewer, committee, checks and chief pools report a numeric `limit`, which
-comes from `config.toml` and applies on reload. The `chief` entry is
-`capacity.chief`: its used count is the background chief-of-staff turns holding
+mason, reviewer, committee, checks and manager pools report a numeric `limit`, which
+comes from `config.toml` and applies on reload. The `manager` entry is
+`capacity.manager`: its used count is the background manager turns holding
 a slot and its waiting entries are the queued ones, oldest first. An unbounded pool is not zero
 capacity and has no setting to raise.
 
@@ -628,11 +630,11 @@ every member on the committee role's profile. With `roles.committee.sandbox =
 Claude, and a custom `roles.committee.image` must support all of their agents.
 Reload applies both lists to turns queued after it.
 
-`roles.chief_of_staff.events_profile` optionally names the profile of the chief
-of staff's turns that deliver service events, so they can run on a lighter
-model than the turns that answer you, which use `roles.chief_of_staff.profile`.
-It must name a configured profile and is accepted only on the chief of staff.
-An owner override of the chief of staff's profile applies to both while it is
+`roles.manager.events_profile` optionally names the profile of the manager's
+turns that deliver service events, so they can run on a lighter model than the
+turns that answer you, which use `roles.manager.profile`.
+It must name a configured profile and is accepted only on the manager.
+An owner override of the manager's profile applies to both while it is
 set.
 
 `notify.webhook` is an absolute `http` or `https` URL with a host, such as an
@@ -655,8 +657,10 @@ provider at execution time, not through network access during loading.
 | `timeout` | `45m` | Positive Go duration; explicit empty values are invalid |
 | `max_turns` | `0` | Nonnegative; zero means no turn limit; only Claude supports a nonzero value through the pinned adapter |
 
-Roles are `architect`, `committee`, `chief_of_staff`, `designer`, `foreman`,
-`mason` and `reviewer`. Every omitted role binding defaults to profile `default`
+Roles are `architect`, `committee`, `designer`, `foreman`, `manager`,
+`mason` and `reviewer`. `[roles.chief_of_staff]` is still accepted as a
+deprecated alias of `[roles.manager]`
+([Deprecated manager keys](#deprecated-manager-keys)). Every omitted role binding defaults to profile `default`
 and sandbox `none`. If there is no profile named `default`, bind all seven roles
 explicitly. A configuration that names any other role is refused. Role keys:
 
@@ -671,12 +675,12 @@ explicitly. A configuration that names any other role is refused. Role keys:
 
 `designer` runs the design sessions' agent. It is a role like the others:
 without a `[roles.designer]` table its design turns run on the `default` profile
-with sandbox `none`, never on the settings of `chief_of_staff`, and an owner
-override of the chief of staff's profile does not reach it. It takes no
-`events_profile`, since only the chief of staff takes event turns. It holds the
+with sandbox `none`, never on the settings of `manager`, and an owner
+override of the manager's profile does not reach it. It takes no
+`events_profile`, since only the manager takes event turns. It holds the
 design tools and nothing more whatever its sandbox: no write, execution,
-version-control, credential or owner-gate tool, and none of the chief of
-staff's other tools. Kind skills never load on designer turns, as on chief
+version-control, credential or owner-gate tool, and none of the manager's
+other tools. Kind skills never load on designer turns, as on manager
 turns.
 
 A `claude` sandbox requires Claude in every profile in the role's fallback chain.
@@ -686,6 +690,30 @@ and, on Claude, the tool that loads skills. Sandbox settings describe requested 
 runs in any mode the platform can confine; one it cannot (for example `claude`
 on Linux) fails before launch with core's reason. Successful configuration
 loading does not imply that execution is available.
+
+### Deprecated manager keys
+
+`[roles.manager]` and `capacity.manager` are the manager's keys. Older
+configurations name them `[roles.chief_of_staff]` and `capacity.chief`. Both old
+forms stay accepted as deprecated aliases and load into the same settings, so
+a file that uses only them behaves exactly as it did and keeps validating:
+
+| Deprecated key | Use instead |
+| --- | --- |
+| `[roles.chief_of_staff]` | `[roles.manager]` |
+| `capacity.chief` | `capacity.manager` |
+
+`osmia config validate` and `osmia doctor` print one warning for each alias in
+use, naming the key that replaces it, for example `roles.chief_of_staff:
+deprecated, use roles.manager`. The warning does not fail validation or stop the
+service from loading the file. A file that uses only the new keys prints none.
+
+Setting both forms of one key is a validation error that names both keys, for
+example `capacity.manager` and `capacity.chief` in one `[capacity]` table, or
+`[roles.manager]` and `[roles.chief_of_staff]` in one file. Choose one form;
+the manager's `profile`, `events_profile`, `sandbox`, `image`, `cpus`, `memory`
+and `skills` are read from whichever table is present. An error in a deprecated
+table names the deprecated key, for example `roles.chief_of_staff.sandbox`.
 
 ### Docker Sandboxes (`sbx`)
 
@@ -747,7 +775,7 @@ cpus = 2
 memory = "4g"
 
 # The read-only roles: architect, reviewer, committee,
-# chief_of_staff, designer and foreman.
+# manager, designer and foreman.
 [roles.reviewer]
 sandbox = "sbx"
 cpus = 2
@@ -937,13 +965,13 @@ send it back to its mason with the failures and output; the send-back counts
 toward `shed.max_bounces`. At that limit the default is to contest the unit,
 and Jev may instead send it back to its mason, run the checks again or have it
 reviewed again, recording its reason; a contested unit stays contested until the
-owner or chief of staff rules review or revise. Recording the ruling also moves
+owner or manager rules review or revise. Recording the ruling also moves
 the unit: review sends the same candidate to reviewing with the ruling’s note;
 revise sends it to implementing with one mason turn carrying the failures and
 note. Recorded rulings and pending role turns are reconciled after restart.
 A run that reports no result, because the engine is
 unreachable, the run timed out or the project has no Dagger checks, leaves the
-unit checking, tells the chief of staff and runs again after ten minutes. After
+unit checking, tells the manager and runs again after ten minutes. After
 three such runs of one candidate in a row the unit is contested instead: a
 ruling of review runs its checks again, and revise returns it to its mason. One
 run at a time per workstream; a pause holds runs not yet started.
@@ -967,7 +995,7 @@ one made with a token that is not an API token, is recorded as an incomplete
 run with the refusal, and the request is made again after that run's wait. Final reviews take no check slot.
 There is no command fallback.
 
-The chief of staff and the final reader can read a failed check's trace through
+The manager and the final reader can read a failed check's trace through
 the service-run `read_cloud_trace` action: a trace ID, as a failed check's
 `dagger trace <id>` command names it, and optionally the check's name to narrow
 the output to that check. The service runs `dagger cloud traces view`
@@ -1004,12 +1032,13 @@ file list, `paths` for chosen files or directories, and `start` and `end` for
 the hunks touching those lines of the named paths. Binary content is not shown,
 and a response over 64 KiB is cut with a truncation flag.
 
-The chief of staff receives a read-only view of its workstream's documents at
+The manager receives a read-only view of its workstream's documents at
 their latest revisions: `spec.md`, `plan.json`, the handed input, the shed
 rounds, and the amendment, unit, final review and delivery records once they
 exist. The service stages the view afresh for each turn, under
-`chief_of_staff/<project>/<workstream>` in the root, and leaves out its own
-tool-call and inspection records.
+`chief_of_staff/<project>/<workstream>` in the root (`chief_of_staff` is the
+manager's stored name and stays as written), and leaves out its own tool-call
+and inspection records.
 
 Missing CLI, login, template or policy requirements fail the turn without falling back to host
 execution.
@@ -1231,7 +1260,7 @@ The skills load on these turns: the architect's turns that draft, answer for or
 amend the climb spec, the committee's turns in the climb spec's metric round, and
 the mason and reviewer turns of the evaluator unit. They are added to the skills
 of the turn's own role. They never load on a climbing attempt's turns, on the
-chief of staff, on a final review, on a Feature workstream or on any other turn.
+manager, on a final review, on a Feature workstream or on any other turn.
 The intended entry is the `hill-climb-evaluator` skill of the skills project, the
 one definition of what an evaluator must be that the service's parser also
 accepts:
@@ -1316,7 +1345,7 @@ the ones you want into your own `config.toml`.
 | `architect` | none (`skills = []`) |
 | `committee` | none (`skills = []`) |
 | `foreman` | none (`skills = []`) |
-| `chief_of_staff` | `handoff-reports`, `design-sketch` |
+| `manager` | `handoff-reports`, `design-sketch` |
 | `designer` | `handoff-reports`, `design-sketch` |
 | `mason` | `behavioral-testing`, `simple-code`, `no-deltas`, `lint-discipline`, `unslop`, `typescript-best-practices`, `debugging`, `handoff-reports` |
 | `reviewer` | `pr-review`, `simple-code`, `no-deltas`, `behavioral-testing` |
@@ -1325,7 +1354,7 @@ the ones you want into your own `config.toml`.
 Each entry is the reference `https://github.com/kpenfound/skills#<folder>`:
 
 ```toml
-[roles.chief_of_staff]
+[roles.manager]
 skills = [
   "https://github.com/kpenfound/skills#handoff-reports",
   "https://github.com/kpenfound/skills#design-sketch",
@@ -1365,8 +1394,8 @@ The architect, committee and foreman have no recommended skills, so leave
 their `skills` out or empty. Skills never replace a factory rule: owner gates,
 footprints, the check gate, the design agent's limits and the verdict formats
 come from Osmia's own prompts and enforcement. Kind skills load only on the
-turns [listed above](#workstream-kind-settings), never on designer or chief
-turns, so `designer` and `chief_of_staff` keep their own lists.
+turns [listed above](#workstream-kind-settings), never on designer or manager
+turns, so `designer` and `manager` keep their own lists.
 
 ## Project registration
 
@@ -1552,7 +1581,7 @@ rebases; `osmia rebase` and `osmia project rebase` still ask for them. A
 drift rebase whose conflict resolution review sent back `shed.max_bounces`
 times, or whose drift mason or reviewer turn failed or ended without a
 verdict, is held: the workstream takes no scheduled drift rebase until
-`osmia rebase` or `osmia project rebase` asks for one or the chief of staff hands it back, and the inbox lists it until
+`osmia rebase` or `osmia project rebase` asks for one or the manager hands it back, and the inbox lists it until
 then. A value that does not
 parse as a Go duration, a TOML number, a negative duration, or a nonzero
 duration shorter than `1m` is rejected.
@@ -1595,7 +1624,7 @@ It turns flake-fix workstreams on for the project. A check that fails and then
 passes when rerun by its own link already counts as a pass in unit and
 final-review check runs, and with the default that is all that happens. With
 `flake_fixes = true` each such run is also recorded as a flake, the originating
-workgroup's chief of staff is told, and the chief of staff may open a separate
+workgroup's manager is told, and the manager may open a separate
 workstream, through the dedicated flake-fix tool, to find and fix the flakiness's
 cause, or decline with a recorded reason. The setting is off by default because
 a flake-fix workstream is an ordinary workstream whose pull requests go out
@@ -1696,7 +1725,7 @@ The web page's **Project settings** form reads and saves a project's settings th
 
 ### Previews
 
-Previews need no project configuration. The chief uses `inspect_code` on the
+Previews need no project configuration. The manager uses `inspect_code` on the
 member's committed Dagger configuration and module source to choose a Service
 call and HTTP port for each `preview` request. The tool requires a non-empty
 `call` argument list and a `port` from 1 to 65535. `path` defaults to `/` and
@@ -1708,7 +1737,7 @@ names, paths outside the exported source (including symlinks), and host-writing
 or interactive chain steps. It checks assignment values, quote removal,
 comma-separated elements and surrounding whitespace as Dagger reads them.
 Checks fail closed, so even a legitimate value containing `:` can be refused;
-the chief can use a module default or explain the limitation. Only a verified
+the manager can use a module default or explain the limitation. Only a verified
 engine Service ID reaches the capture command.
 
 ### Verification
@@ -1738,8 +1767,8 @@ With the setting present:
   lever invocations it verified with;
 - the service reruns up to five of them on the captured candidate and shows the
   results in the unit review bundle as service-recorded evidence;
-- unit reviewers, the final reviewer and the chief of staff are offered
-  `verify`, which runs the lever on the service; masons never are;
+- unit reviewers, the final reviewer and the manager are offered `verify`,
+  which runs the lever on the service; masons never are;
 - the final reviewer gets the regression sweep, and the trace and telemetry
   record [verification measures](telemetry.md#verification-measures).
 
@@ -1811,8 +1840,8 @@ token_env = "HEARSAY_OWNER_TOKEN"
 id = "osmia-worker"
 token_env = "HEARSAY_WORKER_TOKEN"
 [hearsay.agents.orchestrator]
-id = "osmia-chief"
-token_env = "HEARSAY_CHIEF_TOKEN"
+id = "osmia-manager"
+token_env = "HEARSAY_MANAGER_TOKEN"
 [hearsay.agents.observer]
 id = "osmia-observer"
 token_env = "HEARSAY_OBSERVER_TOKEN"
@@ -1927,14 +1956,14 @@ The service exposes Hearsay read tools within role turns: `get_bundle`,
 `traverse` follows Hearsay's typed graph edges from entities, so a role can
 reach the decision log and spec documents around a project or workstream entity.
 Exploratory sessions receive the same read tools at the observer class and no
-write tool. Workers and the chief also receive
+write tool. Workers and the manager also receive
 `assert`, which proposes an agent learning and does not ratify an owner ruling. The endpoint, human token and agent tokens remain service-owned.
 Live Hearsay sources, identities and authority policy are configured by the
 operator in Hearsay; `osmia project memory` generates them for a project (see
 [Hearsay integration](hearsay.md#prepare-hearsays-configuration)).
 
 Hearsay watches use the orchestrator identity and the project's default entity. Their opaque cursors, seen event
-identities and chief notices commit together in the local trace. Remote failures
+identities and manager notices commit together in the local trace. Remote failures
 retain the last cursor and leave local work running. Changed connection or
 identity settings select a separate cursor; the first watch begins at Hearsay's
 current position. Existing history remains available through bundles and read
@@ -2219,8 +2248,8 @@ rules. Jev chooses the class and the sentence of the response that supports it,
 which becomes the recorded evidence. A class below its threshold, a stricter one
 for `gave_up`, or one no sentence supports falls back to the code rules, as does
 an outage, a cool-down or a missing key. The turn's classification records `by`
-as `jev` or `rule`, and a Jev class names its judgment, which the chief of
-staff's notice cites. A fallback leaves an unclear ending a clarify
+as `jev` or `rule`, and a Jev class names its judgment, which the manager's
+notice cites. A fallback leaves an unclear ending a clarify
 continuation, which counts toward `mason.max_clean_turns` like any other
 classified turn, so the unit is contested once the bound is reached.
 
@@ -2258,10 +2287,10 @@ values it applies; a changed value creates a new judgment.
 is asked, what a run records, and `go run ./cmd/smartcheck`, which runs the
 same selection on any Git working tree.
 
-The chief of staff investigates a question, a contested unit, a committee
+The manager investigates a question, a contested unit, a committee
 objection, a plan-only amendment, a discovery or a final review's blocking
 finding first and then calls `decide` with the kind, the subject and a short
-evidence summary. The service checks from the subject's records that the chief
+evidence summary. The service checks from the subject's records that the manager
 may decide it today (a conflict between member charters, the owner's own
 objection and an amendment that changes approved intent are refused, with no
 request and no judgment), builds the state from the records and asks Jev to
@@ -2274,15 +2303,15 @@ revision or is left to the owner. Jev never reads code or uses tools. A pick at
 or above `[jev] decision_threshold` is binding: the outcome tool (`answer`,
 `route_amendment`, `escalate`, `resolve_contested`, `resolve_objection`,
 `decide_amendment`, `record_discovery`, `triage_finding`) then records only that
-outcome, with the chief's own text, and the decision is shown as decided by
+outcome, with the manager's own text, and the decision is shown as decided by
 Jev. A pick below the threshold, or a fallback, leaves the decision with the
-chief. The outcome tools refuse a subject `decide` has not been called for; a
-disposition the owner gave and the chief relays needs none. The result belongs
+manager. The outcome tools refuse a subject `decide` has not been called for; a
+disposition the owner gave and the manager relays needs none. The result belongs
 to the subject occurrence (the question, the contest, the objection, the
 amendment, the discovery or the finding of one final review), is reused when
 `decide` is called again, and survives a restart. A finding triaged as needing
-code is stated in the next plan revision the chief files with `route_amendment`,
-and one left to the owner is shown on the delivery card with the chief's
+code is stated in the next plan revision the manager files with `route_amendment`,
+and one left to the owner is shown on the delivery card with the manager's
 reason. When the service refuses the transition a binding pick calls for, the
 item goes to the owner's inbox with Jev's judgment (a discovery as a
 `discovery` entry, an amendment as its amendment card, a finding on the
@@ -2292,9 +2321,9 @@ The owner gates (a ratification, an amendment that changes approved intent,
 an escalated question, contested unit or objection) are decided by Jev at
 `[jev] decision_threshold`. The owner's own decisions go through the same gate
 worker at `[jev] owner_threshold` instead: the delivery card (approve as
-presented), a charter proposal (ratify the chief of staff's rule or decline),
+presented), a charter proposal (ratify the manager's rule or decline),
 a conflict between charters and an architect's escalation such as a project
-that needs no change (the options the chief of staff wrote), a presented
+that needs no change (the options the manager wrote), a presented
 cancellation (approve and close or leave the open pull requests as drafts, or
 reject) and the owner's own objection (dismiss or overrule). A binding pick is
 recorded as the ordinary decision with Jev as its decider, actor and judgment,
@@ -2302,7 +2331,7 @@ and carried out through the owner's own path; a delivery approval pins the
 same review identity and publishes the same text as the owner's. Below the
 threshold the card reaches the owner with Jev's pick as its recommendation.
 Jev never writes text: an option carried out with text is offered only when
-the chief of staff already wrote it.
+the manager already wrote it.
 
 The delivery of a workstream on a project whose `delivery` is `jev` is a gate
 Jev may decide in place of that delivery approval: the `delivery-route`
@@ -2341,7 +2370,7 @@ in today's usage. `osmia doctor` fails when the key is not set.
 
 A workstream's own slice, spec, plan and workspaces leave active state and new
 bundles when it resolves (merged or cancelled). Its trace remains until owner
-archive. The workgroup's workgroup spec stays active for the shared chief and
+archive. The workgroup's workgroup spec stays active for the shared manager and
 every unresolved member until every member resolves, including a dependent
 waiting for or repairing after an upstream merge. Only then does it leave
 active views and bundles; workgroup spec history and owner decisions remain in
@@ -2362,7 +2391,7 @@ matching merged or closed outcome. Failed lookups record nothing and retry
 on the next cadence; a closed-without-merge outcome remains unresolved.
 These are service rules, with no additional polling configuration.
 
-Archive, by the owner or by the chief of staff, and eligible cleanup of a terminal member preserve the original
+Archive, by the owner or by the manager, and eligible cleanup of a terminal member preserve the original
 shared conversation, active workgroup spec and status for unresolved survivors,
 including across restart and when the retired member was the conversation's
 source or the controller's driver. Durable archive identity and verified
@@ -2391,7 +2420,7 @@ unavailable ruling or relay effects remain pending.
 ### Permanent workstream archives
 
 `osmia archive <workstream>` permanently archives delivered or abandoned work.
-The chief of staff also archives a delivered workstream on its own, as itself,
+The manager also archives a delivered workstream on its own, as itself,
 once the own-pull-request outcome recorded for the workstream's current
 publication is `merged`: every reconciliation pass picks the delivered,
 unarchived workstreams with that evidence, including ones recorded before this
@@ -2411,13 +2440,13 @@ URL, or the recorded upstream commit for an owner-recorded merge). The
 record also pins `resolution_evidence` from the member's history as `merged`,
 `cancelled` or `unresolved`; `resolved` is true only with merged or cancelled
 evidence. Both fields are exposed in the API's runtime archive records. The
-record's optional `actor` is `chief_of_staff` for an automatic archive and
-absent for the owner's, including every record made before the chief of staff
-archived; the API shows it as `archived_by` (`owner` or `chief_of_staff`). The
-chief's conversation shows an entry saying the workstream was archived because
+record's optional `actor` is `chief_of_staff`, the manager's stored name, for an automatic archive and
+absent for the owner's, including every record made before the manager
+archived; the API shows it as `archived_by` (`owner` or `manager`). The
+manager's conversation shows an entry saying the workstream was archived because
 its pull request merged, with the pull request link, derived from the committed
 archive record: it appears once, survives an interruption, and is absent for
-a refused attempt and for an owner archive. A shared chief thread keeps it
+a refused attempt and for an owner archive. A shared manager thread keeps it
 after the member's cleanup; a solo workstream's conversation, with its entry,
 goes when cleanup removes its trace. An
 archived member without that evidence keeps the workgroup unresolved and its

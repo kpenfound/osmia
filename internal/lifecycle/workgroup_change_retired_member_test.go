@@ -209,7 +209,7 @@ func TestArchivedMemberLeavesSurvivorCancellationToApply(t *testing.T) {
 	}
 }
 
-func TestHeldChangeReportsHeldToTheChief(t *testing.T) {
+func TestHeldChangeReportsHeldToTheManager(t *testing.T) {
 	t.Parallel()
 	held := lifecycle.WorkgroupChange{ID: "held", State: "drafting", Failure: "the requester's ruling is unavailable"}.ToolResult()
 	if held.State != "held" || held.Reason != "the requester's ruling is unavailable" {

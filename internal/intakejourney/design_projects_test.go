@@ -337,7 +337,7 @@ func TestDesignPinnedStartRecoversEveryDurableBoundaryWithNewerDraft(t *testing.
 	}
 }
 
-func TestDesignStartExcludesConversationHomeAndContinuesSharedChief(t *testing.T) {
+func TestDesignStartExcludesConversationHomeAndContinuesSharedManager(t *testing.T) {
 	t.Parallel()
 	s, c, home, engine := newDesignEnforcementFixture(t)
 	ctx := context.Background()
@@ -348,12 +348,12 @@ func TestDesignStartExcludesConversationHomeAndContinuesSharedChief(t *testing.T
 	origin := opened.Design.Workstream
 	r, err := s.Repository(home)
 	fixturekit.Must(t, err)
-	_, err = r.ChiefOfStaffThread(origin)
+	_, err = r.ManagerThread(origin)
 	fixturekit.Must(t, err)
 	revision := recordDesignProjects(t, r, origin, intakefixture.ProductionBrief, []config.ProjectID{other})
 	engine.Mu.Lock()
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		return &agent.Result{ClaudeID: "continued-chief", ResultText: "The shared chief continues."}, nil
+		return &agent.Result{ClaudeID: "continued-manager", ResultText: "The shared manager continues."}, nil
 	}
 	engine.Mu.Unlock()
 	fixturekit.Must(t, c.Do(ctx, "POST", "/v1/design/"+string(origin)+"/start", api.DesignStartRequest{BriefRevision: &revision}, nil))
@@ -374,26 +374,26 @@ func TestDesignStartExcludesConversationHomeAndContinuesSharedChief(t *testing.T
 	if group.Conversation == nil || group.Conversation.Project != home || group.Conversation.Workstream != origin {
 		t.Fatalf("conversation moved: %+v", group)
 	}
-	chief, host, _, close, err := s.ChiefRepository(ctx, r, origin)
+	manager, host, _, close, err := s.ManagerRepository(ctx, r, origin)
 	fixturekit.Must(t, err)
-	after, err := chief.Thread(host, trace.ChiefOfStaff)
+	after, err := manager.Thread(host, trace.Manager)
 	close()
 	fixturekit.Must(t, err)
-	if after.Identity.Role != trace.ChiefOfStaff {
-		t.Fatalf("the shared chief's thread: %+v", after.Identity)
+	if after.Identity.Role != trace.Manager {
+		t.Fatalf("the shared manager's thread: %+v", after.Identity)
 	}
 	for _, q := range after.Turns {
-		if q.Request.AgentID != trace.ChiefOfStaff || q.Request.SystemPrompt == intake.DesignRolePrompt {
-			t.Fatalf("a design turn reached the shared chief's thread: %+v", q.Request)
+		if q.Request.AgentID != trace.Manager || q.Request.SystemPrompt == intake.DesignRolePrompt {
+			t.Fatalf("a design turn reached the shared manager's thread: %+v", q.Request)
 		}
 	}
 	_, err = c.Send(ctx, origin, "Continue the conversation at home.")
 	fixturekit.Must(t, err)
-	s.Until(t, "the shared chief to continue the conversation", func() bool {
+	s.Until(t, "the shared manager to continue the conversation", func() bool {
 		conversation, err := c.Conversation(ctx, origin)
 		fixturekit.Must(t, err)
 		return slices.ContainsFunc(conversation.Entries, func(e api.ConversationEntry) bool {
-			return e.Kind == "response" && e.Text == "The shared chief continues."
+			return e.Kind == "response" && e.Text == "The shared manager continues."
 		})
 	})
 	memberRepo, err := s.Repository(other)

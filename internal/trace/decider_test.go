@@ -11,7 +11,7 @@ func TestValidDecider(t *testing.T) {
 		by, judgment string
 		want         bool
 	}{
-		{"", "", true}, {DecidedByOwner, "", true}, {DecidedByChief, "", true},
+		{"", "", true}, {DecidedByOwner, "", true}, {DecidedByManager, "", true},
 		{DecidedByJev, "judgment_ab12", true},
 		{DecidedByJev, "", false}, {DecidedByOwner, "judgment_ab12", false}, {"", "judgment_ab12", false},
 		{"someone", "", false}, {DecidedByJev, "bad key!", false},

@@ -241,7 +241,7 @@ func approveRecoveryWhileLimited(t *testing.T, limit string) *limitedRecoveryApp
 		t.Fatal(e.Message)
 	}
 	if out := intakefixture.Handle(t, m.move, `{"unit":"resume","to":"reviewing","note":"Review it again."}`); !strings.Contains(out, "pending as an owner decision on the recovery card") {
-		t.Fatalf("the chief's move: %s", out)
+		t.Fatalf("the manager's move: %s", out)
 	}
 	cards := recoveryEntriesOf(t, m.f.s, m.repo, m.stream)
 	if len(cards) != 1 || cards[0].Recovery == nil || cards[0].Recovery.Target != UnitReviewing {

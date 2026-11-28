@@ -111,7 +111,7 @@ func (a *archivedUpstream) scriptTurns(t *testing.T) func(*journey.ProductionDes
 		}
 		fixturekit.ConfigureDeliverySigner(t, clone)
 		f.Engine.Mu.Lock()
-		chief := f.Engine.Turns["*"]
+		manager := f.Engine.Turns["*"]
 		f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 			var err error
 			switch {
@@ -150,7 +150,7 @@ func (a *archivedUpstream) scriptTurns(t *testing.T) func(*journey.ProductionDes
 				}
 				_, err = fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "The client resumes uploads", "findings": findings})
 			default:
-				return chief(ctx, req, turn, tools)
+				return manager(ctx, req, turn, tools)
 			}
 			if err != nil {
 				t.Logf("engine turn %s: %v", req.Name, err)
@@ -388,7 +388,7 @@ func TestMergedUpstreamRepairKeepsTheProjectSpecActiveForTheDependent(t *testing
 	if len(resolved) != 0 || resolutionRevision != 0 || !active {
 		t.Fatalf("project spec retired before dependent delivery: resolved=%v revision=%d active=%v", resolved, resolutionRevision, active)
 	}
-	for _, role := range []string{intake.MasonRole, trace.ChiefOfStaff} {
+	for _, role := range []string{intake.MasonRole, trace.Manager} {
 		view, err := f.S.Context().Assemble(ctx, f.Project2, bundle.Scope{Role: role, Workstream: f.Stream2})
 		fixturekit.Must(t, err)
 		if view.ProjectSpec == nil || !strings.Contains(view.Render(), "Stored chunks are acknowledged with their offset.") {

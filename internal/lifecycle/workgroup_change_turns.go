@@ -927,7 +927,7 @@ func (s *Controller) ChangeTurns(ctx context.Context, wt *trace.Repository, c Wo
 			return isolation.Selection{}, err
 		}
 		before, _ := json.MarshalIndent(c.Before, "", "  ")
-		change, _ := json.MarshalIndent(c, "", "  ")
+		change, _ := json.MarshalIndent(c.shown(), "", "  ")
 		for name, data := range map[string][]byte{"before.json": before, "change.json": change, "charters.md": []byte(charters)} {
 			if err := os.WriteFile(filepath.Join(workspace, name), data, 0600); err != nil {
 				return isolation.Selection{}, err

@@ -27,17 +27,17 @@ func recordBriefFor(t *testing.T, repo *trace.Repository, member config.Workstre
 	fixturekit.Must(t, err)
 	revision, err := nextRevision(repo, member, BriefDocument(brief.Review))
 	fixturekit.Must(t, err)
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: BriefDocument(brief.Review), Revision: revision, Project: repo.Project(), Workstream: member, At: fixturekit.DemoStart, Actor: chiefActor, Cause: "fixture"}, Path: BriefPath(brief.Review), Content: string(content) + "\n"}
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: BriefDocument(brief.Review), Revision: revision, Project: repo.Project(), Workstream: member, At: fixturekit.DemoStart, Actor: managerActor, Cause: "fixture"}, Path: BriefPath(brief.Review), Content: string(content) + "\n"}
 	fixturekit.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{doc}))
 }
 
 func logAssumptionFor(t *testing.T, repo *trace.Repository, text string) {
 	t.Helper()
 	ctx := context.Background()
-	_, err := repo.EnsureChiefOfStaff(ctx, stream, fixturekit.DemoStart, fixturekit.ServiceActor)
+	_, err := repo.EnsureManager(ctx, stream, fixturekit.DemoStart, fixturekit.ServiceActor)
 	fixturekit.Must(t, err)
-	scope := fixturekit.ClaimTurn(t, repo, t.TempDir(), stream, trace.ChiefOfStaff, trace.ChiefOfStaff, "assumption", fixturekit.DemoStart)
-	_, err = repo.LogAssumption(ctx, trace.ChiefOfStaff, scope, text, fixturekit.DemoStart)
+	scope := fixturekit.ClaimTurn(t, repo, t.TempDir(), stream, trace.Manager, trace.Manager, "assumption", fixturekit.DemoStart)
+	_, err = repo.LogAssumption(ctx, trace.Manager, scope, text, fixturekit.DemoStart)
 	fixturekit.Must(t, err)
 }
 
@@ -113,7 +113,7 @@ func TestDraftDeliveryIsUnchangedWithoutApplicableBriefItems(t *testing.T) {
 	}
 }
 
-func TestDraftDeliveryOfSharedChiefMembersUsesEachMembersOwnBrief(t *testing.T) {
+func TestDraftDeliveryOfSharedManagerMembersUsesEachMembersOwnBrief(t *testing.T) {
 	t.Parallel()
 	cfg, repo, drafts, report := draftFixture(t)
 	defer repo.Close()

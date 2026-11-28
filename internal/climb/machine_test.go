@@ -285,7 +285,7 @@ func TestCalibrationRunsTheConfiguredCountAndRecordsBaselineAndSpread(t *testing
 		t.Fatalf("the runs passed %d distinct run values", len(runs))
 	}
 	if progress := r.notices(trace.ProgressKind); !slices.ContainsFunc(progress, func(body string) bool { return strings.Contains(body, "baseline 101 ms, spread 3") }) {
-		t.Fatalf("progress to the chief: %v", progress)
+		t.Fatalf("progress to the manager: %v", progress)
 	}
 	if len(r.notices(trace.NoticeKind)) != 0 {
 		t.Fatalf("a calibrated climb raised notices %v", r.notices(trace.NoticeKind))
@@ -314,7 +314,7 @@ func TestAFailedOrInvalidRunHoldsTheClimbAsABrokenMetric(t *testing.T) {
 			}
 			notices := r.notices(trace.NoticeKind)
 			if len(notices) != 1 || !strings.Contains(notices[0], "the metric, not the code, is broken") {
-				t.Fatalf("notices to the chief: %v", notices)
+				t.Fatalf("notices to the manager: %v", notices)
 			}
 			cal, _, found, err := ReadCalibration(r.repo, fixturekit.Stream)
 			fixturekit.Must(t, err)
@@ -344,7 +344,7 @@ func TestASpreadAtTheMinimumImprovementHoldsTheClimbAsTooNoisy(t *testing.T) {
 	}
 	notices := r.notices(trace.NoticeKind)
 	if len(notices) != 1 || !strings.Contains(notices[0], "too noisy to climb") {
-		t.Fatalf("notices to the chief: %v", notices)
+		t.Fatalf("notices to the manager: %v", notices)
 	}
 	cal, _, _, err := ReadCalibration(r.repo, fixturekit.Stream)
 	fixturekit.Must(t, err)

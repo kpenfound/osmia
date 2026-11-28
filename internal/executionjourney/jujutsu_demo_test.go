@@ -148,7 +148,7 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 	f.Engine.Mu.Lock()
 	f.Engine.Turns[execution.MasonTurnID("resume")] = masons.Asking(p, "", "1")
 	f.Engine.Turns[answered] = masons.Turn
-	chief := f.Engine.Turns["*"]
+	manager := f.Engine.Turns["*"]
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
@@ -162,7 +162,7 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 				problems.report("final report %s: %s: %v", req.Name, body, err)
 			}
 		default:
-			return chief(ctx, req, turn, tools)
+			return manager(ctx, req, turn, tools)
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}

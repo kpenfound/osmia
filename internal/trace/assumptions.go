@@ -12,7 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// Assumption is one judgment call the chief of staff made within the
+// Assumption is one judgment call the manager made within the
 // workstream's stated intent, logged rather than asked. Its text appears in
 // the workstream's drafted pull request description.
 type Assumption struct {
@@ -37,8 +37,8 @@ type assumptionsFile struct {
 	Assumptions []Assumption `json:"assumptions"`
 }
 
-// Assumptions returns local judgments followed by the shared chief's judgments
-// affecting stream. Shared judgments stay authoritative on the chief's host;
+// Assumptions returns local judgments followed by the shared manager's judgments
+// affecting stream. Shared judgments stay authoritative on the manager's host;
 // reading them never requires another member's history.
 func Assumptions(r *Repository, stream config.WorkstreamID) ([]Assumption, error) {
 	local, err := readAssumptions(r, stream)
@@ -74,7 +74,7 @@ func Assumptions(r *Repository, stream config.WorkstreamID) ([]Assumption, error
 			return nil, fmt.Errorf("workstream %s is not recorded in workgroup %s", stream, id)
 		}
 	}
-	host := chiefOfStaffHost(groups, stream)
+	host := managerHost(groups, stream)
 	result := applicableAssumptions(local, stream)
 	if host == stream {
 		return result, nil
@@ -118,13 +118,13 @@ func readAssumptions(r *Repository, stream config.WorkstreamID) ([]Assumption, e
 }
 
 // LogAssumption records text as the next logged assumption of the scope's
-// active turn's workstream, in one commit. A chief can select affected members;
+// active turn's workstream, in one commit. A manager can select affected members;
 // omission applies to the whole workgroup. Workers can only select themselves.
 // Replaying the same text and targets in a turn returns the original entry.
 func (r *Repository) LogAssumption(ctx context.Context, agent string, scope coreadapter.Scope, text string, at time.Time, affected ...config.WorkstreamID) (Assumption, error) {
 	stream := config.WorkstreamID(scope.Workstream)
 	members := []config.WorkstreamID{stream}
-	if scope.Role == ChiefOfStaff {
+	if scope.Role == Manager {
 		var err error
 		project := r
 		if r.parent != nil {
@@ -142,7 +142,7 @@ func (r *Repository) LogAssumption(ctx context.Context, agent string, scope core
 	slices.Sort(targets)
 	for i, target := range targets {
 		if !slices.Contains(members, target) {
-			return Assumption{}, refused("workstream %s does not share this chief of staff", target)
+			return Assumption{}, refused("workstream %s does not share this manager", target)
 		}
 		if i > 0 && targets[i-1] == target {
 			return Assumption{}, refused("workstream %s is listed twice", target)

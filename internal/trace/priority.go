@@ -12,9 +12,9 @@ import (
 // PriorityID is the record ID of every priority change of a workstream.
 const PriorityID = "priority"
 
-// PriorityChange records a change the chief of staff made to the project's
+// PriorityChange records a change the manager made to the project's
 // runtime workstream priority order at the owner's request. The actor is the
-// owner whose message the turn answered; Agent is the chief of staff that
+// owner whose message the turn answered; Agent is the manager that
 // made the change in Turn. Order is the project's order in force after it.
 type PriorityChange struct {
 	Header
@@ -31,13 +31,13 @@ func (v PriorityChange) valid() bool {
 }
 
 // PriorityRefused is returned by SetPriority for a change that cannot be
-// made. Reason is written for the chief of staff.
+// made. Reason is written for the manager.
 type PriorityRefused struct{ Reason string }
 
 func (e *PriorityRefused) Error() string { return "priority refused: " + e.Reason }
 
 // SetPriority records a priority change made in the scope's turn. The scope
-// must name this session's active, uncaptured turn of a chief-of-staff
+// must name this session's active, uncaptured turn of a manager
 // thread, and that turn must answer a message from the owner; otherwise it
 // returns *PriorityRefused and apply is not called. apply makes the change
 // and returns the order in force after it, which is recorded; an error from
@@ -61,8 +61,8 @@ func (r *Repository) SetProjectPriority(ctx context.Context, agent string, scope
 	if err := ctx.Err(); err != nil {
 		return PriorityChange{}, err
 	}
-	if scope.Role != ChiefOfStaff {
-		return PriorityChange{}, fmt.Errorf("only a chief-of-staff turn may set the priority")
+	if scope.Role != Manager {
+		return PriorityChange{}, fmt.Errorf("only a manager turn may set the priority")
 	}
 	_, q, err := r.turnScope(agent, scope, true)
 	if err != nil {

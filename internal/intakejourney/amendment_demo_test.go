@@ -39,7 +39,7 @@ func TestAmendmentDemonstration(t *testing.T) {
 			return nil
 		}
 	}
-	masons.Chief.Route("1", []string{"spec#1"}, "Resume from a durable checkpoint", "Acknowledgements are not durable")
+	masons.Manager.Route("1", []string{"spec#1"}, "Resume from a durable checkpoint", "Acknowledgements are not durable")
 	masons.Play[execution.MasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "Acknowledgements are not durable. Should the spec say a durable checkpoint?"})
 		return err

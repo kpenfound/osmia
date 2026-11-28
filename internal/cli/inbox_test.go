@@ -55,12 +55,12 @@ func escalate(t *testing.T, root config.Root, p config.Project, ws config.Workst
 		_, err := repo.Ask(ctx, agent, claim(agent, []string{"mason", "reviewer", "mason"}[i], "turn_"+agent), question, written.Add(time.Duration(i)*time.Second))
 		must(t, err)
 	}
-	chief := claim("chief", trace.ChiefOfStaff, "events")
+	manager := claim("manager", trace.Manager, "events")
 	for _, req := range []trace.EscalationRequest{
 		{Questions: []string{"1", "2"}, Rephrasing: "Are state files and the log format\npart of the contract?", Blocked: "The upload unit and its review.", Options: []string{"Both fixed", "Both free"}, Recommendation: first},
 		{Questions: []string{"3"}, Rephrasing: "May the index unit add a dependency?", Blocked: "The index unit.", Recommendation: second},
 	} {
-		_, err := repo.EscalateQuestions(ctx, "chief", chief, req, written.Add(time.Hour))
+		_, err := repo.EscalateQuestions(ctx, "manager", manager, req, written.Add(time.Hour))
 		must(t, err)
 	}
 	must(t, repo.Close())
@@ -107,7 +107,7 @@ func TestInboxPrintsEveryEscalationWithItsAnswerCommand(t *testing.T) {
 
 func TestAnswerRecordsTheRuling(t *testing.T) {
 	root := startInbox(t)
-	if got, want := successful(t, root, "answer", "1", "Both are part of the contract."), "Ruling recorded on inbox entry 1 ("+stream+", questions 1, 2)\nThe chief of staff relays it to the askers.\n"; got != want {
+	if got, want := successful(t, root, "answer", "1", "Both are part of the contract."), "Ruling recorded on inbox entry 1 ("+stream+", questions 1, 2)\nThe manager relays it to the askers.\n"; got != want {
 		t.Fatalf("answer: %q", got)
 	}
 }

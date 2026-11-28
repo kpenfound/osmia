@@ -31,16 +31,16 @@ func unitProposalPolicy(repo *trace.Repository, stream config.WorkstreamID, unit
 	p.Facts["earlier_moves"] = len(moves)
 	for i := max(0, len(moves)-proposalHistory); i < len(moves); i++ {
 		m := moves[i]
-		p.Records = append(p.Records, router.Entry{Kind: "earlier move", ID: docs[i].ID, Text: fmt.Sprintf("%s moved the unit from %s to %s: %s", m.By, m.From, m.To, m.Note)})
+		p.Records = append(p.Records, router.Entry{Kind: "earlier move", ID: docs[i].ID, Text: fmt.Sprintf("%s moved the unit from %s to %s: %s", trace.DisplayRuler(m.By), m.From, m.To, m.Note)})
 	}
-	_, decisions, err := ChiefDecisions(repo, stream, unit)
+	_, decisions, err := ManagerDecisions(repo, stream, unit)
 	if err != nil {
 		return p, err
 	}
 	p.Facts["earlier_rulings"] = len(decisions)
 	for i := max(0, len(decisions)-proposalHistory); i < len(decisions); i++ {
 		d := decisions[i]
-		p.Records = append(p.Records, router.Entry{Kind: "earlier ruling", ID: d.Contest, Text: fmt.Sprintf("the chief of staff ruled %s on contest %s: %s", d.Decision, d.Contest, d.Note)})
+		p.Records = append(p.Records, router.Entry{Kind: "earlier ruling", ID: d.Contest, Text: fmt.Sprintf("the manager ruled %s on contest %s: %s", d.Decision, d.Contest, d.Note)})
 	}
 	if state.Value != UnitContested {
 		return p, nil
@@ -54,11 +54,11 @@ func unitProposalPolicy(repo *trace.Repository, stream config.WorkstreamID, unit
 		p.Owner, p.RaisedBy = true, "owner"
 		p.Why = fmt.Sprintf("the owner moved unit %s to contested and holds it", unit)
 	case MoveContest(contest, unit):
-		p.Stay, p.RaisedBy = true, "chief of staff"
-		p.Why = fmt.Sprintf("the chief of staff raised the contest of unit %s itself, and by default does not move it out", unit)
-	case slices.ContainsFunc(decisions, func(d ChiefContestDecision) bool { return d.Contest == contest.ID }):
+		p.Stay, p.RaisedBy = true, "manager"
+		p.Why = fmt.Sprintf("the manager raised the contest of unit %s itself, and by default does not move it out", unit)
+	case slices.ContainsFunc(decisions, func(d ManagerContestDecision) bool { return d.Contest == contest.ID }):
 		p.Stay, p.RaisedBy = true, "service"
-		p.Why = fmt.Sprintf("the chief of staff already ruled on contest %s of unit %s, and by default rules a contest once", contest.ID, unit)
+		p.Why = fmt.Sprintf("the manager already ruled on contest %s of unit %s, and by default rules a contest once", contest.ID, unit)
 	default:
 		p.RaisedBy = "service"
 	}

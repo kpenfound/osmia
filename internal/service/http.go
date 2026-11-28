@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/tailnet"
+	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/web"
 )
 
@@ -139,7 +140,7 @@ func (s *Service) configuration() ConfigResponse {
 func (s *Service) runtimeView() RuntimeResponse {
 	state, ds := s.effective()
 	cfg := s.current()
-	out := RuntimeResponse{Effective: state, Profiles: s.effectiveProfiles(state), Projects: []ProjectRuntime{}, Jev: s.jev.Status(), Diagnostics: []Diagnostic{}}
+	out := RuntimeResponse{Effective: displayState(state), Profiles: displayProfiles(s.effectiveProfiles(state)), Projects: []ProjectRuntime{}, Jev: s.jev.Status(), Diagnostics: []Diagnostic{}}
 	for _, id := range s.projectsByNewestWorkstream(cfg) {
 		out.Projects = append(out.Projects, ProjectRuntime{Project: id, ContextMode: s.Context().Mode(id)})
 	}
@@ -167,7 +168,8 @@ func (s *Service) effectiveProfiles(state runtime.State) map[string]EffectivePro
 	stored, _ := s.store.Snapshot()
 	profiles := make(map[string]EffectiveProfile)
 	cfg := s.current()
-	for role, binding := range cfg.Roles {
+	for key, binding := range cfg.Roles {
+		role := trace.RuntimeRole(key)
 		name, source := binding.Profile, "configuration"
 		if override := stored.Profiles[role]; override != "" && state.Profiles[role] == override {
 			name, source = override, "owner_override"
@@ -1029,6 +1031,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		v.Source = runtime.PauseOwner
+		v.Target.Role = trace.StoredRole(v.Target.Role)
 		v.SetAt = s.now()
 		if strings.TrimSpace(v.Reason) == "" {
 			v.Reason = "Owner requested pause"
@@ -1039,6 +1042,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		if !decode(w, r, &v) {
 			return
 		}
+		v.Role = trace.StoredRole(v.Role)
 		err = s.clearPause(v)
 	case r.Method == http.MethodPut && r.URL.Path == Prefix+"/runtime/priority":
 		var v PriorityRequest
@@ -1057,7 +1061,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		if !decode(w, r, &v) {
 			return
 		}
-		err = s.store.SetProfile(v.Role, v.Profile)
+		err = s.store.SetProfile(trace.StoredRole(v.Role), v.Profile)
 	case r.Method == http.MethodDelete && r.URL.Path == Prefix+"/runtime/profile":
 		var v ClearProfileRequest
 		if !decode(w, r, &v) {
@@ -1067,7 +1071,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			fail(w, Validation)
 			return
 		}
-		err = s.store.ClearProfile(v.Role)
+		err = s.store.ClearProfile(trace.StoredRole(v.Role))
 	case r.Method == http.MethodDelete && r.URL.Path == Prefix+"/runtime/provider-limit":
 		var v ClearProviderLimitRequest
 		if !decode(w, r, &v) {

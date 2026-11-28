@@ -61,7 +61,7 @@ func (r *run) sandboxMemory(cfg *config.Config) {
 		slots int
 	}{
 		{"mason", cfg.Capacity.Masons}, {"reviewer", cfg.Capacity.Reviewers}, {"committee", cfg.Capacity.Committee},
-		{"architect", 1}, {"chief_of_staff", 1}, {"designer", 1}, {"foreman", 1},
+		{"architect", 1}, {config.ManagerRole, 1}, {"designer", 1}, {"foreman", 1},
 	} {
 		if role := cfg.Roles[p.name]; role.Sandbox == "sbx" {
 			roles = append(roles, sizedRole{name: p.name, slots: p.slots, sized: role.Memory != ""})
@@ -94,7 +94,7 @@ func (r *run) sandboxMemory(cfg *config.Config) {
 		sum += uint64(role.slots) * memory
 		parts = append(parts, fmt.Sprintf("%s %d × %s (%s)", role.name, role.slots, formatMemory(memory), origin))
 	}
-	detail := fmt.Sprintf("the sbx sandboxes could hold %s at once: %s. Bounded pools count at their capacity; the architect is counted once (it runs at most one turn per workstream, so more workstreams can hold more), and so are the chief of staff and foreman when they run in sbx. A role without memory counts at sbx's default of half the host's memory, between 512 MiB and 32 GiB", formatMemory(sum), strings.Join(parts, ", "))
+	detail := fmt.Sprintf("the sbx sandboxes could hold %s at once: %s. Bounded pools count at their capacity; the architect is counted once (it runs at most one turn per workstream, so more workstreams can hold more), and so are the manager and foreman when they run in sbx. A role without memory counts at sbx's default of half the host's memory, between 512 MiB and 32 GiB", formatMemory(sum), strings.Join(parts, ", "))
 	if sum <= total {
 		r.add(GroupConfig, name, Pass, fmt.Sprintf("%s, within the host's %s of memory", detail, formatMemory(total)), "")
 		return

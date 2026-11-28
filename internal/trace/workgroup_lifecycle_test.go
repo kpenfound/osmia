@@ -231,8 +231,8 @@ func TestRetiredFirstOriginPreservesPartialRulingAndHoldsRemainingRelay(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	chief := claimCrossRepoTurn(t, wg, wg.Project(), g.Members[0], ChiefOfStaff, ChiefOfStaff, "", "chief1")
-	_, err = wg.EscalateQuestions(ctx, ChiefOfStaff, chief, EscalationRequest{Questions: []string{string(crossMember1) + ":" + first.ID, string(crossMember2) + ":" + second.ID}, Rephrasing: "One decision for both origins.", Blocked: "Both origins.", Recommendation: "Keep the contract."}, at)
+	manager := claimCrossRepoTurn(t, wg, wg.Project(), g.Members[0], Manager, Manager, "", "manager1")
+	_, err = wg.EscalateQuestions(ctx, Manager, manager, EscalationRequest{Questions: []string{string(crossMember1) + ":" + first.ID, string(crossMember2) + ":" + second.ID}, Rephrasing: "One decision for both origins.", Blocked: "Both origins.", Recommendation: "Keep the contract."}, at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestRetiredFirstOriginPreservesPartialRulingAndHoldsRemainingRelay(t *testi
 		t.Fatalf("original owner attribution or pins lost: %+v %v", pinned, err)
 	}
 	for range 2 {
-		if _, err := wg.RelayRuling(ctx, ChiefOfStaff, chief, string(crossMember1)+":"+first.ID, "Keep the contract.", ScopeLocal, at); !errors.Is(err, ErrMemberRetired) {
+		if _, err := wg.RelayRuling(ctx, Manager, manager, string(crossMember1)+":"+first.ID, "Keep the contract.", ScopeLocal, at); !errors.Is(err, ErrMemberRetired) {
 			t.Fatalf("unsatisfied retired relay did not remain held: %v", err)
 		}
 		qs, err := r2.Questions(crossMember2)
@@ -365,8 +365,8 @@ func TestRetirementPreservesQuestionRoutedToPendingAmendment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chief := claimCrossRepoTurn(t, group, group.Project(), g.Members[0], ChiefOfStaff, ChiefOfStaff, "", "chief1")
-	if _, err := group.FileAmendment(ctx, ChiefOfStaff, chief, AmendmentRequest{
+	manager := claimCrossRepoTurn(t, group, group.Project(), g.Members[0], Manager, Manager, "", "manager1")
+	if _, err := group.FileAmendment(ctx, Manager, manager, AmendmentRequest{
 		QuestionID: string(crossMember2) + ":" + q.ID, Citations: []string{"plan#resume"},
 		Change: "Widen the retry window", Reason: "The reviewer found a gap",
 		Seal: 1, SealRevision: 1, SpecHash: "sha256:test",

@@ -312,9 +312,9 @@ func (f *shedFixture) awaitStreamAfterRestart(t *testing.T, stream config.Workst
 	return stream
 }
 
-// Without Jev's key the card reaches the owner with the chief of staff's own
+// Without Jev's key the card reaches the owner with the manager's own
 // recommendation, nothing is sent, and the fallback is recorded.
-func TestWithoutJevsKeyTheCardKeepsTheChiefOfStaffsRecommendation(t *testing.T) {
+func TestWithoutJevsKeyTheCardKeepsTheManagersRecommendation(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.97}
 	f := newJevGateFixture(t, p, gateKey(t, false), nil)
@@ -562,8 +562,8 @@ func TestAConfidentJevApprovesOrDeclinesAnIntentChangingAmendment(t *testing.T) 
 	}
 }
 
-// An amendment that leaves the approved intent unchanged is the chief of
-// staff's to decide, not the owner's gate: Jev is never asked about it.
+// An amendment that leaves the approved intent unchanged is the manager's
+// to decide, not the owner's gate: Jev is never asked about it.
 func TestJevIsNeverAskedAboutAPlanOnlyAmendment(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.99}
@@ -606,13 +606,13 @@ func claimThread(t *testing.T, repo *trace.Repository, now time.Time, agent, rol
 func escalate(t *testing.T, f *gateFixture, role string, options ...string) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
-	chief := claimThread(t, f.repo, f.now(), "chief", trace.StatusRole, "chief1", "")
+	manager := claimThread(t, f.repo, f.now(), "manager", trace.StatusRole, "manager1", "")
 	asker := claimThread(t, f.repo, f.now(), "asker", role, "build_asker", "unit1")
 	_, err := f.repo.Ask(ctx, "asker", asker, "Should uploads resume after a restart?", f.now())
 	fixturekit.Must(t, err)
-	_, err = f.repo.EscalateQuestions(ctx, "chief", chief, trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "Should uploads resume?", Section: "spec#1", Conflict: "The spec says resume; the plan says restart.", Blocked: "The upload unit.", Options: options, Recommendation: "Resume from the last chunk."}, f.now())
+	_, err = f.repo.EscalateQuestions(ctx, "manager", manager, trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "Should uploads resume?", Section: "spec#1", Conflict: "The spec says resume; the plan says restart.", Blocked: "The upload unit.", Options: options, Recommendation: "Resume from the last chunk."}, f.now())
 	fixturekit.Must(t, err)
-	return chief
+	return manager
 }
 
 func (f *gateFixture) gates(t *testing.T) []intake.Gate {
@@ -622,12 +622,12 @@ func (f *gateFixture) gates(t *testing.T) []intake.Gate {
 	return gates
 }
 
-func TestAConfidentJevRulesOnAnEscalatedQuestionFromTheChiefsOptions(t *testing.T) {
+func TestAConfidentJevRulesOnAnEscalatedQuestionFromTheManagersOptions(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	p := &gateJev{confidence: 0.95, pick: func(_ string, options []string) string { return options[1] }}
 	f, repo, stream := newEscalationFixture(t, p)
-	chief := escalate(t, f, masonRole, "Resume from the last chunk.", "Restart the upload.")
+	manager := escalate(t, f, masonRole, "Resume from the last chunk.", "Restart the upload.")
 
 	gates := f.gates(t)
 	if len(gates) != 1 || gates[0].Kind != jev.KindEscalatedQuestion || gates[0].Key != jev.QuestionKey("1") || len(gates[0].Options) != 2 || gates[0].Options[1].Description != "Restart the upload." {
@@ -655,7 +655,7 @@ func TestAConfidentJevRulesOnAnEscalatedQuestionFromTheChiefsOptions(t *testing.
 	if after, err := repo.Inbox(); err != nil || after[0].State == trace.QuestionEscalated {
 		t.Fatalf("the escalation is still open: %+v %v", after, err)
 	}
-	if _, err := repo.RelayRuling(ctx, "chief", chief, "1", "Restart the upload.", trace.ScopeLocal, f.now()); err != nil {
+	if _, err := repo.RelayRuling(ctx, "manager", manager, "1", "Restart the upload.", trace.ScopeLocal, f.now()); err != nil {
 		t.Fatal(err)
 	}
 	relayed, err := repo.Questions(stream)
@@ -669,7 +669,7 @@ func TestAConfidentJevRulesOnAnEscalatedQuestionFromTheChiefsOptions(t *testing.
 	}
 }
 
-// An escalation with no options the chief of staff wrote is never sent: Jev
+// An escalation with no options the manager wrote is never sent: Jev
 // never writes the text of a ruling, so the card shows at once for the owner,
 // whoever asked.
 func TestEscalationsWithoutWrittenOptionsAreNeverSent(t *testing.T) {
@@ -698,7 +698,7 @@ func TestEscalationsWithoutWrittenOptionsAreNeverSent(t *testing.T) {
 
 // An architect's escalation, such as the judgment that a project needs no
 // change, is one of the owner's own decisions: Jev decides it from the options
-// the chief of staff wrote at the owner threshold, not the decision threshold.
+// the manager wrote at the owner threshold, not the decision threshold.
 func TestJevDecidesAnArchitectsEscalationAtTheOwnerThreshold(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -740,7 +740,7 @@ func TestJevDecidesAnArchitectsEscalationAtTheOwnerThreshold(t *testing.T) {
 	}
 }
 
-// An escalation that carries a binding Jev judgment of the chief of staff's
+// An escalation that carries a binding Jev judgment of the manager's
 // decision the service could not carry out reaches the owner with the judgment
 // shown, and the gate sends nothing.
 func TestAnEscalationCarryingABindingJudgmentGoesToTheOwnerWithoutAGateRequest(t *testing.T) {
@@ -749,8 +749,8 @@ func TestAnEscalationCarryingABindingJudgmentGoesToTheOwnerWithoutAGateRequest(t
 	p := &gateJev{confidence: 0.99}
 	f := newGateFixture(t, p)
 	escalate(t, f, masonRole, "Resume from the last chunk.", "Restart the upload.")
-	chiefJev := &gateJev{confidence: 0.97, pick: func(string, []string) string { return "answer" }}
-	routed := gateJudge(f.now, chiefJev).Decide(ctx, f.repo, jev.DecisionRequest{Scope: coreadapter.Scope{Project: string(f.repo.Project()), Workstream: string(fixturekit.Stream)}, Cause: "chief-decide", Kind: jev.KindQuestionRouting, Occurrence: jev.QuestionKey("1"), State: "state",
+	managerJev := &gateJev{confidence: 0.97, pick: func(string, []string) string { return "answer" }}
+	routed := gateJudge(f.now, managerJev).Decide(ctx, f.repo, jev.DecisionRequest{Scope: coreadapter.Scope{Project: string(f.repo.Project()), Workstream: string(fixturekit.Stream)}, Cause: "manager-decide", Kind: jev.KindQuestionRouting, Occurrence: jev.QuestionKey("1"), State: "state",
 		Options: []jev.DecisionOption{{Name: "answer", Description: "Answer it."}, {Name: "escalate", Description: "Escalate it."}}})
 	if routed.Status != jev.Binding {
 		t.Fatalf("routing %+v", routed)
@@ -769,7 +769,7 @@ func TestAnEscalationCarryingABindingJudgmentGoesToTheOwnerWithoutAGateRequest(t
 	}
 	f2 := newGateFixture(t, p)
 	escalate(t, f2, masonRole, "Resume from the last chunk.", "Restart the upload.")
-	gateJudge(f2.now, &gateJev{confidence: 0.97, pick: func(string, []string) string { return "escalate" }}).Decide(ctx, f2.repo, jev.DecisionRequest{Scope: coreadapter.Scope{Project: string(f2.repo.Project()), Workstream: string(fixturekit.Stream)}, Cause: "chief-decide", Kind: jev.KindQuestionRouting, Occurrence: jev.QuestionKey("1"), State: "state",
+	gateJudge(f2.now, &gateJev{confidence: 0.97, pick: func(string, []string) string { return "escalate" }}).Decide(ctx, f2.repo, jev.DecisionRequest{Scope: coreadapter.Scope{Project: string(f2.repo.Project()), Workstream: string(fixturekit.Stream)}, Cause: "manager-decide", Kind: jev.KindQuestionRouting, Occurrence: jev.QuestionKey("1"), State: "state",
 		Options: []jev.DecisionOption{{Name: "answer", Description: "Answer it."}, {Name: "escalate", Description: "Escalate it."}}})
 	if gates := f2.gates(t); len(gates) != 1 {
 		t.Fatalf("gates %+v", gates)
@@ -784,7 +784,7 @@ func TestAConfidentJevReviewsAnEscalatedContestAgain(t *testing.T) {
 	c.f.s.jev = gateJudge(c.f.clock.Now, p)
 	contest := c.contest(t)
 	if gate, carried, err := c.f.s.contestedGate(c.repo, c.stream, "resume"); err != nil || gate != nil || carried != nil {
-		t.Fatalf("a contest the chief of staff did not raise is a gate: %+v %+v %v", gate, carried, err)
+		t.Fatalf("a contest the manager did not raise is a gate: %+v %+v %v", gate, carried, err)
 	}
 	if out := c.resolve(t, `{"unit":"resume","decision":"escalate","note":"The reviewer ends every turn without a verdict."}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("escalate: %s", out)

@@ -32,7 +32,7 @@ holding the event. The first event is resync, which asks the client to read
 every view again; it also replaces events a slow subscriber missed. A comment
 line keeps an idle stream open.`
 
-const feedDescription = `Oldest-first entries from the workstream trace and its chief-of-staff
+const feedDescription = `Oldest-first entries from the workstream trace and its manager
 conversation. Kinds message, response, action, status and session retain their
 conversation, status and agent-turn payloads. Every claimed turn is a session,
 including final-review readers. Transition identifies every recorded workflow
@@ -55,7 +55,7 @@ Unit, final and session check entries carry one optional trace_url, the
 Dagger Cloud trace link the CLI printed. It comes from the result record or,
 when the result has none or does not exist yet, from the start record. Captured check output remains in the trace.
 
-brief is the delivery brief the chief of staff recorded for a final review: its
+brief is the delivery brief the manager recorded for a final review: its
 text, before_you_ship items and screenshots. It appears once per review and
 shows the latest brief when it was replaced.
 

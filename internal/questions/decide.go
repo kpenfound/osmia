@@ -24,12 +24,12 @@ const (
 
 // RoutingRoles are the roles whose questions Jev takes part in routing: the
 // workers that build a feature. A question of any other role, such as the
-// architect's judgment that a project needs no change, is the chief of
-// staff's to route without Jev; once escalated, Jev decides it at the owner's
+// architect's judgment that a project needs no change, is the manager's
+// to route without Jev; once escalated, Jev decides it at the owner's
 // gate at the owner threshold.
 var RoutingRoles = []string{"mason", "reviewer"}
 
-// RoutingSubject is an open question the chief of staff may route with Jev.
+// RoutingSubject is an open question the manager may route with Jev.
 type RoutingSubject struct {
 	// Repository holds the trace of Stream, the workstream the question
 	// belongs to.
@@ -43,19 +43,19 @@ type RoutingSubject struct {
 // Key is the question's occurrence key.
 func (s RoutingSubject) Key() string { return jev.QuestionKey(s.Question.Asked.ID) }
 
-// Label names the question for the chief of staff.
+// Label names the question for the manager.
 func (s RoutingSubject) Label() string {
 	return fmt.Sprintf("question %s of workstream %s", s.Question.Asked.ID, s.Stream)
 }
 
-// RoutingSubjectOf resolves the question id the way the chief of staff's
+// RoutingSubjectOf resolves the question id the way the manager's
 // question tools name it (a number of the turn's own workstream, or
 // "<workstream>:<number>" of a workgroup member). The returned reason is
-// non-empty when the chief may not route the question with Jev today: it is not
+// non-empty when the manager may not route the question with Jev today: it is not
 // open, it reports a conflict between member charters, or its asker is not a
 // role Jev takes part in routing for. Such a question keeps the route it has.
 func RoutingSubjectOf(repository *trace.Repository, host config.WorkstreamID, id string) (RoutingSubject, string, error) {
-	member, local, err := repository.ChiefQuestionTarget(host, strings.TrimSpace(id))
+	member, local, err := repository.ManagerQuestionTarget(host, strings.TrimSpace(id))
 	if err != nil {
 		return RoutingSubject{}, "", err
 	}
@@ -77,15 +77,15 @@ func RoutingSubjectOf(repository *trace.Repository, host config.WorkstreamID, id
 	case q.State != trace.QuestionOpen:
 		return s, fmt.Sprintf("question %s is %s, not open; only an open question is routed", id, q.State), nil
 	case len(q.Asked.CharterConflict) > 0:
-		return s, fmt.Sprintf("question %s reports a conflict between member charters; it goes straight to the owner's gate and the chief of staff does not route it with Jev", id), nil
+		return s, fmt.Sprintf("question %s reports a conflict between member charters; it goes straight to the owner's gate and the manager does not route it with Jev", id), nil
 	}
 	thread, err := target.Thread(member, q.Asked.AskedBy.ID)
 	if err != nil {
-		return s, fmt.Sprintf("the asker of question %s is unknown; the chief of staff does not route it with Jev", id), nil
+		return s, fmt.Sprintf("the asker of question %s is unknown; the manager does not route it with Jev", id), nil
 	}
 	s.Role = thread.Identity.Role
 	if !slices.Contains(RoutingRoles, s.Role) {
-		return s, fmt.Sprintf("question %s was asked by the %s, whose questions the chief of staff escalates as it judges and the owner's gate decides; the chief of staff does not route it with Jev", id, s.Role), nil
+		return s, fmt.Sprintf("question %s was asked by the %s, whose questions the manager escalates as it judges and the owner's gate decides; the manager does not route it with Jev", id, s.Role), nil
 	}
 	return s, "", nil
 }

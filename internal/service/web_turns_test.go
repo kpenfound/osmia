@@ -49,16 +49,16 @@ func runEnforced(t *testing.T, turns *isolation.Turns, engine *adaptertest.Engin
 	return got
 }
 
-func TestOrdinaryChiefTurnHoldsWebTools(t *testing.T) {
+func TestOrdinaryManagerTurnHoldsWebTools(t *testing.T) {
 	t.Parallel()
-	f, stream, repository := newReviewFixture(t, "chief-web")
+	f, stream, repository := newReviewFixture(t, "manager-web")
 	for backend, web := range webToolsByBackend {
 		t.Run(backend, func(t *testing.T) {
 			turns, engine, hosts := enforcedTurns(t, f, repository)
-			got := runEnforced(t, turns, engine, hosts, coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "turn-" + backend}, backend)
+			got := runEnforced(t, turns, engine, hosts, coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: "turn-" + backend}, backend)
 			for _, tool := range web {
 				if !slices.Contains(got.Native, tool) {
-					t.Errorf("%s chief native tools %v lack %s", backend, got.Native, tool)
+					t.Errorf("%s manager native tools %v lack %s", backend, got.Native, tool)
 				}
 			}
 			if backend == "claude" {
@@ -68,15 +68,15 @@ func TestOrdinaryChiefTurnHoldsWebTools(t *testing.T) {
 			}
 			for _, tool := range writeOrShellTools {
 				if slices.Contains(got.Native, tool) {
-					t.Errorf("chief holds %s", tool)
+					t.Errorf("manager holds %s", tool)
 				}
 			}
 			names := slices.Clone(got.MCP)
-			want := ChiefOrdinaryToolsOf("feature")
+			want := ManagerOrdinaryToolsOf("feature")
 			slices.Sort(names)
 			slices.Sort(want)
 			if !slices.Equal(names, want) {
-				t.Errorf("chief MCP tools %v, want %v", names, want)
+				t.Errorf("manager MCP tools %v, want %v", names, want)
 			}
 			for _, name := range names {
 				if lower := strings.ToLower(name); strings.Contains(lower, "web") || strings.Contains(lower, "search") || strings.Contains(lower, "fetch") {
@@ -84,16 +84,16 @@ func TestOrdinaryChiefTurnHoldsWebTools(t *testing.T) {
 				}
 			}
 			if slices.Contains(names, draftBriefToolName) || slices.Contains(names, designReadRepoToolName) || slices.Contains(names, designTitleToolName) {
-				t.Errorf("an ordinary chief reaches a design tool: %v", names)
+				t.Errorf("an ordinary manager reaches a design tool: %v", names)
 			}
 			if !got.Capabilities.Web || got.Capabilities.WriteFiles || got.Capabilities.Execute || got.Capabilities.Network {
 				t.Errorf("host capabilities %+v", got.Capabilities)
 			}
 			if len(got.Mounts) == 0 || got.Mounts[0].Access != agent.ReadOnly || got.VCS {
-				t.Errorf("chief workspace %+v vcs=%v", got.Mounts, got.VCS)
+				t.Errorf("manager workspace %+v vcs=%v", got.Mounts, got.VCS)
 			}
-			if got.SystemPrompt != "You are the chief_of_staff." || !strings.Contains(got.Prompt, isolation.WebGuidance) {
-				t.Errorf("chief system prompt %q, or its prompt lacks the web guidance: %q", got.SystemPrompt, got.Prompt)
+			if got.SystemPrompt != "You are the "+trace.Manager+"." || !strings.Contains(got.Prompt, isolation.WebGuidance) {
+				t.Errorf("manager system prompt %q, or its prompt lacks the web guidance: %q", got.SystemPrompt, got.Prompt)
 			}
 		})
 	}
@@ -103,8 +103,8 @@ func TestWebIsGrantedToDesignAndSessionRoles(t *testing.T) {
 	t.Parallel()
 	f, _, repository := newReviewFixture(t, "design-web")
 	turns, _, _ := enforcedTurns(t, f, repository)
-	if !turns.Grants[trace.ChiefOfStaff].Web || !chiefOrdinaryNarrow.Web || !designNarrow.Web {
-		t.Fatalf("chief grant %+v, ordinary narrowing %+v, design narrowing %+v", turns.Grants[trace.ChiefOfStaff], chiefOrdinaryNarrow, designNarrow)
+	if !turns.Grants[trace.Manager].Web || !managerOrdinaryNarrow.Web || !designNarrow.Web {
+		t.Fatalf("manager grant %+v, ordinary narrowing %+v, design narrowing %+v", turns.Grants[trace.Manager], managerOrdinaryNarrow, designNarrow)
 	}
 	if want := []string{"file_read", draftBriefToolName, designReadRepoToolName, designTitleToolName}; !slices.Equal(designNarrow.Tools, want) {
 		t.Fatalf("design narrowing tools %v, want %v", designNarrow.Tools, want)
@@ -157,7 +157,7 @@ func TestRolesWithoutWebGetNoWebTools(t *testing.T) {
 	}
 	turns, _, _ := enforcedTurns(t, f, repository)
 	for role, grant := range turns.Grants {
-		if grant.Web != (role == trace.ChiefOfStaff || role == trace.Designer || role == sessionRole) {
+		if grant.Web != (role == trace.Manager || role == trace.Designer || role == sessionRole) {
 			t.Errorf("%s grant %+v", role, grant)
 		}
 	}

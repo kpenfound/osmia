@@ -27,10 +27,10 @@ const (
 // TurnDirectories are the directories under the root holding what the turns
 // of each workstream ran with, by project and workstream: their session
 // directories, with each session's prompts, transcript and result, and the
-// views the chief of staff and drift reviewers are staged.
+// views the manager and drift reviewers are staged.
 var TurnDirectories = []string{
 
-	"threads", "architect", "shed", "final", "chief_of_staff", "workspaces", "views", "checks"}
+	"threads", "architect", "shed", "final", trace.Manager, "workspaces", "views", "checks"}
 
 // WorkspaceCleanup removes the workspaces of the configured project that the
 // workflow is done with: a unit's workspace and its reviewer's export once
@@ -136,7 +136,7 @@ func (c *WorkspaceCleanup) Clean(ctx context.Context, stream config.WorkstreamID
 	if len(done) == 0 && !finished {
 		return nil
 	}
-	busy, chief, err := c.Busy(stream)
+	busy, manager, err := c.Busy(stream)
 	if err != nil {
 		return err
 	}
@@ -182,7 +182,7 @@ func (c *WorkspaceCleanup) Clean(ctx context.Context, stream config.WorkstreamID
 			return err
 		}
 	}
-	if chief {
+	if manager {
 		return nil
 	}
 	for i, dir := range turns {
@@ -199,14 +199,14 @@ func (c *WorkspaceCleanup) Clean(ctx context.Context, stream config.WorkstreamID
 }
 
 // Busy returns the units of the workstream with a turn unfinished, with the
-// empty unit "" when a thread with no unit but the chief of staff's has one,
-// and whether the chief of staff has one.
+// empty unit "" when a thread with no unit but the manager's has one,
+// and whether the manager has one.
 func (c *WorkspaceCleanup) Busy(stream config.WorkstreamID) (map[string]bool, bool, error) {
 	threads, err := c.Repository.Threads(stream)
 	if err != nil {
 		return nil, false, err
 	}
-	busy, chief := map[string]bool{}, false
+	busy, manager := map[string]bool{}, false
 	for _, th := range threads {
 		unfinished := th.Active != ""
 		for _, q := range th.Turns {
@@ -216,13 +216,13 @@ func (c *WorkspaceCleanup) Busy(stream config.WorkstreamID) (map[string]bool, bo
 		}
 		switch {
 		case !unfinished:
-		case th.Identity.Role == trace.ChiefOfStaff:
-			chief = true
+		case th.Identity.Role == trace.Manager:
+			manager = true
 		default:
 			busy[th.Identity.Unit] = true
 		}
 	}
-	return busy, chief, nil
+	return busy, manager, nil
 }
 
 // Pending reports whether the workstream has an operation without a result.

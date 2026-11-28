@@ -428,7 +428,7 @@ func TestAmendmentDecisionIsCompletedOnceAfterARestart(t *testing.T) {
 	}
 }
 
-func TestChiefOfStaffRecordsTheOwnersAmendmentDecision(t *testing.T) {
+func TestManagerRecordsTheOwnersAmendmentDecision(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, stream := journey.BuiltForAmendment(t, 1)
@@ -438,7 +438,7 @@ func TestChiefOfStaffRecordsTheOwnersAmendmentDecision(t *testing.T) {
 	fixturekit.Must(t, err)
 	defer func() { _ = repo.Close() }()
 	f.S.SetSole(&journey.ActiveProject{Repository: repo})
-	_, err = repo.EnsureChiefOfStaff(ctx, stream, fixturekit.DemoStart, intake.ServiceActor)
+	_, err = repo.EnsureManager(ctx, stream, fixturekit.DemoStart, intake.ServiceActor)
 	fixturekit.Must(t, err)
 	profile := coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}
 	for _, turn := range []struct {
@@ -446,19 +446,19 @@ func TestChiefOfStaffRecordsTheOwnersAmendmentDecision(t *testing.T) {
 		actor trace.Actor
 	}{{"events_1", intake.ServiceActor}, {"message_1", intake.OwnerActor}} {
 		_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn.id, Revision: 1, Project: f.Project, Workstream: stream, At: fixturekit.DemoStart, Actor: turn.actor, Cause: "fixture"},
-			AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: turn.id, Profile: profile, SystemPrompt: "chief", Prompt: "Reject amendment 1."})
+			AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: turn.id, Profile: profile, SystemPrompt: "manager", Prompt: "Reject amendment 1."})
 		fixturekit.Must(t, err)
 	}
 	controls := &journey.RuntimeControls{}
 	controls.Service.Store(f.S)
 	decide := func(turn string) string {
 		t.Helper()
-		scope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: turn}
+		scope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: turn}
 		out, err := controls.DecideAmendment(repo, scope).Handle(ctx, json.RawMessage(`{"amendment":"1","packet":1,"decision":"reject","note":"Keep the chunk semantics.","owner_decided":true}`))
 		fixturekit.Must(t, err)
 		return string(out)
 	}
-	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token-events", filepath.Join(t.TempDir(), "events"), fixturekit.DemoStart)
+	_, err = repo.ClaimTurn(ctx, stream, trace.Manager, "token-events", filepath.Join(t.TempDir(), "events"), fixturekit.DemoStart)
 	fixturekit.Must(t, err)
 	if out := decide("events_1"); out != `{"recorded":false,"reason":"this turn does not answer an owner message"}` {
 		t.Fatalf("service turn: %s", out)
@@ -468,8 +468,8 @@ func TestChiefOfStaffRecordsTheOwnersAmendmentDecision(t *testing.T) {
 	repo, err = trace.Open(f.S.Current().Root, f.S.Current().Project)
 	fixturekit.Must(t, err)
 	f.S.SetSole(&journey.ActiveProject{Repository: repo})
-	fixturekit.Must(t, repo.AbandonTurn(ctx, stream, trace.ChiefOfStaff, "events_1", fixturekit.DemoStart))
-	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token-message", filepath.Join(t.TempDir(), "message"), fixturekit.DemoStart)
+	fixturekit.Must(t, repo.AbandonTurn(ctx, stream, trace.Manager, "events_1", fixturekit.DemoStart))
+	_, err = repo.ClaimTurn(ctx, stream, trace.Manager, "token-message", filepath.Join(t.TempDir(), "message"), fixturekit.DemoStart)
 	fixturekit.Must(t, err)
 	var result struct {
 		Recorded  bool   `json:"recorded"`

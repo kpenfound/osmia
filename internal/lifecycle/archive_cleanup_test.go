@@ -104,14 +104,14 @@ func TestArchiveCleanupRetainsTheTitleAndDefersForABusyWorkstream(t *testing.T) 
 	h := func(kind, id string) trace.Header {
 		return trace.Header{Schema: "osmia.trace." + kind, Version: trace.Version, ID: id, Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "fixture"}
 	}
-	_, err = repo.EnsureChiefOfStaff(ctx, fixturekit.Stream, fixturekit.DemoStart, intake.ServiceActor)
+	_, err = repo.EnsureManager(ctx, fixturekit.Stream, fixturekit.DemoStart, intake.ServiceActor)
 	fixturekit.Must(t, err)
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h("turn-request", "request-title"), AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "title", Profile: coreadapter.Profile{Name: "fake", Backend: "fake", Model: "fake"}, Prompt: "Set title"})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h("turn-request", "request-title"), AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "title", Profile: coreadapter.Profile{Name: "fake", Backend: "fake", Model: "fake"}, Prompt: "Set title"})
 	fixturekit.Must(t, err)
 	session := t.TempDir()
-	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "title-token", session, fixturekit.DemoStart)
+	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.Manager, "title-token", session, fixturekit.DemoStart)
 	fixturekit.Must(t, err)
-	_, err = repo.SetStatus(ctx, trace.ChiefOfStaff, coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(fixturekit.Stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "title"}, trace.StatusContent{Goal: "Preserved workstream title", Note: "Sensitive detail", Agents: []string{}}, fixturekit.DemoStart, func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	_, err = repo.SetStatus(ctx, trace.Manager, coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(fixturekit.Stream), Role: trace.Manager, Thread: trace.Manager, Turn: "title"}, trace.StatusContent{Goal: "Preserved workstream title", Note: "Sensitive detail", Agents: []string{}}, fixturekit.DemoStart, func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: h("document", "full-check-output"), Path: "units/u/checks-1-output.txt", Content: "sensitive stdout and stderr"}}))
 	_, err = repo.SetWorkstreamBase(ctx, fixturekit.Quiet, fixturekit.Stream, 0, fixturekit.DemoStart)
@@ -143,8 +143,8 @@ func TestArchiveCleanupRetainsTheTitleAndDefersForABusyWorkstream(t *testing.T) 
 	if strings.Contains(logged.String(), "Sensitive detail") || strings.Contains(logged.String(), "sensitive stdout and stderr") {
 		t.Fatalf("log carries sensitive status or document content: %s", logged.String())
 	}
-	fixturekit.Must(t, repo.CaptureTurn(ctx, "title-token", trace.TurnResponse{Header: h("turn-response", "response-title"), AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "title", RequestID: "request-title", RequestRevision: 1, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "test-session"}, SessionDirectory: session, StartedAt: fixturekit.DemoStart, FinalResponse: "Done"}}))
-	fixturekit.Must(t, repo.CompleteTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "title", "title-token", fixturekit.DemoStart))
+	fixturekit.Must(t, repo.CaptureTurn(ctx, "title-token", trace.TurnResponse{Header: h("turn-response", "response-title"), AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "title", RequestID: "request-title", RequestRevision: 1, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "test-session"}, SessionDirectory: session, StartedAt: fixturekit.DemoStart, FinalResponse: "Done"}}))
+	fixturekit.Must(t, repo.CompleteTurn(ctx, fixturekit.Stream, trace.Manager, "title", "title-token", fixturekit.DemoStart))
 	fixturekit.Must(t, cleanup.Pass(ctx))
 	raw, _ = store.Snapshot()
 	if !raw.Archived[0].CleanedAt.IsZero() {

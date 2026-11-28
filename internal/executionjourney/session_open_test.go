@@ -601,19 +601,19 @@ func TestPublisherPassSkipsASessionAlongsideAnApprovedWorkstream(t *testing.T) {
 	assertSessionUnchanged(t, repository, session, before)
 }
 
-func TestEnsureChiefsOfStaffSkipsASessionAlongsideAnOrdinaryWorkstream(t *testing.T) {
+func TestEnsureManagersSkipsASessionAlongsideAnOrdinaryWorkstream(t *testing.T) {
 	t.Parallel()
 	_, repo := newExclusionFixture(t, "")
 	ctx := context.Background()
 	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, service.SessionActor))
 	session := createTestSession(t, repo)
 	before := captureSessionSnapshot(t, repo, session)
-	fixturekit.Must(t, service.EnsureChiefsOfStaff(ctx, repo, fixturekit.DemoStart.Add(time.Hour)))
-	if _, err := repo.ChiefOfStaffThread(fixturekit.Stream); err != nil {
-		t.Fatalf("the ordinary workstream's chief-of-staff thread: %v", err)
+	fixturekit.Must(t, service.EnsureManagers(ctx, repo, fixturekit.DemoStart.Add(time.Hour)))
+	if _, err := repo.ManagerThread(fixturekit.Stream); err != nil {
+		t.Fatalf("the ordinary workstream's manager thread: %v", err)
 	}
-	if _, err := repo.ChiefOfStaffThread(session); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the session got a chief-of-staff thread: %v", err)
+	if _, err := repo.ManagerThread(session); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the session got a manager thread: %v", err)
 	}
 	assertSessionUnchanged(t, repo, session, before)
 }

@@ -147,7 +147,7 @@ type Loop struct {
 }
 
 // NoCandidateStall is how many attempts in a row may end without a candidate
-// before the chief of staff is told the climb is stalled.
+// before the manager is told the climb is stalled.
 const NoCandidateStall = 3
 
 const maxSteps = 64
@@ -771,7 +771,7 @@ func (l *Loop) promoted(ctx context.Context, c *cycle, j Journal) (bool, error) 
 	a.Commit = j.Squashed
 	best := j.Measurement.Score
 	body := fmt.Sprintf("Attempt %d was kept: %s. The current best is now %v on %s.", j.Number, strings.TrimSpace(oneLine(j.Hypothesis)), best, j.Squashed)
-	events := []trace.Event{trace.Progress(fmt.Sprintf("%s-%s", trace.ClimbAttemptSubject(j.Number), PhaseRecorded), "chief", body)}
+	events := []trace.Event{trace.Progress(fmt.Sprintf("%s-%s", trace.ClimbAttemptSubject(j.Number), PhaseRecorded), trace.ManagerKey, body)}
 	return l.record(ctx, c, j, PhasePromoted, a, events, api.EventClimbKept)
 }
 
@@ -789,7 +789,7 @@ func (l *Loop) finishDiscard(ctx context.Context, c *cycle, j Journal, from Phas
 		}
 		if run%NoCandidateStall == 0 {
 			id := fmt.Sprintf("%s-%s", trace.ClimbAttemptSubject(j.Number), PhaseRecorded)
-			events = append(events, trace.Notice(id, "chief", fmt.Sprintf("The climb is stalled: %d attempts in a row ended without a candidate, the latest being attempt %d (%s). The mason produces nothing the service can measure; steer it with a note or conclude the climb.", run, j.Number, d.Reason)))
+			events = append(events, trace.Notice(id, trace.ManagerKey, fmt.Sprintf("The climb is stalled: %d attempts in a row ended without a candidate, the latest being attempt %d (%s). The mason produces nothing the service can measure; steer it with a note or conclude the climb.", run, j.Number, d.Reason)))
 		}
 	}
 	return l.record(ctx, c, j, from, a, events, "")

@@ -15,7 +15,7 @@ import (
 func TestDraftWorkgroupRefusesAMemberOfAnUnregisteredKind(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newCrossRepoWiringFixture(t, map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff})
+	f := newCrossRepoWiringFixture(t, map[string]string{trace.Manager: trace.Manager})
 	s, err := journey.Start(ctx, f.opts)
 	fixturekit.Must(t, err)
 	defer func() { fixturekit.Must(t, s.Close()) }()

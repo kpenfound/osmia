@@ -7,6 +7,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/envelope"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // Render returns the bundle as the text a turn request carries. The output
@@ -135,7 +136,7 @@ func (b Bundle) Render() string {
 			line("  owner: %s", indent(d.OwnerResponse))
 		}
 		if d.ReturnedAnswer == "" {
-			line("  answer: waiting for the chief of staff to relay the ruling")
+			line("  answer: waiting for the manager to relay the ruling")
 		} else {
 			line("  answer: %s", indent(d.ReturnedAnswer))
 		}
@@ -166,7 +167,7 @@ func (b Bundle) Render() string {
 		line("- The owner edited charter.md: record %s revision %d. Recheck the current charter before proceeding.", d.ID, d.Revision)
 	}
 	for _, n := range b.ProjectNotices {
-		line("- %s (record %s revision %d, workstream %s, thread %s, turn %s): informational chief-of-staff notice", n.Source, n.Record, n.Revision, n.Scope.Workstream, n.Scope.Thread, n.Scope.Turn)
+		line("- %s (record %s revision %d, workstream %s, thread %s, turn %s): informational manager notice", n.Source, n.Record, n.Revision, n.Scope.Workstream, trace.DisplayRole(n.Scope.Thread), n.Scope.Turn)
 		section, err := envelope.Render(envelope.Section{Name: "project_notice", Text: n.Text})
 		if err != nil {
 			panic(err)

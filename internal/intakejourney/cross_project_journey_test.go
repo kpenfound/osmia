@@ -169,10 +169,10 @@ func (j *crossProjectJourney) cliHandIn(t *testing.T) {
 		fixturekit.Must(t, err)
 		return state.Value == "complete"
 	})
-	chief, host, _, closeChief, err := j.S.ChiefRepository(context.Background(), r, j.Origin)
+	manager, host, _, closeManager, err := j.S.ManagerRepository(context.Background(), r, j.Origin)
 	fixturekit.Must(t, err)
-	j.Before, err = chief.Thread(host, trace.ChiefOfStaff)
-	closeChief()
+	j.Before, err = manager.Thread(host, trace.Manager)
+	closeManager()
 	fixturekit.Must(t, err)
 }
 
@@ -193,7 +193,7 @@ func TestCrossProjectDesignJourney(t *testing.T) {
 			return nil, err
 		}
 		if !slices.Contains(names, intake.DraftBriefToolName) {
-			return &agent.Result{ClaudeID: "session-chief-journey", ResultText: "The workgroup follows the agreed brief."}, nil
+			return &agent.Result{ClaudeID: "session-manager-journey", ResultText: "The workgroup follows the agreed brief."}, nil
 		}
 		projects := []config.ProjectID{j.Project}
 		if strings.Contains(req.Prompt, "Add Client") {
@@ -246,7 +246,7 @@ func TestCrossProjectDesignJourney(t *testing.T) {
 	}
 	displayed, err = j.C.Design(ctx, j.Origin)
 	fixturekit.Must(t, err)
-	j.Before, err = r.ChiefOfStaffThread(j.Origin)
+	j.Before, err = r.ManagerThread(j.Origin)
 	fixturekit.Must(t, err)
 	j.Design, err = r.DesignerThread(j.Origin)
 	fixturekit.Must(t, err)

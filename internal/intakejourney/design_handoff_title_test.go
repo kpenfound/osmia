@@ -60,7 +60,7 @@ func newHandoffTitleFixture(t *testing.T) *handoffTitleFixture {
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		prompt := intakefixture.OwnPrompt(req.Prompt)
 		if !strings.Contains(prompt, intake.HandoffTitleOpening) {
-			return intakefixture.QuestionResult(req, "session-chief", "Nothing to do."), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Nothing to do."), nil
 		}
 		f.mu.Lock()
 		f.calls = append(f.calls, prompt)
@@ -77,7 +77,7 @@ func newHandoffTitleFixture(t *testing.T) *handoffTitleFixture {
 		if err != nil || !strings.Contains(out, `"stored":true`) {
 			f.problem("set_status: %s %v", out, err)
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Titled."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Titled."), nil
 	}
 	engine.Mu.Unlock()
 	f.restart(t, f.window)
@@ -160,19 +160,19 @@ func (f *handoffTitleFixture) notices(t *testing.T) (recorded, acknowledged int)
 	return recorded, acknowledged
 }
 
-func (f *handoffTitleFixture) chiefThread(t *testing.T, shared bool) trace.Thread {
+func (f *handoffTitleFixture) managerThread(t *testing.T, shared bool) trace.Thread {
 	t.Helper()
 	r, err := f.s.Repository(f.home)
 	fixturekit.Must(t, err)
 	if !shared {
-		th, err := r.ChiefOfStaffThread(f.origin)
+		th, err := r.ManagerThread(f.origin)
 		fixturekit.Must(t, err)
 		return th
 	}
-	target, host, _, closeTarget, err := f.s.ChiefRepository(context.Background(), r, f.origin)
+	target, host, _, closeTarget, err := f.s.ManagerRepository(context.Background(), r, f.origin)
 	fixturekit.Must(t, err)
 	defer closeTarget()
-	th, err := target.Thread(host, trace.ChiefOfStaff)
+	th, err := target.Thread(host, trace.Manager)
 	fixturekit.Must(t, err)
 	return th
 }
@@ -203,7 +203,7 @@ func TestDesignStartDeliversOneHandoffTitleTurnToTheThreadThatContinues(t *testi
 			r, err := f.s.Repository(f.home)
 			fixturekit.Must(t, err)
 			revision := recordDesignProjects(t, r, f.origin, intakefixture.ProductionBrief, projects)
-			before, err := r.ChiefOfStaffThread(f.origin)
+			before, err := r.ManagerThread(f.origin)
 			fixturekit.Must(t, err)
 
 			f.interrupt.Store(true)
@@ -228,7 +228,7 @@ func TestDesignStartDeliversOneHandoffTitleTurnToTheThreadThatContinues(t *testi
 			f.s.Until(t, "the hand-off title turn to be delivered before the routine-progress window", func() bool { return f.deliveredTurns() > 0 })
 			f.s.Until(t, "the hand-off turn to settle", func() bool {
 				recorded, acknowledged := f.notices(t)
-				turns := handoffTitleTurns(f.chiefThread(t, which.adopted))
+				turns := handoffTitleTurns(f.managerThread(t, which.adopted))
 				return recorded == 1 && acknowledged == 1 && len(turns) == 1 && !turns[0].CompletedAt.IsZero()
 			})
 			for i := range 2 {
@@ -249,15 +249,15 @@ func TestDesignStartDeliversOneHandoffTitleTurnToTheThreadThatContinues(t *testi
 				t.Fatalf("hand-off turn problems:\n%s", problems)
 			}
 			if got := f.deliveredTurns(); got != 1 {
-				t.Fatalf("%d hand-off turns reached the chief of staff, want 1", got)
+				t.Fatalf("%d hand-off turns reached the manager, want 1", got)
 			}
-			thread := f.chiefThread(t, which.adopted)
+			thread := f.managerThread(t, which.adopted)
 			turns := handoffTitleTurns(thread)
 			if len(turns) != 1 || turns[0].Response == nil || turns[0].CompletedAt.IsZero() {
 				t.Fatalf("hand-off turns on the continuing thread: %+v", turns)
 			}
 			if thread.Identity.ThreadID != before.Identity.ThreadID || thread.Identity.ID != before.Identity.ID {
-				t.Fatalf("the hand-off turn is not on the design's chief thread: before %+v, after %+v", before.Identity, thread.Identity)
+				t.Fatalf("the hand-off turn is not on the design's manager thread: before %+v, after %+v", before.Identity, thread.Identity)
 			}
 
 			selected, found, err := intake.DesignSelectionOf(r, f.origin)
@@ -273,12 +273,12 @@ func TestDesignStartDeliversOneHandoffTitleTurnToTheThreadThatContinues(t *testi
 				}
 				return
 			}
-			if _, err := r.Thread(f.origin, trace.ChiefOfStaff); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("the retired local chief remains: %v", err)
+			if _, err := r.Thread(f.origin, trace.Manager); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("the retired local manager remains: %v", err)
 			}
 			for _, turn := range before.Turns {
 				if strings.Contains(turn.Request.Prompt, intake.HandoffTitleOpening) {
-					t.Fatal("the hand-off turn reached the local chief before it retired")
+					t.Fatal("the hand-off turn reached the local manager before it retired")
 				}
 			}
 			for _, member := range selected.Members {
@@ -289,8 +289,8 @@ func TestDesignStartDeliversOneHandoffTitleTurnToTheThreadThatContinues(t *testi
 				if st.Status == nil || st.Status.Goal != handoffTitleGoal {
 					t.Fatalf("member %s status: %+v", member.Workstream, st)
 				}
-				if _, err := repo.Thread(member.Workstream, trace.ChiefOfStaff); !errors.Is(err, os.ErrNotExist) {
-					t.Fatalf("member %s keeps a local chief: %v", member.Workstream, err)
+				if _, err := repo.Thread(member.Workstream, trace.Manager); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("member %s keeps a local manager: %v", member.Workstream, err)
 				}
 			}
 			alias, err := f.c.Status(ctx, f.origin)

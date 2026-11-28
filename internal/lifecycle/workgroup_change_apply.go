@@ -104,7 +104,7 @@ func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g tr
 			return err
 		}
 		for _, t := range threads {
-			if t.Identity.Role == trace.ChiefOfStaff {
+			if t.Identity.Role == trace.Manager {
 				continue
 			}
 			for _, q := range t.Turns {
@@ -743,7 +743,7 @@ func (s *Controller) CreateChangeFollowup(ctx context.Context, wt *trace.Reposit
 		return false, err
 	}
 	if ChangeSharedRepository(*g, wt) {
-		if err := repo.RetractChiefOfStaff(ctx, id); err != nil {
+		if err := repo.RetractManager(ctx, id); err != nil {
 			return false, err
 		}
 		if err := repo.RetractWorkgroup(ctx, id, s.Now(), amendmentActor, WorkgroupChangeDocument(c.ID)); err != nil {

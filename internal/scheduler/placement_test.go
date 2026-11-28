@@ -417,7 +417,7 @@ func TestAFreedSlotIsKeptForAWaitingResumedTurnAgainstNewTurnsFromOutsideThePass
 	r.queue(stream, "resumed", "two")
 	r.pass()
 	r.finish(stream, "busy", busy, a.ID)
-	if c := r.place.Take(fleet.Turn{ID: "chief-turn", Profile: "default", Role: "chief_of_staff"}); c.Client != "" {
+	if c := r.place.Take(fleet.Turn{ID: "manager-turn", Profile: "default", Role: trace.Manager}); c.Client != "" {
 		t.Fatalf("a new turn from outside the pass took the slot owed to the resumed turn: %+v", c)
 	}
 	r.pass()

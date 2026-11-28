@@ -284,7 +284,7 @@ func newClimbFixtureHosted(t *testing.T, engine *evaluatorEngine, evaluatorPrese
 			}
 			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 		}
-		return c.masons.Chief.Turn(ctx, req, verified, tools)
+		return c.masons.Manager.Turn(ctx, req, verified, tools)
 	}
 	f.engine.Mu.Unlock()
 	return c
@@ -363,7 +363,7 @@ func approvalOf(card api.InboxEntry) api.ClimbApprovalRequest {
 	return req
 }
 
-func (c *climbFixture) chiefNotices(t *testing.T, stream config.WorkstreamID, kind string) []string {
+func (c *climbFixture) managerNotices(t *testing.T, stream config.WorkstreamID, kind string) []string {
 	t.Helper()
 	outbox, err := c.repository().Outbox(stream)
 	fixturekit.Must(t, err)
@@ -573,7 +573,7 @@ func TestACalibrationThatFindsTheMetricBrokenOrNoisyHoldsTheClimb(t *testing.T) 
 			defer c.stop(t)
 			stream := c.ratified(t)
 			c.awaitInner(t, stream, tc.state)
-			notices := c.chiefNotices(t, stream, trace.NoticeKind)
+			notices := c.managerNotices(t, stream, trace.NoticeKind)
 			held := ""
 			for _, n := range notices {
 				if strings.Contains(n, tc.notice) {
@@ -581,7 +581,7 @@ func TestACalibrationThatFindsTheMetricBrokenOrNoisyHoldsTheClimb(t *testing.T) 
 				}
 			}
 			if held == "" {
-				t.Fatalf("the chief of staff was not told %q: %v", tc.notice, notices)
+				t.Fatalf("the manager was not told %q: %v", tc.notice, notices)
 			}
 			if _, open := c.card(t); open {
 				t.Fatal("a held climb opened the approval card")

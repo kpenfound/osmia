@@ -50,7 +50,7 @@ func newAmendmentKit(t *testing.T, p *gateJev, spec, graph string) *amendmentKit
 	t.Cleanup(func() { _ = repo.Close() })
 	f.s.setSole(&activeProject{repository: repo})
 	f.s.jev = gateJudge(f.clock.Now, p)
-	scope := intakefixture.ClaimChiefTurn(t, repo, f.project, stream, f.clock.Now, intakefixture.ChiefTurnInput{
+	scope := intakefixture.ClaimManagerTurn(t, repo, f.project, stream, f.clock.Now, intakefixture.ManagerTurnInput{
 		Turn: "events_1", Prompt: "Amendment 1 is presented.", Actor: serviceActor, Cause: "fixture", Token: "token-events", Directory: "events",
 	})
 	controls := &runtimeControls{}
@@ -106,7 +106,7 @@ func TestAConfidentPlanAmendmentPickBindsDecideAmendment(t *testing.T) {
 		t.Fatalf("reject against the pick: %s", out)
 	}
 	if out := intakefixture.Handle(t, k.amend, `{"amendment":"1","packet":1,"decision":"approve"}`); !strings.Contains(out, `"recorded":false`) {
-		t.Fatalf("approve without the chief of staff's reasoning: %s", out)
+		t.Fatalf("approve without the manager's reasoning: %s", out)
 	}
 	if len(k.decisions(t)) != 0 {
 		t.Fatal("a refused call recorded a decision")
@@ -131,7 +131,7 @@ func TestAConfidentPlanAmendmentPickBindsDecideAmendment(t *testing.T) {
 
 // An amendment that changes the approved intent is the owner's gate: decide
 // refuses it with no request and no judgment, and decide_amendment records
-// nothing for the chief of staff.
+// nothing for the manager.
 func TestDecideRefusesAnAmendmentThatChangesIntent(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95}
@@ -149,14 +149,14 @@ func TestDecideRefusesAnAmendmentThatChangesIntent(t *testing.T) {
 		t.Fatalf("decide_amendment: %s", out)
 	}
 	if len(k.decisions(t)) != 0 {
-		t.Fatal("the chief of staff decided an amendment that changes intent")
+		t.Fatal("the manager decided an amendment that changes intent")
 	}
 }
 
 // A pick below the threshold and an unconfigured Jev leave a plan-only
-// amendment to the chief of staff: decide says so and decide_amendment takes
+// amendment to the manager: decide says so and decide_amendment takes
 // either decision.
-func TestAPlanAmendmentDecisionThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
+func TestAPlanAmendmentDecisionThatIsNotConfidentLeavesTheManagerFree(t *testing.T) {
 	t.Parallel()
 	for name, p := range map[string]*gateJev{"below the threshold": {confidence: 0.5}, "unconfigured": nil} {
 		t.Run(name, func(t *testing.T) {
@@ -165,14 +165,14 @@ func TestAPlanAmendmentDecisionThatIsNotConfidentLeavesTheChiefFree(t *testing.T
 			if out := intakefixture.Handle(t, k.amend, rejectAmendment); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "call decide") {
 				t.Fatalf("decide_amendment before decide: %s", out)
 			}
-			if out := intakefixture.Handle(t, k.decide, decideAmendmentInput); !strings.Contains(out, `"decision":"chief"`) || strings.Contains(out, `"pick"`) {
+			if out := intakefixture.Handle(t, k.decide, decideAmendmentInput); !strings.Contains(out, `"decision":"manager"`) || strings.Contains(out, `"pick"`) {
 				t.Fatalf("decide: %s", out)
 			}
 			if out := intakefixture.Handle(t, k.amend, rejectAmendment); !strings.Contains(out, `"recorded":true`) {
 				t.Fatalf("reject: %s", out)
 			}
 			docs := k.decisions(t)
-			if len(docs) != 1 || docs[0].Actor.ID != trace.ChiefOfStaff {
+			if len(docs) != 1 || docs[0].Actor.ID != trace.Manager {
 				t.Fatalf("decision records %+v", docs)
 			}
 		})
@@ -184,7 +184,7 @@ func TestAPlanAmendmentPickTheServiceRefusedReachesTheOwner(t *testing.T) {
 	p := &gateJev{confidence: 0.95, pick: func(string, []string) string { return "approve" }}
 	k := newAmendmentKit(t, p, fixturekit.ValidSpec, intakefixture.RestartPlan)
 	if _, open, err := k.f.s.intake().AmendmentEntry(k.repo, k.stream, "1"); err != nil || open {
-		t.Fatalf("the chief of staff's amendment is listed for the owner: %v %v", open, err)
+		t.Fatalf("the manager's amendment is listed for the owner: %v %v", open, err)
 	}
 	if out := intakefixture.Handle(t, k.decide, decideAmendmentInput); !strings.Contains(out, `"pick":"approve"`) {
 		t.Fatalf("decide: %s", out)
@@ -274,7 +274,7 @@ func TestAConfidentDiscoveryPickBindsTheDisposition(t *testing.T) {
 		}
 	}
 	if out := k.disposition(t, `"disposition":"declined"`); !strings.Contains(out, `"recorded":false`) {
-		t.Fatalf("disposition without the chief of staff's reasoning: %s", out)
+		t.Fatalf("disposition without the manager's reasoning: %s", out)
 	}
 	if out := k.disposition(t, declineFields); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("decline: %s", out)
@@ -296,12 +296,12 @@ func TestAConfidentDiscoveryPickBindsTheDisposition(t *testing.T) {
 	}
 }
 
-// A caller cannot name the decider of a discovery: a disposition the chief of
-// staff records on its own is never Jev's.
+// A caller cannot name the decider of a discovery: a disposition the manager
+// records on its own is never Jev's.
 func TestADiscoveryCannotNameItsDecider(t *testing.T) {
 	t.Parallel()
 	k := newDiscoveryKit(t, "decide-discovery-decider", nil)
-	if out := intakefixture.Handle(t, k.decide, k.decideInput()); !strings.Contains(out, `"decision":"chief"`) {
+	if out := intakefixture.Handle(t, k.decide, k.decideInput()); !strings.Contains(out, `"decision":"manager"`) {
 		t.Fatalf("decide: %s", out)
 	}
 	if out := k.disposition(t, declineFields+`,"decided_by":"jev","judgment":"judgment_ab12","handed_to_owner":"x"`); !strings.Contains(out, `"recorded":true`) {
@@ -349,8 +349,8 @@ func TestADiscoveryPickTheServiceRefusedReachesTheOwner(t *testing.T) {
 }
 
 // A pick below the threshold and an unconfigured Jev leave a discovery's
-// disposition to the chief of staff, who then records any valid disposition.
-func TestADiscoveryDecisionThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
+// disposition to the manager, who then records any valid disposition.
+func TestADiscoveryDecisionThatIsNotConfidentLeavesTheManagerFree(t *testing.T) {
 	t.Parallel()
 	for name, p := range map[string]*gateJev{"below the threshold": {confidence: 0.5}, "unconfigured": nil} {
 		t.Run(name, func(t *testing.T) {
@@ -359,7 +359,7 @@ func TestADiscoveryDecisionThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
 			if out := k.disposition(t, declineFields); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "call decide") {
 				t.Fatalf("disposition before decide: %s", out)
 			}
-			if out := intakefixture.Handle(t, k.decide, k.decideInput()); !strings.Contains(out, `"decision":"chief"`) || strings.Contains(out, `"pick"`) {
+			if out := intakefixture.Handle(t, k.decide, k.decideInput()); !strings.Contains(out, `"decision":"manager"`) || strings.Contains(out, `"pick"`) {
 				t.Fatalf("decide: %s", out)
 			}
 			if out := k.disposition(t, `"disposition":"suggestion","reason":"Worth keeping, not necessary."`); !strings.Contains(out, `"recorded":true`) {

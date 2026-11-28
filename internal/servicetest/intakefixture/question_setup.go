@@ -56,7 +56,7 @@ func NewQuestionSetup(t *testing.T, prefix, global, charter string, askers []Que
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	fixturekit.Must(t, err)
 	fixturekit.RecordCharter(t, repo, charter)
-	agents := map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff}
+	agents := map[string]string{trace.Manager: trace.Manager}
 	created := map[config.WorkstreamID]bool{}
 	for _, a := range askers {
 		if !created[a.Stream] {
@@ -81,17 +81,17 @@ func NewQuestionSetup(t *testing.T, prefix, global, charter string, askers []Que
 	views := filepath.Join(cfg.Root.String(), "views")
 	fixturekit.Must(t, os.Mkdir(views, 0700))
 
-	every := append([]string{"file_read", questions.AskTool}, questions.ChiefTools...)
+	every := append([]string{"file_read", questions.AskTool}, questions.ManagerTools...)
 	f.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		f.Lives <- r
 		turns := &isolation.Turns{Workspaces: &fixturekit.DemoWorkspaces{Directory: cfg.Project.Clone}, Views: isolation.Views{Directory: views}, Engine: f.Engine,
-			Grants: map[string]coreadapter.Capabilities{"mason": {Tools: every}, "reviewer": {Tools: every}, trace.ChiefOfStaff: {Tools: every}, trace.Designer: {Tools: every}},
+			Grants: map[string]coreadapter.Capabilities{"mason": {Tools: every}, "reviewer": {Tools: every}, trace.Manager: {Tools: every}, trace.Designer: {Tools: every}},
 			Select: func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 				list, err := questions.Tools(r, agents[scope.Thread], scope, clock.Now)
-				if scope.Role == trace.ChiefOfStaff {
+				if scope.Role == trace.Manager {
 					list = jevfixture.AutoDecide(r, config.WorkstreamID(scope.Workstream), list)
 				}
 				return list, err

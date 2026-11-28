@@ -18,7 +18,7 @@ import (
 const StatusID = "status"
 
 // StatusRole is the only role that may write a workstream status.
-const StatusRole = "chief_of_staff"
+const StatusRole = Manager
 
 // FeatureSubject is the workflow subject holding a workstream's feature state.
 const FeatureSubject = "feature"
@@ -57,7 +57,7 @@ func UnitSubject(unit string) string {
 	return "unit_" + hex.EncodeToString(sum[:16])
 }
 
-// StatusContent is what the chief of staff writes. Attention names an open
+// StatusContent is what the manager writes. Attention names an open
 // owner gate, or is empty when there are none. Agents may be empty.
 type StatusContent struct {
 	Goal      string   `json:"goal"`
@@ -79,7 +79,7 @@ func (c StatusContent) valid() bool {
 }
 
 // StatusRejected is returned by SetStatus when the caller's check refuses
-// the content. Reason is written for the chief of staff.
+// the content. Reason is written for the manager.
 type StatusRejected struct{ Reason string }
 
 func (e *StatusRejected) Error() string { return "status rejected: " + e.Reason }
@@ -99,7 +99,7 @@ type OwnerGate struct {
 
 // SetStatus stores content as the next status revision of the scope's
 // workstream. The scope must name this session's active, uncaptured turn of a
-// chief-of-staff thread. A check error is returned as *StatusRejected and
+// manager thread. A check error is returned as *StatusRejected and
 // stores nothing. It returns the stored revision.
 func (r *Repository) SetStatus(ctx context.Context, agent string, scope coreadapter.Scope, content StatusContent, at time.Time, check StatusCheck) (int, error) {
 	if at.IsZero() || check == nil {
@@ -115,7 +115,7 @@ func (r *Repository) SetStatus(ctx context.Context, agent string, scope coreadap
 		return 0, err
 	}
 	if scope.Role != StatusRole {
-		return 0, fmt.Errorf("only a chief-of-staff turn may set the status")
+		return 0, fmt.Errorf("only a manager turn may set the status")
 	}
 	_, q, err := r.turnScope(agent, scope, true)
 	if err != nil {
@@ -167,7 +167,7 @@ func latestStatus(records []Record, stream config.WorkstreamID) *Status {
 }
 
 // WorkstreamStatus is a workstream's latest status with the facts the trace
-// owns. Status is nil until the chief of staff first writes one. State is the
+// owns. Status is nil until the manager first writes one. State is the
 // FeatureSubject workflow state, empty until one is recorded, and Subjects
 // the state of every workflow subject that has one, read with it. For a
 // session workstream (Kind SessionKind), State is instead its SessionState
@@ -356,7 +356,7 @@ func ownerGates(records []Record, stream config.WorkstreamID, view *workflowView
 				}
 			}
 			raised := contest.Actor.Kind == "owner" || strings.HasPrefix(contest.ID, subject+"-move-")
-			decisionPath := "units/" + subject + "/chief-" + EventID(contest.ID, "chief") + ".json"
+			decisionPath := ContestDecisionPath(subject, contest.ID)
 			for _, rec := range records {
 				d, ok := rec.(Document)
 				if !ok || d.Workstream != stream || d.Path != decisionPath {

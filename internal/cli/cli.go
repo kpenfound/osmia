@@ -829,8 +829,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if o.json {
 			return output(stdout, stderr, result)
 		}
-		if result.Archived && result.ArchivedBy == wire.ArchivedByChief {
-			fmt.Fprintf(stdout, "Workstream %s was permanently archived by the chief of staff because its pull request merged; its title remains and its trace will be deleted\n", result.Workstream)
+		if result.Archived && result.ArchivedBy == wire.ArchivedByManager {
+			fmt.Fprintf(stdout, "Workstream %s was permanently archived by the manager because its pull request merged; its title remains and its trace will be deleted\n", result.Workstream)
 		} else if result.Archived {
 			fmt.Fprintf(stdout, "Workstream %s permanently archived; its title remains and its trace will be deleted\n", result.Workstream)
 		} else {
@@ -1168,7 +1168,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			if o.json {
 				return output(stdout, stderr, entry)
 			}
-			fmt.Fprintf(stdout, "Message %s sent to the chief of staff of %s: %s\n", entry.Turn, id, entry.State)
+			fmt.Fprintf(stdout, "Message %s sent to the manager of %s: %s\n", entry.Turn, id, entry.State)
 			return 0
 		}
 		list, err := c.Conversation(ctx, id)
@@ -1278,7 +1278,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if o.json {
 			return output(stdout, stderr, result)
 		}
-		fmt.Fprintf(stdout, "Ruling recorded on inbox entry %d (%s, questions %s)\nThe chief of staff relays it to the askers.\n", result.Number, result.Workstream, strings.Join(result.Questions, ", "))
+		fmt.Fprintf(stdout, "Ruling recorded on inbox entry %d (%s, questions %s)\nThe manager relays it to the askers.\n", result.Number, result.Workstream, strings.Join(result.Questions, ", "))
 		return 0
 	}
 	if cmd == "contested" {
@@ -2138,7 +2138,7 @@ func showStatus(w io.Writer, st wire.WorkstreamStatus) {
 		}
 	}
 	if st.Status == nil {
-		fmt.Fprintln(w, "Status: none yet; the chief of staff has not written one")
+		fmt.Fprintln(w, "Status: none yet; the manager has not written one")
 		showAgentStatus(w, st.Agents)
 		return
 	}
@@ -2194,7 +2194,7 @@ func showConversation(w io.Writer, list wire.ConversationResponse, hint string) 
 	for _, e := range list.Entries {
 		author := "owner"
 		if e.Kind == "response" {
-			author = "chief of staff"
+			author = "manager"
 		}
 		fmt.Fprintf(w, "%s %s [%s %s]\n", e.At.Format(time.RFC3339), author, e.Turn, e.State)
 		for _, line := range strings.Split(strings.TrimRight(e.Text, "\n"), "\n") {
@@ -2281,7 +2281,7 @@ func showInbox(w io.Writer, list wire.InboxResponse) {
 			block("Answer", "none; fix the cause of the last failure and the service publishes on its next attempt")
 		case wire.InboxDrift:
 			block("Held", fmt.Sprintf("drift rebase %d", e.Revision))
-			block("Answer", fmt.Sprintf("osmia rebase %s asks for another drift rebase; osmia send %s \"...\" asks the chief of staff to hand it back with a note; or abandon the workstream", stream, stream))
+			block("Answer", fmt.Sprintf("osmia rebase %s asks for another drift rebase; osmia send %s \"...\" asks the manager to hand it back with a note; or abandon the workstream", stream, stream))
 		case wire.InboxBase:
 			if len(e.Options) > 0 {
 				block("Answer", fmt.Sprintf("osmia upstream %s %v moves it onto upstream; or osmia abandon %s \"...\"", stream, e.Answer.Body["base"], stream))
@@ -2297,9 +2297,9 @@ func showInbox(w io.Writer, list wire.InboxResponse) {
 		case wire.InboxLoop:
 			block("Answer", fmt.Sprintf("osmia resume %s once you have looked at its status and feed", stream))
 		case wire.InboxNotices:
-			block("Answer", fmt.Sprintf("osmia send %s \"...\" once the cause is fixed; the held notices follow the chief of staff's answer", stream))
+			block("Answer", fmt.Sprintf("osmia send %s \"...\" once the cause is fixed; the held notices follow the manager's answer", stream))
 		case wire.InboxDiscovery:
-			block("Answer", fmt.Sprintf("osmia send %s \"...\" with your decision: assign it to a unit, decline it or keep it as a suggestion; the chief of staff records it", stream))
+			block("Answer", fmt.Sprintf("osmia send %s \"...\" with your decision: assign it to a unit, decline it or keep it as a suggestion; the manager records it", stream))
 		}
 	}
 }
@@ -2489,7 +2489,7 @@ func showBrief(w io.Writer, stream config.WorkstreamID, review int, b *wire.Deli
 			fmt.Fprintf(w, "Screenshot: %s\n", wire.ImagePath(stream, id))
 		}
 	case wire.BriefWaiting:
-		fmt.Fprintf(w, "Delivery brief for final review %d of %s: the chief of staff is still writing it.\n", review, stream)
+		fmt.Fprintf(w, "Delivery brief for final review %d of %s: the manager is still writing it.\n", review, stream)
 	default:
 		fmt.Fprintf(w, "%s (final review %d of %s).\n", wire.NoBriefRecorded, review, stream)
 	}

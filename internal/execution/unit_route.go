@@ -51,8 +51,16 @@ const (
 	TriggerStalled           = "unit.stalled"
 	TriggerOwnerRuling       = "contest.owner_ruling"
 	TriggerJevRuling         = "contest.jev_ruling"
-	TriggerChiefRuling       = "contest.chief_ruling"
+	TriggerManagerRuling     = storedManagerRulingTrigger
 )
+
+// storedManagerRulingTrigger is a stored name of the manager role: the trigger
+// of the exit a manager ruling on a contested unit raises. Saved routing
+// records hold it and are named from an occurrence key that holds it
+// (router.OccurrenceKey): router.Router.Route reads the record of that key, and
+// recordspans.Recorder.Route sends the span of a saved record only when its
+// trigger is listed in recordspans.RouteTriggers. The value must not change.
+const storedManagerRulingTrigger = "contest.chief_ruling"
 
 // TargetWait is the target of an exit that leaves the unit where it is: nothing
 // moves while the exit's records and notices are committed. It is the default of
@@ -138,7 +146,7 @@ type UnitExitInput struct {
 	Turn    string
 	Actor   trace.Actor
 	// Authority is the authority the exit carries: the owner's decision, a
-	// reviewer's verdict or one of Jev's gate decisions. A chief proposal and a
+	// reviewer's verdict or one of Jev's gate decisions. A manager proposal and a
 	// default carry none.
 	Authority *router.Authority
 	Evidence  router.Evidence
@@ -160,7 +168,7 @@ type UnitExitInput struct {
 	// Active says the workstream must be building or assembled, as it must
 	// for a move.
 	Active bool
-	// Proposed is the state a proposal of the chief of staff asks for, when a
+	// Proposed is the state a proposal of the manager asks for, when a
 	// policy sets the default to leave the unit where it is.
 	Proposed string
 	// Gate lists targets that are the owner's decision on this exit: a
@@ -341,11 +349,11 @@ func unitOperationExcept(repo *trace.Repository, stream config.WorkstreamID, uni
 
 // RegisterUnitEffects defines, in the router's registry, the effect of entering
 // each state a unit moves to. They are the records an owner's command and the
-// chief of staff's tool make, and every other way a unit is moved to a state
+// manager's tool make, and every other way a unit is moved to a state
 // its trigger does not enter as a default: the move with its note, a fresh
 // clean-turn allowance for the mason, the candidate a fresh check run or review
-// works on, the approval record the foreman lands, and the notice to the chief
-// of staff. load returns the execution controller.
+// works on, the approval record the foreman lands, and the notice to the manager.
+// load returns the execution controller.
 func RegisterUnitEffects(reg *router.Effects, load func() *Controller) {
 	for _, target := range moveTargets {
 		reg.Register(UnitMachine, target, func(ctx context.Context, p router.Plan) (router.Effect, error) {
@@ -384,7 +392,7 @@ func (s *Controller) moveCause(x router.Exit) (string, error) {
 		return x.Turn, nil
 	}
 	switch x.Trigger {
-	case TriggerMoveOwner, TriggerMoveProposal, TriggerOwnerRuling, TriggerJevRuling, TriggerChiefRuling:
+	case TriggerMoveOwner, TriggerMoveProposal, TriggerOwnerRuling, TriggerJevRuling, TriggerManagerRuling:
 		transitions, err := trace.Read[trace.Transition](x.Repo, x.Workstream)
 		if err != nil {
 			return "", err
@@ -516,7 +524,7 @@ var triggerSpecs = map[string]triggerSpec{
 	},
 	TriggerMoveProposal: {
 		describe: map[string]string{
-			TargetWait: "Leave the unit where it is: the chief of staff raised or ruled the contest it sits in, and by default does not move it out; it stays held for the owner.",
+			TargetWait: "Leave the unit where it is: the manager raised or ruled the contest it sits in, and by default does not move it out; it stays held for the owner.",
 		},
 		questions: []router.Question{question("proposal_fits", "The proposed move fits the evidence."), question("evidence_supports", "The history and rulings support the move.")},
 	},

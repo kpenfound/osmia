@@ -183,7 +183,7 @@ func TestJevDropsADependencyOnAnAbandonedUpstream(t *testing.T) {
 	}
 }
 
-func TestADropBelowTheBarHoldsTheDependentAndWakesTheChief(t *testing.T) {
+func TestADropBelowTheBarHoldsTheDependentAndWakesTheManager(t *testing.T) {
 	t.Parallel()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
 	p := dropsAt(0.8)
@@ -709,14 +709,14 @@ func TestAWaivedMergeOrderEdgeLetsTheDraftBeMarkedReadyAfterAFreshApproval(t *te
 	}
 }
 
-func TestTheChiefOfStaffDropsADependency(t *testing.T) {
+func TestTheManagerDropsADependency(t *testing.T) {
 	t.Parallel()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
 	p := &jevfixture.Transitions{}
 	journey.InspectForTest(f.s).SetRouterJudge(jevfixture.TransitionJudge(f.s.Now, p))
-	host, err := f.repository.ChiefOfStaffHost(f.downstream)
+	host, err := f.repository.ManagerHost(f.downstream)
 	fixturekit.Must(t, err)
-	scope := intakefixture.ClaimChiefTurn(t, f.repository, f.project, host, func() time.Time { return fixturekit.DemoStart }, intakefixture.ChiefTurnInput{
+	scope := intakefixture.ClaimManagerTurn(t, f.repository, f.project, host, func() time.Time { return fixturekit.DemoStart }, intakefixture.ManagerTurnInput{
 		Turn: "events_drop", Prompt: "The upstream will not merge.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-events_drop", Directory: "events_drop",
 	})
 	f.resolvePasses(t)
@@ -725,21 +725,24 @@ func TestTheChiefOfStaffDropsADependency(t *testing.T) {
 	tool := controls.Lifecycle().DropDependency(f.repository, scope)
 	out := intakefixture.Handle(t, tool, fmt.Sprintf(`{"upstream":%q,"reason":"The dependent works without it.","workstream":%q}`, f.upstream, f.downstream))
 	if !strings.Contains(out, `"recorded":true`) {
-		t.Fatalf("the chief's drop: %s", out)
+		t.Fatalf("the manager's drop: %s", out)
 	}
 	dropped := lastOn(t, f.repository, f.downstream, lifecycle.DependencySubject(f.upstream, trace.EdgeHardBlock))
-	if dropped.To != lifecycle.DependencyWaived || dropped.DecidedBy != trace.DecidedByChief || dropped.Judgment != "" {
-		t.Fatalf("the chief's drop %+v", dropped)
+	if dropped.To != lifecycle.DependencyWaived || dropped.DecidedBy != trace.DecidedByManager || dropped.Judgment != "" {
+		t.Fatalf("the manager's drop %+v", dropped)
+	}
+	if !strings.Contains(dropped.Reason, "its upstream ended (manager)") || strings.Contains(dropped.Reason, trace.Manager) {
+		t.Fatalf("the reason of the manager's drop: %q", dropped.Reason)
 	}
 	if n := len(p.TransitionRequests()); n != 0 {
-		t.Fatalf("Jev was asked %d times about the chief's decision", n)
+		t.Fatalf("Jev was asked %d times about the manager's decision", n)
 	}
 	waivers, _, err := lifecycle.EdgeWaiversAt(f.repository, f.downstream)
 	fixturekit.Must(t, err)
-	if len(waivers.Waivers) != 1 || waivers.Waivers[0].DecidedBy != trace.DecidedByChief || waivers.Waivers[0].Ended != trace.ChiefOfStaff {
+	if len(waivers.Waivers) != 1 || waivers.Waivers[0].DecidedBy != trace.DecidedByManager || waivers.Waivers[0].Ended != trace.Manager {
 		t.Fatalf("waivers %+v", waivers)
 	}
 	if f.holdsMason(t, f.downstream) {
-		t.Fatal("the dependent is still held after the chief's drop")
+		t.Fatal("the dependent is still held after the manager's drop")
 	}
 }

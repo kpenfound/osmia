@@ -45,7 +45,7 @@ func queuedWork(s *Service, r *trace.Repository, stream config.WorkstreamID) (qu
 			turns[t.Identity.ID+"\n"+q.Request.TurnID] = true
 		}
 		roles[t.Identity.ID] = t.Identity.Role
-		if trace.ChiefLike(t.Identity.Role) || t.Identity.Role == sessionRole {
+		if trace.ManagerLike(t.Identity.Role) || t.Identity.Role == sessionRole {
 			continue
 		}
 		for _, q := range t.Turns {
@@ -56,7 +56,7 @@ func queuedWork(s *Service, r *trace.Repository, stream config.WorkstreamID) (qu
 			if q.Claim != nil {
 				state = "running"
 			}
-			out.Items = append(out.Items, queuedItem{Role: t.Identity.Role, Unit: q.Request.Unit, What: fmt.Sprintf("%s %s turn", state, t.Identity.Role)})
+			out.Items = append(out.Items, queuedItem{Role: trace.DisplayRole(t.Identity.Role), Unit: q.Request.Unit, What: fmt.Sprintf("%s %s turn", state, trace.DisplayRole(t.Identity.Role))})
 			busy[q.Request.Unit] = true
 			break
 		}
@@ -155,7 +155,7 @@ func queuedWork(s *Service, r *trace.Repository, stream config.WorkstreamID) (qu
 		if role == "" {
 			role = q.Asked.AskedBy.ID
 		}
-		out.Items = append(out.Items, queuedItem{Role: role, Unit: q.Asked.Unit, What: "the answer to question " + q.Asked.ID + " is delivered as the asker's next turn"})
+		out.Items = append(out.Items, queuedItem{Role: trace.DisplayRole(role), Unit: q.Asked.Unit, What: "the answer to question " + q.Asked.ID + " is delivered as the asker's next turn"})
 	}
 	if working && pause == "" {
 		requests, err := trace.Read[trace.Amendment](r, stream)
@@ -268,7 +268,7 @@ func (c *runtimeControls) withQueuedWork(ctx context.Context, cfg *config.Config
 		}
 		return data
 	}
-	target, stream, refusal, err := chiefMember(r, scope, in.Workstream)
+	target, stream, refusal, err := managerMember(r, scope, in.Workstream)
 	if err != nil || refusal != "" {
 		return out
 	}

@@ -19,15 +19,15 @@ import (
 func logAssumption(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, text string, at time.Time) trace.Assumption {
 	t.Helper()
 	ctx := context.Background()
-	_, err := repository.EnsureChiefOfStaff(ctx, stream, at, intake.ServiceActor)
+	_, err := repository.EnsureManager(ctx, stream, at, intake.ServiceActor)
 	fixturekit.Must(t, err)
 	turn := fmt.Sprintf("assumption-%d", at.UnixNano())
 	h := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request-" + turn, Revision: 1, Project: repository.Project(), Workstream: stream, At: at, Actor: intake.ServiceActor, Cause: "fixture"}
-	_, err = repository.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: turn, Profile: coreadapter.Profile{Name: "fake", Backend: "fake", Model: "fake"}, Prompt: "Review the status"})
+	_, err = repository.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: turn, Profile: coreadapter.Profile{Name: "fake", Backend: "fake", Model: "fake"}, Prompt: "Review the status"})
 	fixturekit.Must(t, err)
-	_, err = repository.ClaimTurn(ctx, stream, trace.ChiefOfStaff, turn+"-token", t.TempDir(), at)
+	_, err = repository.ClaimTurn(ctx, stream, trace.Manager, turn+"-token", t.TempDir(), at)
 	fixturekit.Must(t, err)
-	a, err := repository.LogAssumption(ctx, trace.ChiefOfStaff, coreadapter.Scope{Project: string(repository.Project()), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: turn}, text, at)
+	a, err := repository.LogAssumption(ctx, trace.Manager, coreadapter.Scope{Project: string(repository.Project()), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: turn}, text, at)
 	fixturekit.Must(t, err)
 	return a
 }

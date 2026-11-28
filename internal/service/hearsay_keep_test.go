@@ -72,8 +72,8 @@ func (f *publisherFixture) decideWork(stream config.WorkstreamID) {
 	f.ask(stream, "1", "Is the upload cap 10 MiB or unbounded?", hr(3))
 	f.escalate(stream, "1", "Is the upload cap 10 MiB or unbounded?", hr(4))
 	f.ruling(stream, "1", 1, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Cap uploads at 10 MiB."}, hr(5), trace.Actor{Kind: "owner", ID: "local"})
-	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":"Treat the 10 MiB cap as inclusive.","actor":{"kind":"agent","id":"chief_of_staff"},"thread":"chief","turn":"t1","at":%q}]}`, string(stream), hr(6).Format(time.RFC3339))
-	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(6), chiefActor)
+	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":"Treat the 10 MiB cap as inclusive.","actor":{"kind":"agent","id":"`+trace.Manager+`"},"thread":"manager","turn":"t1","at":%q}]}`, string(stream), hr(6).Format(time.RFC3339))
+	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(6), managerActor)
 }
 
 func (f *publisherFixture) down() (recover func()) {
@@ -142,7 +142,7 @@ func TestCleanupKeepsPendingPublicationThroughAnOutageAndARestart(t *testing.T) 
 			assumptions = append(assumptions, d)
 		}
 	}
-	if len(assumptions) != 1 || assumptions[0].Source != "osmia-work" || assumptions[0].Str("author") != "" || assumptions[0].Str("decider") != "chief_of_staff" || assumptions[0].Str("workstream") != string(stream) {
+	if len(assumptions) != 1 || assumptions[0].Source != "osmia-work" || assumptions[0].Str("author") != "" || assumptions[0].Str("decider") != trace.Manager || assumptions[0].Str("workstream") != string(stream) {
 		t.Fatalf("assumption: %v", assumptions)
 	}
 	for _, p := range posts {
@@ -273,7 +273,7 @@ func TestKeptRecordsHoldOnlyEligibleContent(t *testing.T) {
 	f.decideWork(stream)
 	f.recordMerge(stream)
 	f.ask(stream, "2", "Which function retries?", hr(7))
-	f.ruling(stream, "2", 1, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "CODE-ANSWER retry lives in client.go.", Citations: []string{"inspection#inspection-abc"}}, hr(8), chiefActor)
+	f.ruling(stream, "2", 1, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "CODE-ANSWER retry lives in client.go.", Citations: []string{"inspection#inspection-abc"}}, hr(8), managerActor)
 	f.amendment(stream, "a1", []string{"spec#1"}, "UNDECIDED-AMENDMENT-CHANGE", "UNDECIDED-AMENDMENT-REASON", "", hr(9))
 	f.document(stream, "unit-report", 1, "units/u1/report.json", `{"learnings":["MASON-LEARNING-SENTINEL"]}`, hr(9), trace.Actor{Kind: "agent", ID: "mason"})
 	recoverHooks := f.down()
@@ -451,8 +451,8 @@ id = "osmia-worker"
 token_env = "PUBLISH_TEST_WORKER"
 
 [hearsay.agents.orchestrator]
-id = "osmia-chief"
-token_env = "PUBLISH_TEST_CHIEF"
+id = "osmia-manager"
+token_env = "PUBLISH_TEST_MANAGER"
 
 [hearsay.agents.observer]
 id = "osmia-observer"

@@ -55,7 +55,7 @@ func (s *Service) deliveryGate(ctx context.Context, repository *trace.Repository
 			if len(p.Brief.BeforeYouShip) > 0 {
 				brief += "\nBefore you ship:\n- " + strings.Join(p.Brief.BeforeYouShip, "\n- ")
 			}
-			intake.GateSection(&b, "Chief of staff's delivery brief", brief, 8<<10)
+			intake.GateSection(&b, "Manager's delivery brief", brief, 8<<10)
 		}
 		intake.GateSection(&b, "Title", p.Title, 0)
 		intake.GateSection(&b, "Description", p.Draft, 8<<10)

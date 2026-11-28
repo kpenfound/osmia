@@ -114,7 +114,7 @@ func TestBrowserWorkgroupImagesAndArchivedPlaceholder(t *testing.T) {
 	feedAtBottom(p, feed)
 	scrollFeedUp(p)
 	p.Eval(`window.imageDocument = true`, nil)
-	host, err := f.repo.ChiefOfStaffHost(stream)
+	host, err := f.repo.ManagerHost(stream)
 	must(t, err)
 	_, err = f.repo.PublishImageReference(context.Background(), trace.Header{Project: f.repo.Project(), Workstream: host, At: time.Now().UTC(), Actor: ownerActor, Cause: "browser-reference"}, quiet, v.ID, "image-turn")
 	must(t, err)

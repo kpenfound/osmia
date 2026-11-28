@@ -52,7 +52,7 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 			lifecyclefixture.LogUnsettled(t, origin, f.Stream1, journey.DeltaRunner{S: f.S}.Load)
 		}
 	}()
-	authority, host, _, closeAuthority, err := f.S.Lifecycle().ChiefRepository(ctx, origin, f.Stream1)
+	authority, host, _, closeAuthority, err := f.S.Lifecycle().ManagerRepository(ctx, origin, f.Stream1)
 	fixturekit.Must(t, err)
 	approval, pins, found, err := trace.ReadGroupApproval(authority, host)
 	closeAuthority()
@@ -73,7 +73,7 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 	f.Engine.Mu.Lock()
 	f.Engine.Turns["lifecycle-project-journal"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "May the cross-repo acknowledgment contract change?"})
-		return intakefixture.QuestionResult(req, "session-journal-worker", "Asked the original shared chief."), err
+		return intakefixture.QuestionResult(req, "session-journal-worker", "Asked the original shared manager."), err
 	}
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		names, err := intakefixture.ToolNames(ctx, tools)
@@ -100,7 +100,7 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 			}
 		}
 		_, err = fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Preserve the pending project decision.", "note": "The contract request remains pending.", "agents": []string{}})
-		return intakefixture.QuestionResult(req, "session-journal-chief", "The pending request remains in the original authority."), err
+		return intakefixture.QuestionResult(req, "session-journal-manager", "The pending request remains in the original authority."), err
 	}
 	f.Engine.Mu.Unlock()
 	journey.LifecycleAwait(t, f, "production member admission", func() bool {
@@ -156,7 +156,7 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 		}
 		live, err := f.S.Repository(f.Project2)
 		fixturekit.Must(t, err)
-		target, _, _, release, err := f.S.Lifecycle().ChiefRepository(ctx, live, f.Stream2)
+		target, _, _, release, err := f.S.Lifecycle().ManagerRepository(ctx, live, f.Stream2)
 		fixturekit.Must(t, err)
 		defer release()
 		saved, err := trace.Get[trace.Document](target, host, "member-questions-"+string(f.Stream1), 1)

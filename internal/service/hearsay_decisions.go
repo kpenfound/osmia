@@ -25,14 +25,14 @@ const (
 )
 
 const (
-	deciderOwner = "owner"
-	deciderChief = "chief_of_staff"
+	deciderOwner   = "owner"
+	deciderManager = trace.Manager
 )
 
 type decider int
 
 const (
-	byChief decider = iota
+	byManager decider = iota
 	byOwner
 	byJev
 )
@@ -54,7 +54,7 @@ func (d publishedDecision) decider() string {
 	if d.by == byOwner {
 		return deciderOwner
 	}
-	return deciderChief
+	return deciderManager
 }
 
 func (d publishedDecision) source(in *publishInputs) string {
@@ -298,13 +298,13 @@ func (st *publishStream) questionDecisions() []publishedDecision {
 		case answer != nil && !citesCode(*answer):
 			d := publishedDecision{
 				id: decisionID(string(st.id()), "answer", q.Asked.ID), workstream: st.id(),
-				context:   "A question to the chief of staff about intent or scope: " + asked,
+				context:   "A question to the manager about intent or scope: " + asked,
 				outcome:   strings.TrimSpace(answer.ReturnedAnswer),
-				rationale: "Answered by the chief of staff from the record" + citedFrom(answer.Citations) + ".",
+				rationale: "Answered by the manager from the record" + citedFrom(answer.Citations) + ".",
 				question:  st.questionRef(q.Asked.ID), created: answer.At, updated: answer.At}
 			if jevRuling(*answer) {
 				d.id, d.by, d.judgment = jevID(st.id(), "answer", q.Asked.ID), byJev, answer.Judgment
-				d.rationale = jevNote(answer.Judgment, "The answer's text is the chief of staff's, from the record"+citedFrom(answer.Citations)+".")
+				d.rationale = jevNote(answer.Judgment, "The answer's text is the manager's, from the record"+citedFrom(answer.Citations)+".")
 			}
 			out = append(out, d)
 		}
@@ -352,7 +352,7 @@ func (st *publishStream) ownerRuling(q trace.QuestionState, ruling trace.Ruling)
 			}
 		}
 		if rec := strings.TrimSpace(e.Recommendation); rec != "" {
-			rationale = fmt.Sprintf("Ruled by %s on escalated question, inbox entry %d. The chief of staff recommended: %s", ruledBy, e.Inbox, rec)
+			rationale = fmt.Sprintf("Ruled by %s on escalated question, inbox entry %d. The manager recommended: %s", ruledBy, e.Inbox, rec)
 		}
 	}
 	d := publishedDecision{
@@ -374,8 +374,8 @@ func (st *publishStream) assumptionDecisions() []publishedDecision {
 		}
 		d := publishedDecision{
 			id:      decisionID("assumption", shortHash(a.Thread, a.Turn, a.ID, a.At.UTC().Format(time.RFC3339Nano), a.Text)),
-			context: "A judgment call the chief of staff made within the stated intent instead of asking the owner.",
-			outcome: strings.TrimSpace(a.Text), rationale: "It stays within the approved intent, so the chief of staff logged it and carried on.",
+			context: "A judgment call the manager made within the stated intent instead of asking the owner.",
+			outcome: strings.TrimSpace(a.Text), rationale: "It stays within the approved intent, so the manager logged it and carried on.",
 			created: a.At, updated: a.At}
 		if len(a.Workstreams) <= 1 {
 			d.workstream = st.id()
@@ -482,8 +482,8 @@ func amendmentDecider(doc trace.Document, verdict intake.AmendmentDecision) (dec
 		return byJev, jevDecider(verdict.Actor, verdict.Judgment)
 	case doc.Actor.Kind == "owner":
 		return byOwner, true
-	case doc.Actor.Kind == "agent" && doc.Actor.ID == trace.ChiefOfStaff:
-		return byChief, true
+	case doc.Actor.Kind == "agent" && doc.Actor.ID == trace.Manager:
+		return byManager, true
 	}
 	return 0, false
 }
@@ -656,7 +656,7 @@ func (st *publishStream) charterDecisions() []publishedDecision {
 		}
 		d := publishedDecision{
 			id: decisionID(string(st.id()), "charter", p.Question), by: byOwner,
-			context:  fmt.Sprintf("The chief of staff drew a standing charter rule from the owner's ruling on question %s.\n\nOwner's ruling: %s\n\nProposed rule: %s", question, strings.TrimSpace(p.OwnerResponse), strings.TrimSpace(p.Rule)),
+			context:  fmt.Sprintf("The manager drew a standing charter rule from the owner's ruling on question %s.\n\nOwner's ruling: %s\n\nProposed rule: %s", question, strings.TrimSpace(p.OwnerResponse), strings.TrimSpace(p.Rule)),
 			question: string(origin) + ":" + question, created: c.Proposed.At, updated: c.Decided.At}
 		note := strings.TrimSpace(p.Note)
 		if p.Decision == trace.CharterRatify {

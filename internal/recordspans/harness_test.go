@@ -165,14 +165,25 @@ func (h *harness) document(id, path string, at time.Time, actor trace.Actor, uni
 
 func (h *harness) turn(id string, enqueued, claimed time.Time, mutate func(*trace.TurnRequest, *trace.TurnResponse)) trace.TurnResponse {
 	h.t.Helper()
+	return h.turnOf("mason", id, enqueued, claimed, mutate)
+}
+
+func (h *harness) turnOf(role, id string, enqueued, claimed time.Time, mutate func(*trace.TurnRequest, *trace.TurnResponse)) trace.TurnResponse {
+	h.t.Helper()
 	ctx := context.Background()
-	agent := trace.Agent{Header: header("agent", "mason", created, service, ""), Role: "mason", ThreadID: "thread", Session: coreadapter.BackendSession{Backend: "fake", ID: "original"}}
-	if err := h.repo.CreateThread(ctx, agent); err != nil {
-		h.t.Fatal(err)
+	thread := "thread"
+	if role == trace.Manager {
+		thread = trace.Manager
 	}
-	req := trace.TurnRequest{Header: header("turn-request", "request_"+id, enqueued, service, "u1"), AgentID: "mason", ThreadID: "thread", TurnID: id,
+	agent := trace.Agent{Header: header("agent", role, created, service, ""), Role: role, ThreadID: thread, Session: coreadapter.BackendSession{Backend: "fake", ID: "original"}}
+	if role != trace.Manager {
+		if err := h.repo.CreateThread(ctx, agent); err != nil {
+			h.t.Fatal(err)
+		}
+	}
+	req := trace.TurnRequest{Header: header("turn-request", "request_"+id, enqueued, service, "u1"), AgentID: role, ThreadID: thread, TurnID: id,
 		Profile: coreadapter.Profile{Name: "default", Backend: "Fake", Model: "test-model-1"}, Prompt: "prompt " + id}
-	resp := trace.TurnResponse{Header: header("turn-response", "response_"+id, claimed.Add(5*time.Second), service, "u1"), AgentID: "mason", ThreadID: "thread", TurnID: id,
+	resp := trace.TurnResponse{Header: header("turn-response", "response_"+id, claimed.Add(5*time.Second), service, "u1"), AgentID: role, ThreadID: thread, TurnID: id,
 		RequestID: "request_" + id, RequestRevision: 1,
 		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "Fake", ID: "continued"}, SessionDirectory: "/owned/" + id, StartedAt: claimed, Duration: 5 * time.Second, FinalResponse: "reply " + id}}
 	resp.Cause = req.Cause
@@ -182,13 +193,13 @@ func (h *harness) turn(id string, enqueued, claimed time.Time, mutate func(*trac
 	if _, err := h.repo.EnqueueTurn(ctx, req); err != nil {
 		h.t.Fatal(err)
 	}
-	if _, err := h.repo.ClaimTurn(ctx, stream, "mason", "token-"+id, "/owned/"+id, claimed); err != nil {
+	if _, err := h.repo.ClaimTurn(ctx, stream, role, "token-"+id, "/owned/"+id, claimed); err != nil {
 		h.t.Fatal(err)
 	}
 	if err := h.repo.CaptureTurn(ctx, "token-"+id, resp); err != nil {
 		h.t.Fatal(err)
 	}
-	if err := h.repo.CompleteTurn(ctx, stream, "mason", id, "token-"+id, resp.At); err != nil {
+	if err := h.repo.CompleteTurn(ctx, stream, role, id, "token-"+id, resp.At); err != nil {
 		h.t.Fatal(err)
 	}
 	return resp

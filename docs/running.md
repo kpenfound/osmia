@@ -295,9 +295,9 @@ decisions shows "Sending…"; a refused command shows its reason there next to
 the restored card and adds no entry. Archiving a workstream keeps its
 acknowledgement in that line and adds no feed entry.
 
-The project pane is the main entry point. It leads with **Needs you**, a list of every open inbox entry and charter rule across the workstreams, each linking to the workstream or workgroup that answers it. Below it, each one-repo project shows its workgroups and member workstreams with named waits. **Create project** registers a repo with its own charter. **Hand in a feature** selects active projects through a multi-select; the first is home for the shared chief and conversation. **Open a design session** opens a read-only chat whose brief starts with that project. Ask the agent to change the project list; inferred changes need your agreement. Choose **New project** in the design form to design a project that does not exist yet: the session lives in the project whose card you opened the form from, or in the first active project, and the form refuses when no project is active. The agent drafts the project's name, repo name, visibility, description and first charter with the brief, and the design page shows them, including the visibility, before you press Start. The visibility is private unless you confirm public in the session. The repo is created with only a README, so the new project's first unit sets up `dagger check`. Once the agent has titled a design session, its title replaces the workstream ID in the sidebar row, the project pane's design-session list and the design page's heading, and follows a later title without a reload; an untitled session keeps its ID. After you press Start, the chief of staff titles the started work from the handed brief, and the page shows that title as the work's goal.
+The project pane is the main entry point. It leads with **Needs you**, a list of every open inbox entry and charter rule across the workstreams, each linking to the workstream or workgroup that answers it. Below it, each one-repo project shows its workgroups and member workstreams with named waits. **Create project** registers a repo with its own charter. **Hand in a feature** selects active projects through a multi-select; the first is home for the shared manager and conversation. **Open a design session** opens a read-only chat whose brief starts with that project. Ask the agent to change the project list; inferred changes need your agreement. Choose **New project** in the design form to design a project that does not exist yet: the session lives in the project whose card you opened the form from, or in the first active project, and the form refuses when no project is active. The agent drafts the project's name, repo name, visibility, description and first charter with the brief, and the design page shows them, including the visibility, before you press Start. The visibility is private unless you confirm public in the session. The repo is created with only a README, so the new project's first unit sets up `dagger check`. Once the agent has titled a design session, its title replaces the workstream ID in the sidebar row, the project pane's design-session list and the design page's heading, and follows a later title without a reload; an untitled session keeps its ID. After you press Start, the manager titles the started work from the handed brief, and the page shows that title as the work's goal.
 
-Above **Start workgroup from brief**, the read-only **Brief** panel shows the latest revision, project names with home marked and text collapsed by default. It updates live and Start sends the displayed revision. A stale brief shows a conflict and refreshes the panel without allocating work. One member per selected project is created without an architect selection turn. The list stays fixed until ratification; changing it requires abandoning and handing in again. One ratification covers the workgroup spec, graph and slices; the original conversation continues as the shared chief, at the session's project even when it is not a member.
+Above **Start workgroup from brief**, the read-only **Brief** panel shows the latest revision, project names with home marked and text collapsed by default. It updates live and Start sends the displayed revision. A stale brief shows a conflict and refreshes the panel without allocating work. One member per selected project is created without an architect selection turn. The list stays fixed until ratification; changing it requires abandoning and handing in again. One ratification covers the workgroup spec, graph and slices; the original conversation continues as the shared manager, at the session's project even when it is not a member.
 
 Starting a **New project** design needs `[projects]` in `config.toml` (see [configuration](configuration.md#project-creation)) and `GITHUB_TOKEN` in the service's environment. Start checks four things before it records anything: creation is configured, the token's account is `repo_owner`, the repo name is free under `repo_owner`, and `clone_dir/<repo>` does not exist. A refused Start names the failing check and creates nothing on GitHub. Otherwise Start creates the GitHub repository for `repo_owner` with only a README, **private unless the brief says public** (the agent sets public only after you confirm it in the session), clones it into `clone_dir/<repo>` with your git and SSH configuration, makes `main` the default branch, registers the project with the drafted charter and then allocates it as a workgroup member beside any existing projects the brief names. The new project's handed input says the repository is new and that its first unit must set up `dagger check`; Osmia picks no toolchain for it. The creation survives a restart: it finishes the same repository and the same workgroup once.
 
@@ -328,7 +328,7 @@ A setting whose stored value differs from the value in effect shows the stored v
 
 A refused save, such as an invalid value or a failure preparing the service, keeps your draft and shows the field error or the reason; nothing is written. If the stored settings changed elsewhere since the form read them, the save is refused as stale, writes nothing and keeps the draft with a notice that the settings changed elsewhere. **Read settings** then loads the latest stored values on purpose. An untouched form follows other clients' saves live; a form with a draft keeps its draft and version and shows the notice. A save that was recorded but could not be applied is reported as saved, not as a refusal: the saved values show as **Not yet applied** at the new revision, and the project's next save from the form, or a restart, applies them.
 
-Ask the chief in the workstream conversation to capture built work; previews need no project setup.
+Ask the manager in the workstream conversation to capture built work; previews need no project setup.
 
 **Delivered (merged)** requires an owner merge record or a recorded merged
 outcome matching the current publication's PR, live or archived. An open,
@@ -404,9 +404,9 @@ The member view is laid out like a chat client:
   attempt's diff, its branch and its measurement output. The panel redraws as
   the climb's events arrive, with no reload.
   **Conversation** is the default. It lists, in the order they happened, your
-  messages and the chief of staff's answers and actions, images, delivery
-  briefs, the outcomes of your commands, and only the latest status the chief
-  of staff wrote, with its attention note highlighted. Machine events appear
+  messages and the manager's answers and actions, images, delivery
+  briefs, the outcomes of your commands, and only the latest status the manager
+  wrote, with its attention note highlighted. Machine events appear
   only as one quiet line each: the workstream becoming ratified, building,
   assembled or delivered, and the result of each final review. Selecting a
   line opens Activity at that entry. Sessions, unit changes and check runs,
@@ -414,7 +414,7 @@ The member view is laid out like a chat client:
   event, in the order it happened: each agent session with its role, profile
   and outcome (a finished session opens to its report or failure), each change
   of the workstream's or a unit's state with its reason, each check run, each
-  final review and every status the chief of staff wrote. The latest status is
+  final review and every status the manager wrote. The latest status is
   marked current and older ones recede. Consecutive runs of routine events fold
   into one "N events" line that opens in place. A unit filter limits Activity
   to one unit's events; there are no event-type filters. The tab, the unit
@@ -423,19 +423,19 @@ The member view is laid out like a chat client:
   address shows the same view and Back and Forward step through it. The dot on
   a sidebar row follows Conversation, the status and what waits on you; events
   only Activity shows never mark a workstream. Its inbox entries sit below
-  Conversation's entries, above the message field: what each asks, what waits on it, its options and the chief
-  of staff's recommendation. A ratification also shows the objections the
-  chief of staff escalated and your own, with the ones it dismissed and why
+  Conversation's entries, above the message field: what each asks, what waits on it, its options and the manager's
+  recommendation. A ratification also shows the objections the
+  manager escalated and your own, with the ones it dismissed and why
   folded below them; a
-  delivery shows the chief of staff's delivery brief first (its text,
+  delivery shows the manager's delivery brief first (its text,
   screenshot thumbnails that open the full image, and, when the change needs
   something done to deploy it, a separate **Before you ship** list that is
   always visible), then the final report's findings and the units serving each
   criterion. Without a brief it says "No brief was recorded for this review".
-  The delivery entry waits for the brief while the chief of staff's turn for
+  The delivery entry waits for the brief while the manager's turn for
   that final review runs and appears when the brief is recorded or that turn
   ends without one. The brief is also its own entry in Conversation, so you can
-  reply to the chief of staff right under it; a workgroup's conversation
+  reply to the manager right under it; a workgroup's conversation
   shows each member's brief labelled with the member.
   Jev, the factory's decision maker, decides some of these entries before
   they reach you: when its confidence on a ratification, an amendment that
@@ -452,7 +452,7 @@ The member view is laid out like a chat client:
   to landing (`delivery = "jev"`), Jev instead picks how a clean delivery goes
   out, by landing it or by marking its draft pull request ready, when its
   confidence reaches `jev.decision_threshold`. Jev never writes text, so
-  an option that needs words is offered only when the chief of staff already
+  an option that needs words is offered only when the manager already
   wrote them. Without Jev's API key the service
   still runs and every entry reaches you; `osmia doctor` fails its Jev check.
   The Documents tab reads and edits the draft spec and plan before
@@ -464,9 +464,9 @@ The member view is laid out like a chat client:
   other facts in the archived list, then permanently deletes the workstream's
   own trace, including full check output. It cannot be undone; see
   [the command line](cli.md). You do not have to archive a delivered
-  workstream whose pull request has merged: the chief of staff archives it
+  workstream whose pull request has merged: the manager archives it
   when the merge is recorded, and the archived list shows “Archived by the
-  chief of staff”. The chief's conversation says so with the pull request
+  manager”. The manager's conversation says so with the pull request
   link, and your own archive stays available for every other terminal
   workstream.
   A workgroup whose members are all archived stays in the Archived group while
@@ -489,16 +489,16 @@ requesting the deleted image. New images appear over the event stream without
 a reload. Opening a feed or receiving a new entry snaps to its end; refreshing
 an existing entry keeps the scroll position.
 
-Ask a project's chief to show a built page. The chief uses `inspect_code` on
+Ask a project's manager to show a built page. The manager uses `inspect_code` on
 the member's committed Dagger configuration and module source to choose a
 Service call and HTTP port for each request.
-The chief's `preview` tool asks the service to capture the feature-branch head,
+The manager's `preview` tool asks the service to capture the feature-branch head,
 or a named unit's recorded candidate, at one URL path. It supports `desktop`
 and `phone` viewports and full-page captures. The service runs both the chosen
 Dagger Service and pinned Chromium through Dagger, without a browser on the host
 or a published host port. Previews share the check-slot pool; a waiting run is
 labelled `preview` in the capacity view, and its timeout starts after admission.
-An unavailable or failed preview gives the chief a limitation to explain.
+An unavailable or failed preview gives the manager a limitation to explain.
 
 Exploratory session agents can attach a PNG or JPEG from their current worktree
 with `show_image(path)`, including a screenshot just written in the same turn.
@@ -519,7 +519,7 @@ From the page you can:
 - Decide a contested unit, an amendment or a charter proposal.
 - Accept the final review and mark each workstream's pull request ready for
   review with one click. The delivery card shows the final report's findings,
-  the recorded check result, the chief of staff's brief and the PR title, and a
+  the recorded check result, the manager's brief and the PR title, and a
   collapsed **What will be published** section with the description (the
   brief's **Before you ship** items included) and each commit message as plain,
   read-only text. Its one button says what approving does: **Mark ready for
@@ -608,13 +608,13 @@ the upstream base as a **draft**. You approve nothing for this, and the
 workstream stays `assembled`. The draft carries the drafted title and
 description without the brief's **Before you ship** items, which do not exist
 yet. `GITHUB_TOKEN` must be set in the service's environment: it opens the pull
-request and reads the commit statuses below. Without it the final review waits at publication: nothing is pushed or opened, the workstream stays `assembled`, no final read starts, and the status wait and a chief of staff notice name the missing `GITHUB_TOKEN`. Restart `osmia serve` with the token and the review pushes, opens the draft and watches the checks as usual.
+request and reads the commit statuses below. Without it the final review waits at publication: nothing is pushed or opened, the workstream stays `assembled`, no final read starts, and the status wait and a manager notice name the missing `GITHUB_TOKEN`. Restart `osmia serve` with the token and the review pushes, opens the draft and watches the checks as usual.
 
 Every later commit of the workstream goes to the same pull request, draft or
 ready, with no approval: the commit of a revision for blocking findings or
 failed checks, and the commit of a drift rebase. Each push starts a new check
 cycle. Nothing is pushed to a merged or closed pull request; the final review
-fails with that reason and the chief of staff is told.
+fails with that reason and the manager is told.
 
 The service runs no final check of its own. Dagger Cloud runs the project's
 checks on the pull request, and the service watches the combined commit
@@ -657,7 +657,7 @@ statuses of the pushed head commit in the upstream repository:
   check that failed and then passed on the rerun is recorded as flaky and
   counts as a pass; one that fails again stays failed. At most one rerun is made
   for a push that Dagger Cloud accepted.
-- The chief of staff and the final reader can read why a check failed with the
+- The manager and the final reader can read why a check failed with the
   `read_cloud_trace` action, which no other role holds. It takes the trace ID a
   failed check's `dagger trace <id>` command names and, optionally, that check's
   name, and returns the output `dagger trace <id>` shows: for the whole trace, or
@@ -702,21 +702,21 @@ statuses of the pushed head commit in the upstream repository:
   check that has an output record returns it without fetching, and a call for
   the whole trace fetches and records it as a separate document. The final
   reader's view holds each record, or its failure, beside the result as
-  `final/checks-<k>-traces/<record>.json`, and the chief of staff reads them as
+  `final/checks-<k>-traces/<record>.json`, and the manager reads them as
   workstream documents with `factory_context`.
 - Everything is recorded, so a restart resumes where the watch was: the wait is
   measured from the recorded push, and no push, rerun or notice is repeated.
 
 The committee's final read starts only on a completed result for the exact
 commit that was pushed, and its prompt carries the outcome, the counts, the
-failed checks with their trace ids and the flaky checks. The chief of staff
+failed checks with their trace ids and the flaky checks. The manager
 triages blocking findings: the ones that need code go into one plan
 revision, whose commit is pushed to the open pull request and starts a new
 cycle, and it records the delivery brief for the review.
 
 **Load never ran.** When the first read after the 2 minutes finds no `load`
-status, the chief of staff gets one notice for that push, and the watch goes on.
-The chief can poll the statuses at once or ask Dagger Cloud to rerun every check
+status, the manager gets one notice for that push, and the watch goes on.
+The manager can poll the statuses at once or ask Dagger Cloud to rerun every check
 of the pull request (`dagger cloud checks rerun --all --pr <N>`, with the same
 `--org` rule), and it can
 bring you a **Checks missing** entry with two answers: keep waiting, or continue
@@ -728,7 +728,7 @@ to it is refused as stale, and the later push waits for its own results. Answer
 with `osmia checks <workstream-id> keep-waiting|continue`, through the API or on
 the page.
 
-**Mark ready for review.** The delivery card appears once the chief of staff
+**Mark ready for review.** The delivery card appears once the manager
 has recorded the brief for the final review, or its turn ended without one. It
 is pinned to that review, its commit and its description, so an approval made
 before a later push replaced the commit is refused as stale. Approving adds the
@@ -799,7 +799,7 @@ write it, or the transcribed text, to the trace, the log or an event.
 A session is a lighter-weight workstream for exploratory work: a direct chat
 with one agent on its own copy of a registered project's code, without the
 rest of the factory around it. There is no shed, no spec, no plan, no units,
-no reviewer and no committee, and no chief of staff speaks for it; opening,
+no reviewer and no committee, and no manager speaks for it; opening,
 listing and reading a session appear alongside your other workstreams, but a
 session is never scheduled for the shed, a mason, a reviewer, a check run
 before review, a dependency refresh or delivery.
@@ -1368,12 +1368,12 @@ carries `climb.attempt-started`, `climb.phase`, `climb.attempt-recorded`,
 `climb.kept`, `climb.plateau` and `climb.stop`; each names the workstream and
 asks a client to read the climb again.
 
-`GET /v1/workgroups/{id}/feed` returns the shared chief conversation,
+`GET /v1/workgroups/{id}/feed` returns the shared manager conversation,
 statuses and actions in `entries`, and one current summary per member in
 `members`. Each summary includes `workstream`, `repo`, `state`,
 `display_state`, unit counts by state in `units`, `wait`, `pr_link`,
 `running`, `archived` and, for an archived member, `archived_by` (`owner` or
-`chief_of_staff`). Archived cards use pinned archive facts; their
+`manager`). Archived cards use pinned archive facts; their
 unit counts are empty. Entries about one member include its `workstream`
 and `repo`. `POST /v1/workgroups/{id}/conversation` accepts `{"text":"..."}`
 and acknowledges the message after it is durable, without a member-address
@@ -1386,8 +1386,8 @@ membership or retirement holds return an error.
 
 For a member of a multi-member workgroup, `GET /v1/feed/{workstream}`
 contains only member activity: transitions, worker sessions, checks and final
-reviews. Shared chief conversation, statuses, actions and chief sessions
-belong to the workgroup feed. Single-member feeds also contain those chief
+reviews. Shared manager conversation, statuses, actions and manager sessions
+belong to the workgroup feed. Single-member feeds also contain those manager
 entries. `GET` and `POST /v1/conversation/{workstream}` keep the member's
 conversation address and member note for CLI and API clients.
 
@@ -1400,7 +1400,7 @@ records expose `resolution_evidence` (`merged`, `cancelled` or `unresolved`)
 and `resolved`, pinned from history before cleanup. Only merge or cancel
 evidence resolves an archived member; a missing pin keeps the workgroup and
 workgroup spec active with a visible diagnostic. An archive record also names
-its actor, `chief_of_staff` when the chief of staff archived the workstream
+its actor, `manager` when the manager archived the workstream
 because its pull request merged and nothing for the owner's archive; the
 status, archive and member-summary responses expose it as `archived_by`. See
 [resolution and retention](configuration.md#resolution-retention-and-shared-lifecycle).

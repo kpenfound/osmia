@@ -60,7 +60,7 @@ func TestBundleRetiresResolvedMemberSliceBeforeProjectSpec(t *testing.T) {
 			if tc.outcome != "" {
 				record("own-pull-request-outcome", "own-pull-request-outcome.json", tc.outcome)
 			}
-			for _, role := range []string{"mason", trace.ChiefOfStaff} {
+			for _, role := range []string{"mason", trace.Manager} {
 				b := f.assemble(t, bundle.Scope{Role: role, Workstream: first})
 				if b.ProjectSpec == nil || b.ProjectSpec.Behavior != spec.Behavior || (b.ProjectSpec.Slice == nil) != tc.retired {
 					t.Fatalf("member bundle: %+v", b.ProjectSpec)

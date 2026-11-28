@@ -56,7 +56,7 @@ type Dependencies struct {
 	ProjectFor        func(id config.ProjectID) (config.ProjectID, *APIError)
 	Ratify            func(ctx context.Context, raw string, req RatifyRequest) (RatifyResponse, *APIError)
 	// Router applies the owner's moves of a workstream as pinned moves, routes
-	// the proposals of the chief of staff, and decides the exits of dependency
+	// the proposals of the manager, and decides the exits of dependency
 	// waits and drift rebases: the passes raise the trigger, the default, the
 	// legal targets and the evidence, and the router chooses the state.
 	Router         router.Port

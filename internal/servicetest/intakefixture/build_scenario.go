@@ -177,38 +177,38 @@ func (f *TurnScenario) CaptureTurn(t *testing.T, repository *trace.Repository, s
 	return q
 }
 
-func (f *TurnScenario) ChiefRecordsAnswer(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, id, text, cite string) {
+func (f *TurnScenario) ManagerRecordsAnswer(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, id, text, cite string) {
 	t.Helper()
 	ctx := context.Background()
 	fixturekit.Must(t, func() error {
-		_, err := repository.EnsureChiefOfStaff(ctx, stream, f.Now(), fixturekit.OwnerActor)
+		_, err := repository.EnsureManager(ctx, stream, f.Now(), fixturekit.OwnerActor)
 		return err
 	}())
-	turn := "chief-answer-" + id
+	turn := "manager-answer-" + id
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.Now(), Actor: f.ForemanActor, Cause: "test", Depth: 1},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "chief", Prompt: "Answer question " + id}
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "manager", Prompt: "Answer question " + id}
 	_, err := repository.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
 	token := "claim-" + turn
-	directory := filepath.Join(f.Root().String(), "threads", string(f.Project), string(stream), trace.ChiefOfStaff, token)
-	q, err := repository.ClaimTurn(ctx, stream, trace.ChiefOfStaff, token, directory, f.Now())
+	directory := filepath.Join(f.Root().String(), "threads", string(f.Project), string(stream), trace.Manager, token)
+	q, err := repository.ClaimTurn(ctx, stream, trace.Manager, token, directory, f.Now())
 	fixturekit.Must(t, err)
-	chiefScope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: turn}
-	tools, err := questions.Tools(repository, trace.ChiefOfStaff, chiefScope, f.Now)
+	managerScope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: turn}
+	tools, err := questions.Tools(repository, trace.Manager, managerScope, f.Now)
 	fixturekit.Must(t, err)
 	tools = jevfixture.AutoDecide(repository, stream, tools)
 	i := slices.IndexFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == questions.AnswerTool })
 	if i < 0 {
-		t.Fatal("the chief of staff has no answer tool")
+		t.Fatal("the manager has no answer tool")
 	}
 	input, err := json.Marshal(map[string]any{"question": id, "text": text, "citations": []string{cite}})
 	fixturekit.Must(t, err)
 	out, err := tools[i].Handle(ctx, input)
 	fixturekit.Must(t, err)
 	if !strings.Contains(string(out), `"recorded":true`) {
-		t.Fatalf("the chief of staff's answer to question %s: %s", id, out)
+		t.Fatalf("the manager's answer to question %s: %s", id, out)
 	}
-	f.CompleteClaimedTurn(t, repository, stream, trace.ChiefOfStaff, q, &coreadapter.Outcome{Status: "done", Report: "Answered question " + id})
+	f.CompleteClaimedTurn(t, repository, stream, trace.Manager, q, &coreadapter.Outcome{Status: "done", Report: "Answered question " + id})
 }
 
 func (f *TurnScenario) CompleteClaimedTurn(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, agent string, q trace.QueuedTurn, outcome *coreadapter.Outcome) {
@@ -453,10 +453,10 @@ func ConfigureMasonThreads(t *testing.T, root, backend, capacity string, origina
 // ScriptMasons installs the first worker turns and failing clarification turns.
 func ScriptMasons(engine *fixturekit.DemoEngine, turnID func(string) string) *FakeMasons {
 	fake := &FakeMasons{Runs: map[string][]agent.Request{}, Play: map[string]func(context.Context, agent.Request, *mcp.ClientSession) error{}}
-	fake.Chief = &Chief{P: &Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
+	fake.Manager = &Manager{P: &Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	engine.Mu.Lock()
 	defer engine.Mu.Unlock()
-	engine.Turns["*"] = fake.Chief.Turn
+	engine.Turns["*"] = fake.Manager.Turn
 	engine.Turns[turnID("resume")] = fake.Turn
 	engine.Turns[turnID("dedupe")] = fake.Turn
 	for _, unit := range []string{"resume", "dedupe"} {
@@ -526,11 +526,11 @@ func RaiseFixtureContest(t *testing.T, r *trace.Repository, stream config.Workst
 	if !found {
 		t.Fatal("fixture unit has no contest")
 	}
-	data, err := json.Marshal(api.ChiefContestDecision{Contest: header.ID, Decision: escalate, Turn: "fixture"})
+	data, err := json.Marshal(api.ManagerContestDecision{Contest: header.ID, Decision: escalate, Turn: "fixture"})
 	fixturekit.Must(t, err)
 	h := header
 	h.Schema = "osmia.trace.document"
-	h.ID = trace.UnitSubject(unit) + "-chief-" + header.ID
+	h.ID = trace.UnitSubject(unit) + "-manager-" + header.ID
 	h.Revision = 1
 	h.Actor = actor
 	h.Cause = header.ID

@@ -27,7 +27,7 @@ var _ reconcile.Bounded = (*Publisher)(nil)
 // runs under the attempt deadline and ends in a result after repeated failure.
 func (p *Publisher) Bound(op coreadapter.Operation) bool { return PublicationAction(op) }
 
-// Failing has nothing to tell the chief of staff: a publication that keeps
+// Failing has nothing to tell the manager: a publication that keeps
 // failing opens its inbox entry (see PublicationEntry).
 func (p *Publisher) Failing(context.Context, coreadapter.Operation, int, string) error { return nil }
 

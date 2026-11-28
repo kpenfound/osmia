@@ -21,25 +21,25 @@ import (
 )
 
 type crossRepoStall struct {
-	s     *Service
-	repo  *trace.Repository
-	other *trace.Repository
-	chief *trace.Repository
-	g     trace.Workgroup
-	clock *fixturekit.FixedClock
-	log   *exitLog
+	s       *Service
+	repo    *trace.Repository
+	other   *trace.Repository
+	manager *trace.Repository
+	g       trace.Workgroup
+	clock   *fixturekit.FixedClock
+	log     *exitLog
 }
 
 func newCrossRepoStall(t *testing.T) *crossRepoStall {
 	t.Helper()
-	s, chief, g := workgroupFeedFixture(t, true, 2)
+	s, manager, g := workgroupFeedFixture(t, true, 2)
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	s.options.Reconciliation.Now = clock.Now
 	key := gateKey(t, true)
 	settings := config.Jev{URL: config.DefaultJevURL, Model: config.DefaultJevModel, APIKeyEnv: key, Timeout: "20s", CheckThreshold: config.DefaultJevCheckThreshold, DecisionThreshold: config.DefaultJevDecisionThreshold, OwnerThreshold: config.DefaultJevOwnerThreshold}
 	s.jev = &jev.Judge{Config: func() config.Jev { return settings }, Provider: (&jevfixture.Transitions{}).Factory(), Getenv: os.Getenv}
 	s.router = s.newRouter()
-	return &crossRepoStall{s: s, repo: s.projects[0].repository, other: s.projects[1].repository, chief: chief, g: g, clock: clock, log: &exitLog{}}
+	return &crossRepoStall{s: s, repo: s.projects[0].repository, other: s.projects[1].repository, manager: manager, g: g, clock: clock, log: &exitLog{}}
 }
 
 func (f *crossRepoStall) watch() stallWatch {
@@ -130,8 +130,8 @@ func (f *crossRepoStall) seedChange(t *testing.T, c lifecycle.WorkgroupChange, r
 	t.Helper()
 	data, err := json.Marshal(c)
 	fixturekit.Must(t, err)
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: lifecycle.WorkgroupChangeDocument(c.ID), Revision: revision, Project: f.chief.Project(), Workstream: f.g.Members[0], At: at, Actor: stallSeeder, Cause: "seed"}
-	fixturekit.Must(t, f.chief.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: lifecycle.WorkgroupChangePath(c.ID), Content: string(data)}}))
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: lifecycle.WorkgroupChangeDocument(c.ID), Revision: revision, Project: f.manager.Project(), Workstream: f.g.Members[0], At: at, Actor: stallSeeder, Cause: "seed"}
+	fixturekit.Must(t, f.manager.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: lifecycle.WorkgroupChangePath(c.ID), Content: string(data)}}))
 }
 
 func changeStalls(exits []router.Exit, subject string) []router.Exit {
@@ -176,7 +176,7 @@ func TestACrossRepoWorkgroupChangeStallsOnItsLeader(t *testing.T) {
 		}
 	}
 	if told != 1 {
-		t.Fatalf("the chief of staff was told of the change %d times through the leader, want 1", told)
+		t.Fatalf("the manager was told of the change %d times through the leader, want 1", told)
 	}
 	other := f.watch()
 	other.repository = f.other
@@ -204,7 +204,7 @@ func TestACrossRepoWorkgroupChangeStallsOnItsLeader(t *testing.T) {
 	if _, apiErr := f.s.approveRecovery(ctx, string(fixturekit.Stream), recoveryRequestOf(t, *card)); apiErr != nil {
 		t.Fatalf("approving the change's card: %s", apiErr.Message)
 	}
-	changes, err := lifecycle.ReadChanges(f.chief, f.g.Members[0])
+	changes, err := lifecycle.ReadChanges(f.manager, f.g.Members[0])
 	fixturekit.Must(t, err)
 	if len(changes) != 1 || changes[0].State != "failed" {
 		t.Fatalf("the approved card left the workgroup's change %+v", changes)
@@ -216,7 +216,7 @@ func TestACrossRepoWorkgroupChangeStallsOnItsLeader(t *testing.T) {
 func TestACrossRepoAmendmentRequestStallsOnItsLeader(t *testing.T) {
 	ctx := context.Background()
 	f := newCrossRepoStall(t)
-	_, err := trace.FileProjectAmendment(ctx, f.chief, trace.ProjectAmendment{Workgroup: f.g.ID, Origin: fixturekit.Quiet, Role: "mason", Requester: stallSeeder, Citations: []string{"criterion 1"}, Change: "Widen the contract", Reason: "the slice cannot meet it"}, fixturekit.DemoStart)
+	_, err := trace.FileProjectAmendment(ctx, f.manager, trace.ProjectAmendment{Workgroup: f.g.ID, Origin: fixturekit.Quiet, Role: "mason", Requester: stallSeeder, Citations: []string{"criterion 1"}, Change: "Widen the contract", Reason: "the slice cannot meet it"}, fixturekit.DemoStart)
 	fixturekit.Must(t, err)
 	subject := lifecycle.WorkgroupChangeDocument("contract-1")
 	f.clock.QuietFor(44 * time.Minute)

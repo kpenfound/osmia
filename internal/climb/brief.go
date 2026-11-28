@@ -82,7 +82,7 @@ func (b Brief) Render() string {
 	}
 	if len(b.Steering) > 0 {
 		line("")
-		line("## Steering notes from the chief of staff")
+		line("## Steering notes from the manager")
 		for _, n := range b.Steering {
 			mark := ""
 			if n.Number > b.Delivered {

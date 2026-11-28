@@ -80,9 +80,9 @@ func TestBrowserAgentMarkdownAcrossConversations(t *testing.T) {
 	const owner = "# Owner **literal**\n| no | formatting |"
 	f.sendAndAnswer(t, p, quiet, owner, browserMarkdown)
 	awaitFeedEvent(p, quiet)
-	chief := `[data-workstream="` + string(quiet) + `"] [data-kind=response] [data-field=text] > .markdown`
-	expected := assertMarkdown(p, chief)
-	assertMarkdownPhone(p, chief)
+	manager := `[data-workstream="` + string(quiet) + `"] [data-kind=response] [data-field=text] > .markdown`
+	expected := assertMarkdown(p, manager)
+	assertMarkdownPhone(p, manager)
 	p.Await("plain owner message", `document.querySelector('[data-kind=message] [data-field=text]').textContent === `+strconv.Quote(owner)+` && !document.querySelector('[data-kind=message] [data-field=text] h1')`)
 	conversation, err := f.c.Conversation(ctx, quiet)
 	must(t, err)
@@ -116,7 +116,7 @@ func TestBrowserAgentMarkdownAcrossConversations(t *testing.T) {
 	awaitFeedEvent(ps, opened.Session.Workstream)
 	session := `#session-feed [data-kind=response] [data-field=text] > .markdown`
 	if got := assertMarkdown(ps, session); got != expected {
-		t.Fatalf("session structure differs from chief: %s", got)
+		t.Fatalf("session structure differs from manager: %s", got)
 	}
 	assertMarkdownPhone(ps, session)
 	ps.Await("session owner text as typed", `document.querySelector('#session-feed [data-kind=message] [data-field=text]').textContent === `+strconv.Quote(owner))
@@ -145,7 +145,7 @@ func TestBrowserAgentMarkdownAcrossConversations(t *testing.T) {
 	design := `#design-feed [data-kind=response] [data-field=text] > .markdown`
 	got := assertMarkdown(pd, design)
 	if strings.TrimSpace(got) != strings.TrimSpace(expected) {
-		t.Fatalf("design structure differs from chief: %s", got)
+		t.Fatalf("design structure differs from manager: %s", got)
 	}
 	assertMarkdownPhone(pd, design)
 	pd.AwaitText("#design-feed details summary", "Assumptions (reply to override)")
@@ -171,7 +171,7 @@ func TestBrowserMarkdownStatusAndReportsStayExpanded(t *testing.T) {
 	t.Parallel()
 	f := newPageFixture(t)
 	f.status(t, trace.StatusContent{Goal: "Markdown reports", Note: browserMarkdown, Attention: browserMarkdown, Agents: []string{}})
-	f.answerChief(t, stream, f.chief.Turn, browserMarkdown)
+	f.answerManager(t, stream, f.manager.Turn, browserMarkdown)
 	p := openBrowser(t)
 	watchMarkdownEvents(p)
 	p.Run(chromedp.EmulateViewport(390, 844), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
@@ -181,8 +181,8 @@ func TestBrowserMarkdownStatusAndReportsStayExpanded(t *testing.T) {
 	assertMarkdown(p, card+`[data-latest=true] [data-field=note] > .markdown`)
 	assertMarkdown(p, card+`[data-latest=true] [data-field=attention] > .markdown`)
 	p.OpenActivity()
-	p.Click(card + `[data-kind=session][data-role=chief_of_staff] summary`)
-	report := card + `[data-kind=session][data-role=chief_of_staff] [data-field=summary] > .markdown`
+	p.Click(card + `[data-kind=session][data-role=manager] summary`)
+	report := card + `[data-kind=session][data-role=manager] [data-field=summary] > .markdown`
 	assertMarkdown(p, report)
 	assertMarkdownPhone(p, report)
 	p.Eval(`window.feedEvents.length = 0`, nil)
@@ -191,7 +191,7 @@ func TestBrowserMarkdownStatusAndReportsStayExpanded(t *testing.T) {
 	awaitFeedEvent(p, stream)
 	p.Await("the new reply in Conversation", `[...document.querySelectorAll(`+quote(card+`[data-kind=response]`)+`)].some(n => n.textContent.includes('A new reply.'))`)
 	p.OpenActivity()
-	p.Await("report stays open after an update", `document.querySelector(`+quote(card+`[data-kind=session][data-role=chief_of_staff] details`)+`).open`)
+	p.Await("report stays open after an update", `document.querySelector(`+quote(card+`[data-kind=session][data-role=manager] details`)+`).open`)
 	assertMarkdown(p, report)
-	p.Await("session anchor", `document.getElementById(`+quote("feed-turn-"+f.chief.Turn)+`)?.querySelector('details').open`)
+	p.Await("session anchor", `document.getElementById(`+quote("feed-turn-"+f.manager.Turn)+`)?.querySelector('details').open`)
 }

@@ -126,7 +126,7 @@ func TestCrossProjectCharterValidationAndContext(t *testing.T) {
 		}
 	}
 	provider := bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return f.a, nil }}
-	for _, role := range []string{"architect", "committee", trace.ChiefOfStaff} {
+	for _, role := range []string{"architect", "committee", trace.Manager} {
 		b, err := provider.Assemble(ctx, f.a.Project(), bundle.Scope{Role: role, Workstream: fixturekit.Stream})
 		fixturekit.Must(t, err)
 		for _, required := range []string{string(f.a.Project()) + "/charter#1: A requires", string(charterProjectB) + "/charter#1: B requires", "workgroup spec and contracts must satisfy every charter"} {
@@ -156,15 +156,15 @@ func TestCrossProjectCharterConflictAndAmendment(t *testing.T) {
 		t.Fatalf("owner inbox: %+v", inbox)
 	}
 	host := f.workgroup.Members[0]
-	_, err = f.group.EnsureChiefOfStaff(ctx, host, fixturekit.DemoStart, OwnerActor)
+	_, err = f.group.EnsureManager(ctx, host, fixturekit.DemoStart, OwnerActor)
 	fixturekit.Must(t, err)
-	chief := claimCharterChief(t, f.group, host)
-	if _, err := f.group.AnswerQuestion(ctx, trace.ChiefOfStaff, chief, string(fixturekit.Stream)+":"+q, "Dismiss it.", []string{"charter#1"}, fixturekit.DemoStart); err == nil || !strings.Contains(err.Error(), "only the owner's ruling") {
-		t.Fatalf("chief answered conflict: %v", err)
+	manager := claimCharterManager(t, f.group, host)
+	if _, err := f.group.AnswerQuestion(ctx, trace.Manager, manager, string(fixturekit.Stream)+":"+q, "Dismiss it.", []string{"charter#1"}, fixturekit.DemoStart); err == nil || !strings.Contains(err.Error(), "only the owner's ruling") {
+		t.Fatalf("manager answered conflict: %v", err)
 	}
 	_, err = f.group.Rule(ctx, inbox[0].Number, "B may persist the coordination journal.", OwnerActor, fixturekit.DemoStart)
 	fixturekit.Must(t, err)
-	tools, err := questions.Tools(f.group, trace.ChiefOfStaff, chief, func() time.Time { return fixturekit.DemoStart })
+	tools, err := questions.Tools(f.group, trace.Manager, manager, func() time.Time { return fixturekit.DemoStart })
 	fixturekit.Must(t, err)
 	for _, tool := range tools {
 		if tool.Name == questions.AnswerTool {
@@ -172,7 +172,7 @@ func TestCrossProjectCharterConflictAndAmendment(t *testing.T) {
 			out, err := tool.Handle(ctx, raw)
 			fixturekit.Must(t, err)
 			if !strings.Contains(string(out), `"recorded":false`) {
-				t.Fatalf("chief answered charter conflict: %s", out)
+				t.Fatalf("manager answered charter conflict: %s", out)
 			}
 		}
 		if tool.Name != questions.ProposeCharterTool {
@@ -254,33 +254,33 @@ func TestCrossProjectCharterConflictCannotBeDismissed(t *testing.T) {
 	h.Schema, h.ID = "osmia.trace.document", shed.DocumentID(1, member)
 	fixturekit.Must(t, f.a.RecordDocuments(ctx, []trace.Document{{Header: h, Path: shed.Path(1, member), Content: string(data)}}))
 	host := f.workgroup.Members[0]
-	_, err = f.group.EnsureChiefOfStaff(ctx, host, fixturekit.DemoStart, OwnerActor)
+	_, err = f.group.EnsureManager(ctx, host, fixturekit.DemoStart, OwnerActor)
 	fixturekit.Must(t, err)
-	scope := claimCharterChief(t, f.group, host)
+	scope := claimCharterManager(t, f.group, host)
 	controls := Controls{Load: func() *Controller { return New(Dependencies{}) }}
 	tool := controls.ResolveObjection(f.group, scope)
 	out, err := tool.Handle(ctx, json.RawMessage(`{"workstream":"`+string(fixturekit.Stream)+`","objection":"`+id+`","decision":"dismiss","note":"Ignore it."}`))
 	fixturekit.Must(t, err)
-	if !strings.Contains(string(out), `"recorded":false`) || !strings.Contains(string(out), "chief cannot resolve") {
-		t.Fatalf("chief dismissal tool: %s", out)
+	if !strings.Contains(string(out), `"recorded":false`) || !strings.Contains(string(out), "manager cannot resolve") {
+		t.Fatalf("manager dismissal tool: %s", out)
 	}
 
 	conflict := shed.Objection{ID: "conflict", Kind: shed.CharterConflict, Part: "spec#1", Argument: "Rules conflict.", Citations: []string{"charter#1", string(charterProjectB) + "/charter#1"}}
 	records := []shed.Record{{Version: shed.Version, Round: 1, Revision: shed.Pin{Spec: 1, Plan: 1}, Member: "committee", Objections: []shed.Objection{conflict}}}
-	decisions := []shed.ChiefDecisions{{Decisions: []shed.ChiefDecision{{Objection: "conflict", Decision: shed.Dismiss, Note: "Ignore it."}}}}
+	decisions := []shed.ManagerDecisions{{Decisions: []shed.ManagerDecision{{Objection: "conflict", Decision: shed.Dismiss, Note: "Ignore it."}}}}
 	entries := shed.DissentRecord(records, nil, decisions)
 	if len(entries) != 1 || !entries[0].Blocking || !entries[0].Escalated || entries[0].Disposition != "" || len(shed.ForOwner(entries)) != 1 || len(shed.Undecided(entries)) != 0 {
-		t.Fatalf("chief dismissed conflict: %+v", entries)
+		t.Fatalf("manager dismissed conflict: %+v", entries)
 	}
 }
 
-func claimCharterChief(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) coreadapter.Scope {
+func claimCharterManager(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
 	h := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_events", Revision: 1, Project: repo.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: OwnerActor, Cause: "test"}
-	_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Resolve conflicts."})
+	_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "events", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Resolve conflicts."})
 	fixturekit.Must(t, err)
-	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token-events", filepath.Join(t.TempDir(), "events"), fixturekit.DemoStart)
+	_, err = repo.ClaimTurn(ctx, stream, trace.Manager, "token-events", filepath.Join(t.TempDir(), "events"), fixturekit.DemoStart)
 	fixturekit.Must(t, err)
-	return coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: trace.ChiefOfStaff, Turn: "events", Role: trace.ChiefOfStaff}
+	return coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: trace.Manager, Turn: "events", Role: trace.Manager}
 }

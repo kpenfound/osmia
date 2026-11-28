@@ -105,7 +105,7 @@ func (g loopGuard) pause(ctx context.Context, stream config.WorkstreamID, guard 
 		}
 		k++
 	}
-	reason := fmt.Sprintf("Loop guard: %d agent sessions ran since the workstream's last progress, %s at %s, reaching loop.max_sessions (%d); everything but the chief of staff waits until the owner resumes the workstream", sessions, what, since.UTC().Format(time.RFC3339), g.cfg.Loop.MaxSessions)
+	reason := fmt.Sprintf("Loop guard: %d agent sessions ran since the workstream's last progress, %s at %s, reaching loop.max_sessions (%d); everything but the manager waits until the owner resumes the workstream", sessions, what, since.UTC().Format(time.RFC3339), g.cfg.Loop.MaxSessions)
 	id := fmt.Sprintf("%s-paused-%d", loopGuardSubject, k)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: g.repository.Project(), Workstream: stream, At: g.s.now(), Actor: loopGuardActor, Cause: loopGuardSubject}
 	tx := trace.Transaction{ExpectedVersion: guard.Version, Transition: trace.Transition{Header: h, Subject: loopGuardSubject, From: guard.Value, To: fmt.Sprintf("paused-%d", k), Reason: reason},
@@ -158,7 +158,7 @@ func lastProgress(repository *trace.Repository, stream config.WorkstreamID) (tim
 			case r.From == r.To:
 			case r.Subject == trace.FeatureSubject:
 				mark(r.At, "the workstream moving to "+featureState(r.To))
-			case strings.HasPrefix(r.Subject, "unit-") && r.Actor == chiefActor:
+			case strings.HasPrefix(r.Subject, "unit-") && r.Actor == managerActor:
 			case strings.HasPrefix(r.Subject, "unit-") && slices.Contains(unitProgress, r.To):
 				mark(r.At, fmt.Sprintf("unit %s moving to %s", strings.TrimPrefix(r.Subject, "unit-"), r.To))
 			case r.Subject == shedSubject, strings.HasPrefix(r.Subject, amendmentSubject("")), r.Subject == finalReviewSubject, r.Subject == publicationSubject:

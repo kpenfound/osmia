@@ -229,7 +229,7 @@ func TestBrowserFailedReadsOfferTheNextStep(t *testing.T) {
 	p.click("#workstreams [data-state=error] button[data-action=retry]")
 	p.await("the conversation read again", `document.querySelector('#workstreams [data-state=error]') === null && document.getElementById('problems').hidden &&
 		document.querySelector('#workstreams [data-field=empty] [data-state=empty]') !== null`)
-	p.awaitText("#workstreams [data-field=empty]", "Write to the chief of staff below.")
+	p.awaitText("#workstreams [data-field=empty]", "Write to the manager below.")
 
 	a.failFeed.Store(true)
 	api.pushEvent("resync")

@@ -56,18 +56,18 @@ func TestFeedOrdersEverythingThatHappened(t *testing.T) {
 	transition(trace.UnitSubject("upload"), "upload", intake.UnitReady, 2)
 	transition(trace.QuestionSubject("q1"), "", "asked", 3)
 
-	_, err = repo.EnsureChiefOfStaff(ctx, fixturekit.Stream, at(0), intake.ServiceActor)
+	_, err = repo.EnsureManager(ctx, fixturekit.Stream, at(0), intake.ServiceActor)
 	fixturekit.Must(t, err)
-	chiefProfile := coreadapter.Profile{Name: "chief", Backend: "fake", Model: "test"}
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: header("osmia.trace.turn-request", "request_events", 4), AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events", Profile: chiefProfile, Prompt: "Events"})
+	managerProfile := coreadapter.Profile{Name: "manager", Backend: "fake", Model: "test"}
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: header("osmia.trace.turn-request", "request_events", 4), AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "events", Profile: managerProfile, Prompt: "Events"})
 	fixturekit.Must(t, err)
-	chief, err := repo.ClaimTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "token_events", filepath.Join(t.TempDir(), "events"), at(5))
+	manager, err := repo.ClaimTurn(ctx, fixturekit.Stream, trace.Manager, "token_events", filepath.Join(t.TempDir(), "events"), at(5))
 	fixturekit.Must(t, err)
-	scope := coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(fixturekit.Stream), Thread: trace.ChiefOfStaff, Turn: "events", Role: trace.ChiefOfStaff}
+	scope := coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(fixturekit.Stream), Thread: trace.Manager, Turn: "events", Role: trace.Manager}
 	content := trace.StatusContent{Goal: "Ship uploads.", Attention: "Rule on the API.", Note: "Upload is ready.", Agents: []string{"A mason builds upload."}}
-	_, err = repo.SetStatus(ctx, trace.ChiefOfStaff, scope, content, at(6), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	_, err = repo.SetStatus(ctx, trace.Manager, scope, content, at(6), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	fixturekit.Must(t, err)
-	finish(trace.ChiefOfStaff, chief, coreadapter.SessionResult{FinalResponse: "Status written."}, 7)
+	finish(trace.Manager, manager, coreadapter.SessionResult{FinalResponse: "Status written."}, 7)
 
 	fixturekit.QueueRoleTurn(t, repo, fixturekit.Stream, "agent_mason_upload", intake.MasonRole, "upload", at(8))
 	mason, err := repo.ClaimTurn(ctx, fixturekit.Stream, "agent_mason_upload", "token_upload", filepath.Join(t.TempDir(), "upload"), at(9))
@@ -77,7 +77,7 @@ func TestFeedOrdersEverythingThatHappened(t *testing.T) {
 	finish("agent_mason_upload", mason, coreadapter.SessionResult{FinalResponse: "Long answer", Outcome: &coreadapter.Outcome{Status: execution.MasonDone, Report: "Built upload."}}, 12)
 
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_owner", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at(13), Actor: intake.OwnerActor, Cause: "owner-message"},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "message_owner", Profile: chiefProfile, Prompt: "How is it going?"})
+		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "message_owner", Profile: managerProfile, Prompt: "How is it going?"})
 	fixturekit.Must(t, err)
 
 	transition(execution.ChecksSubject("upload"), "upload", "requested-1", 14)
@@ -95,12 +95,12 @@ func TestFeedOrdersEverythingThatHappened(t *testing.T) {
 
 	got, err := service.FeedEntries(repo, repo, fixturekit.Stream)
 	fixturekit.Must(t, err)
-	chiefEnded, masonEnded, unitFinished, finalFinished, readerEnded := at(7), at(12), at(16), at(19), at(21)
+	managerEnded, masonEnded, unitFinished, finalFinished, readerEnded := at(7), at(12), at(16), at(19), at(21)
 	want := []api.FeedEntry{
 		{Kind: "transition", At: at(1), Transition: &api.FeedTransition{Subject: trace.FeatureSubject, From: "", To: intake.BuildingState, Actor: "service:osmia", Reason: "because " + intake.BuildingState}},
 		{Kind: "transition", At: at(2), Transition: &api.FeedTransition{Subject: trace.UnitSubject("upload"), Unit: "upload", From: "", To: intake.UnitReady, Actor: "service:osmia", Reason: "because " + intake.UnitReady}},
 		{Kind: "transition", At: at(3), Transition: &api.FeedTransition{Subject: trace.QuestionSubject("q1"), From: "", To: "asked", Actor: "service:osmia", Reason: "because asked"}},
-		{Kind: "session", At: at(5), Session: &api.FeedSession{Agent: trace.ChiefOfStaff, Role: trace.ChiefOfStaff, Turn: "events", Profile: "chief", State: "done", StartedAt: at(5), EndedAt: &chiefEnded, Summary: "Status written."}},
+		{Kind: "session", At: at(5), Session: &api.FeedSession{Agent: trace.ManagerDisplay, Role: trace.ManagerDisplay, Turn: "events", Profile: "manager", State: "done", StartedAt: at(5), EndedAt: &managerEnded, Summary: "Status written."}},
 		{Kind: "status", At: at(6), Status: &api.StatusView{Goal: "Ship uploads.", Attention: "Rule on the API.", Note: "Upload is ready.", Agents: []string{"A mason builds upload."}, Revision: 1, UpdatedAt: at(6)}},
 		{Kind: "session", At: at(9), Session: &api.FeedSession{Agent: "agent_mason_upload", Role: intake.MasonRole, Unit: "upload", Turn: "agent_mason_upload-turn", Profile: "default", State: "done", StartedAt: at(9), EndedAt: &masonEnded, Summary: "Built upload."}},
 		{Kind: "transition", At: at(10), Transition: &api.FeedTransition{Subject: trace.UnitSubject("upload"), Unit: "upload", From: intake.UnitReady, To: intake.UnitImplementing, Actor: "service:osmia", Reason: "because " + intake.UnitImplementing}},

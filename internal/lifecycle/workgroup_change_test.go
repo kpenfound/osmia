@@ -40,7 +40,7 @@ func TestAStalledChangeEndsOnlyAtThePinnedRevision(t *testing.T) {
 	ctx := context.Background()
 	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.S.Now(), intake.ServiceActor, "fixture")
 	fixturekit.Must(t, err)
-	_, err = repo.EnsureChiefOfStaff(ctx, stream, f.S.Now(), intake.ServiceActor)
+	_, err = repo.EnsureManager(ctx, stream, f.S.Now(), intake.ServiceActor)
 	fixturekit.Must(t, err)
 	c, apiFault := f.S.Lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "stalled-delta", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
 	if apiFault != nil {
@@ -118,7 +118,7 @@ func TestDeltaSchedulingRecordsRunnerIntentBeforeExecution(t *testing.T) {
 	ctx := context.Background()
 	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.S.Now(), intake.ServiceActor, "fixture")
 	fixturekit.Must(t, err)
-	_, err = repo.EnsureChiefOfStaff(ctx, stream, f.S.Now(), intake.ServiceActor)
+	_, err = repo.EnsureManager(ctx, stream, f.S.Now(), intake.ServiceActor)
 	fixturekit.Must(t, err)
 	c, apiFault := f.S.Lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "queued-delta", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
 	if apiFault != nil {
@@ -340,7 +340,7 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 			_, err = fixturekit.CallTool(ctx, tools, lifecycle.RequestChangeTool, toolMap(lifecycle.ChangeRequest{Key: key, Kind: "amend", Scope: "workgroup", Change: "Offset is encoded as a string."}))
 			return intakefixture.QuestionResult(req, "session-owner-amend", "The committee will debate the delta."), err
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Following the approved workgroup."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Following the approved workgroup."), nil
 	}
 	f.Engine.Mu.Unlock()
 	_, err = f.C.Send(ctx, f.Origin, "Amend the offset contract to string.")
@@ -432,7 +432,7 @@ func approvedCancellation(t *testing.T, f *journey.ShedFixture, repo *trace.Repo
 	f.S.SetSole(&journey.ActiveProject{Id: repo.Project(), Repository: repo})
 	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.S.Now(), intake.ServiceActor, "fixture")
 	fixturekit.Must(t, err)
-	_, err = repo.EnsureChiefOfStaff(ctx, stream, f.S.Now(), intake.ServiceActor)
+	_, err = repo.EnsureManager(ctx, stream, f.S.Now(), intake.ServiceActor)
 	fixturekit.Must(t, err)
 	c, apiFault := f.S.Lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "cancel", Kind: "cancel", Scope: scope, Change: "Superseded by owner"})
 	if apiFault != nil {

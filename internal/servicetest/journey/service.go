@@ -350,8 +350,8 @@ func (s *Service) Answers(cfg *config.Config, repository *trace.Repository) *que
 	return s.Intake().Answers(cfg, repository)
 }
 
-func (s *Service) ChiefRepository(ctx context.Context, r *trace.Repository, w config.WorkstreamID) (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error) {
-	return s.Intake().ChiefRepository(ctx, r, w)
+func (s *Service) ManagerRepository(ctx context.Context, r *trace.Repository, w config.WorkstreamID) (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error) {
+	return s.Intake().ManagerRepository(ctx, r, w)
 }
 
 func (s *Service) Runtimes() (*config.Config, []*ActiveProject) {
@@ -426,9 +426,9 @@ func (p PollsAccess) Last(project config.ProjectID, w config.WorkstreamID, kind 
 }
 
 type PageFixture struct {
-	S     *Service
-	C     *Client
-	Chief coreadapter.Scope
+	S       *Service
+	C       *Client
+	Manager coreadapter.Scope
 }
 
 func NewPageFixture(t *testing.T) *PageFixture {
@@ -437,7 +437,7 @@ func NewPageFixture(t *testing.T) *PageFixture {
 	s := &Service{}
 	s.Polls = PollsAccess{S: s}
 	s.bind(f.S)
-	return &PageFixture{S: s, C: &Client{Client: f.C, DefaultTimeout: f.C.TimeoutForTest()}, Chief: f.Chief}
+	return &PageFixture{S: s, C: &Client{Client: f.C, DefaultTimeout: f.C.TimeoutForTest()}, Manager: f.Manager}
 }
 
 // Until re-evaluates cond whenever the service announces a change, and on a

@@ -23,9 +23,9 @@ func crossProjectAdmissionFixture(t *testing.T) (*Service, []trace.CrossRepoMemb
 		t.Cleanup(func() { r.Close() })
 		members = append(members, trace.CrossRepoMember{Project: r, Workstream: f.streams[p.ID]})
 	}
-	chief, group, err := trace.CreateWorkgroupTrace(context.Background(), f.cfg.Root, members, fixturekit.DemoStart, ownerActor, "fixture")
+	manager, group, err := trace.CreateWorkgroupTrace(context.Background(), f.cfg.Root, members, fixturekit.DemoStart, ownerActor, "fixture")
 	fixturekit.Must(t, err)
-	t.Cleanup(func() { chief.Close() })
+	t.Cleanup(func() { manager.Close() })
 	for _, m := range members {
 		fixturekit.Must(t, m.Project.JoinCrossRepoWorkgroup(context.Background(), m.Workstream, group.ID, fixturekit.DemoStart, ownerActor, "fixture"))
 	}
@@ -173,12 +173,12 @@ func TestRemoveProjectRefusesUnresolvedMemberThenRemovesResolvedProject(t *testi
 		fixturekit.Must(t, err)
 		members = append(members, trace.CrossRepoMember{Project: r, Workstream: f.streams[p.ID]})
 	}
-	chief, group, err := trace.CreateWorkgroupTrace(ctx, f.cfg.Root, members, fixturekit.DemoStart, ownerActor, "fixture")
+	manager, group, err := trace.CreateWorkgroupTrace(ctx, f.cfg.Root, members, fixturekit.DemoStart, ownerActor, "fixture")
 	fixturekit.Must(t, err)
 	for _, m := range members {
 		fixturekit.Must(t, m.Project.JoinCrossRepoWorkgroup(ctx, m.Workstream, group.ID, fixturekit.DemoStart, ownerActor, "fixture"))
 	}
-	fixturekit.Must(t, chief.Close())
+	fixturekit.Must(t, manager.Close())
 	for _, m := range members {
 		fixturekit.Must(t, m.Project.Close())
 	}

@@ -17,7 +17,7 @@ cross-project workgroup each charter governs its member's slice, plan and units;
 the workgroup spec and contracts must satisfy all member charters. Unqualified
 `charter#n` means the member's own rule; `<project>/charter#n` names another
 project's rule. Unknown projects or rules are refused. Charter conflicts go
-to the owner and cannot be dismissed by the chief. Amendments are recorded
+to the owner and cannot be dismissed by the manager. Amendments are recorded
 and decided in the project whose rule changes.
 
 ## Template
@@ -84,8 +84,8 @@ loads the latest text. See the [command line](cli.md).
 ## Rules from your rulings
 
 When a ruling you gave a workstream is a standing rule for the project, its
-chief of staff proposes the rule for the charter. You ratify or decline it with
-`osmia charter` or by telling the chief of staff (see the
+manager proposes the rule for the charter. You ratify or decline it with
+`osmia charter` or by telling the manager (see the
 [command line](cli.md)).
 A ratified rule is appended to the charter by the service, not by you: it
 takes the number after your highest rule and goes under a `## Standing rulings`

@@ -37,7 +37,7 @@ type ChangeRequest struct {
 // ChangeDecision approves precisely the presented impact. PR disposition is
 // selected at cancellation, and never authorizes a push or a merge. DecidedBy
 // is "jev" for a cancellation Jev decided at the owner threshold, with
-// Judgment naming its judgment record; the chief of staff's tool never sets
+// Judgment naming its judgment record; the manager's tool never sets
 // them.
 type ChangeDecision struct {
 	Revision     int    `json:"revision"`
@@ -81,7 +81,7 @@ type WorkgroupChange struct {
 	Followups map[config.WorkstreamID]config.WorkstreamID `json:"followups,omitempty"`
 	Failure   string                                      `json:"failure,omitempty"`
 	// FailureSettled is true once a failed change's requester has its ruling
-	// and the chief of staff its notice.
+	// and the manager its notice.
 	FailureSettled bool `json:"failure_settled,omitempty"`
 	// Attempt counts the retries of the change's drafting and debate. Each
 	// retry queues its turns afresh under new turn IDs.
@@ -147,7 +147,7 @@ func (s *Controller) SaveChange(ctx context.Context, repo *trace.Repository, c *
 	return err
 }
 
-// ChangeContext uses the existing chief routing so the original design address
+// ChangeContext uses the existing manager routing so the original design address
 // and every member resolve to exactly the same authoritative journal and chat.
 func (s *Controller) ChangeContext(ctx context.Context, raw string) (*trace.Repository, trace.Workgroup, config.WorkstreamID, func(), error) {
 	_, stream, repo, api := s.ConversationTrace(raw)
@@ -155,7 +155,7 @@ func (s *Controller) ChangeContext(ctx context.Context, raw string) (*trace.Repo
 		return nil, trace.Workgroup{}, "", func() {
 		}, errors.New(api.Message)
 	}
-	wt, host, _, close, err := s.ChiefRepository(ctx, repo, stream)
+	wt, host, _, close, err := s.ManagerRepository(ctx, repo, stream)
 	if err != nil {
 		return nil, trace.Workgroup{}, "", close, err
 	}
@@ -184,7 +184,7 @@ func (s *Controller) ChangeContext(ctx context.Context, raw string) (*trace.Repo
 			}, err
 		}
 		if (id != "" || pending != "") && wt == repo {
-			wt, host, _, close, err = s.ChiefRepository(ctx, repo, stream)
+			wt, host, _, close, err = s.ManagerRepository(ctx, repo, stream)
 			if err != nil {
 				return nil, g, "", close, err
 			}
@@ -525,7 +525,7 @@ func (c *Controls) ChangeControl(repository *trace.Repository, scope coreadapter
 		schema = `{"type":"object","properties":{"id":{"type":"string"},"revision":{"type":"integer"},"decision":{"type":"string","enum":["approve","reject"]},"pull_requests":{"type":"string","enum":["close","draft"]}},"required":["id","revision","decision"],"additionalProperties":false}`
 	}
 	return coreadapter.Tool{Name: name, Effect: coreadapter.ToolMemory, Description: "Record the owner's amend or cancel request, or the owner's decision on the one impact summary. Cancel asks whether open PRs are closed or left as drafts. Never publish or merge.", InputSchema: json.RawMessage(schema), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
-		_, owner, err := repository.OwnerTurn(trace.ChiefOfStaff, scope)
+		_, owner, err := repository.OwnerTurn(trace.Manager, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -585,11 +585,22 @@ func (c *Controls) ChangeControl(repository *trace.Repository, scope coreadapter
 	}}
 }
 
-// ChangeToolResult is a change as the chief's change tools report it. A
-// pending change with a recorded hold reads state "held" with its reason.
+// ChangeToolResult is a change as the manager's change tools report it. A
+// pending change with a recorded hold reads state "held" with its reason, and
+// a requester recorded as the manager reads under its display name.
 type ChangeToolResult struct {
 	WorkgroupChange
 	Reason string `json:"reason,omitempty"`
+}
+
+func (c WorkgroupChange) shown() WorkgroupChange {
+	if c.Requester == nil {
+		return c
+	}
+	requester := *c.Requester
+	requester.Role, requester.Requester = trace.DisplayRole(requester.Role), requester.Requester.Display()
+	c.Requester = &requester
+	return c
 }
 
 // Held reports whether a pending change is held by a recorded diagnostic.
@@ -597,7 +608,7 @@ func (c WorkgroupChange) Held() bool {
 	return c.Failure != "" && c.State != "applied" && c.State != "rejected" && c.State != "failed"
 }
 func (c WorkgroupChange) ToolResult() ChangeToolResult {
-	out := ChangeToolResult{WorkgroupChange: c}
+	out := ChangeToolResult{WorkgroupChange: c.shown()}
 	if c.Held() {
 		out.State, out.Reason = "held", c.Failure
 	}
@@ -635,7 +646,7 @@ func ChangeIdle(repo *trace.Repository, stream config.WorkstreamID) (bool, error
 		return false, err
 	}
 	for _, t := range threads {
-		if t.Identity.Role != trace.ChiefOfStaff && t.Active != "" {
+		if t.Identity.Role != trace.Manager && t.Active != "" {
 			for _, q := range t.Turns {
 				if q.Request.TurnID != t.Active {
 					continue
@@ -697,11 +708,11 @@ func ChangeRepositoryHeld(repo *trace.Repository, stream config.WorkstreamID, op
 	return true, nil
 }
 func (s *Controller) ChangeNotice(ctx context.Context, repo *trace.Repository, c WorkgroupChange) error {
-	_, err := repo.EnsureChiefOfStaff(ctx, c.Host, s.Now(), serviceActor)
+	_, err := repo.EnsureManager(ctx, c.Host, s.Now(), serviceActor)
 	if err != nil {
 		return err
 	}
-	th, err := repo.Thread(c.Host, trace.ChiefOfStaff)
+	th, err := repo.Thread(c.Host, trace.Manager)
 	if err != nil {
 		return err
 	}
@@ -713,11 +724,11 @@ func (s *Controller) ChangeNotice(ctx context.Context, repo *trace.Repository, c
 	if c.Request.Kind == "cancel" {
 		body += "\n\nAt cancel time choose whether open PRs are closed or left as drafts. Merged work is untouched. Dependents shown as cancelled stop in the same operation."
 	}
-	profile, _, err := s.RoleExecution(s.Current(), trace.ChiefOfStaff)
+	profile, _, err := s.RoleExecution(s.Current(), trace.Manager)
 	if err != nil {
 		return err
 	}
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + id, Revision: 1, Project: repo.Project(), Workstream: c.Host, At: s.Now(), Actor: amendmentActor, Cause: WorkgroupChangeDocument(c.ID)}, AgentID: trace.ChiefOfStaff, ThreadID: th.Identity.ThreadID, TurnID: id, Profile: profile, SystemPrompt: "The impact summary is already visible as one action in this conversation. Acknowledge it briefly; do not repeat the table or approval question.", Prompt: body})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + id, Revision: 1, Project: repo.Project(), Workstream: c.Host, At: s.Now(), Actor: amendmentActor, Cause: WorkgroupChangeDocument(c.ID)}, AgentID: trace.Manager, ThreadID: th.Identity.ThreadID, TurnID: id, Profile: profile, SystemPrompt: "The impact summary is already visible as one action in this conversation. Acknowledge it briefly; do not repeat the table or approval question.", Prompt: body})
 	return err
 }
 
@@ -725,7 +736,7 @@ func (s *Controller) ChangeNotice(ctx context.Context, repo *trace.Repository, c
 // records each workgroup change notice written to its events.
 const ChangeNoticeSubject = "workgroup-change-notice"
 
-// ChangeFailureNotice tells the chief of staff that workgroup change c failed,
+// ChangeFailureNotice tells the manager that workgroup change c failed,
 // through the events of the workgroup's leading live member: the leader's own
 // project trace for a cross-repo workgroup, or wt for a same-repo one. The
 // event delivery path carries them to the shared thread. It is written once
@@ -749,7 +760,7 @@ func (s *Controller) ChangeFailureNotice(ctx context.Context, wt *trace.Reposito
 	}
 	body := fmt.Sprintf("Workgroup change %s (%s, requested: %s) failed before it was applied: %s. Nothing of it was applied and the recorded workgroup spec is unchanged. %s Tell the owner in plain words what happened.", c.ID, c.Request.Kind, c.Request.Change, strings.TrimRight(c.Failure, ". "), lever)
 	id := ChangeIdentity(fmt.Sprintf("change-%s-failed-%d", c.ID, c.Attempt))
-	return s.NoticeChief(ctx, repo, leader, ChangeNoticeSubject, id, WorkgroupChangeDocument(c.ID), c.Failure, body, amendmentActor)
+	return s.NoticeManager(ctx, repo, leader, ChangeNoticeSubject, id, WorkgroupChangeDocument(c.ID), c.Failure, body, amendmentActor)
 }
 
 // Summary presents the actual proposed intent with its mechanical impact.
@@ -822,7 +833,7 @@ func (c WorkgroupChange) Summary() string {
 const FixedProjectsMessage = "the project set is fixed until ratification; cancel the whole workgroup to abandon the work and hand it in again"
 
 // MemberRemovalGate protects the owner's project set for direct abandonment
-// as well as moves relayed by the chief. Whole-workgroup cancellation uses its
+// as well as moves relayed by the manager. Whole-workgroup cancellation uses its
 // durable change journal and does not pass through individual abandonment.
 func (s *Controller) MemberRemovalGate(ctx context.Context, raw string) *APIError {
 	_, stream, repo, api := s.ConversationTrace(raw)
@@ -912,7 +923,7 @@ func (s *Controller) EndStalledChange(ctx context.Context, host config.Workstrea
 // RetryChange starts a stuck workgroup change's drafting and debate again: a
 // change that is drafting, debating or answering, or that failed before it was
 // presented, returns to drafting with its hold cleared and its debate emptied,
-// and its turns are queued afresh on the next pass. It is the chief of staff's
+// and its turns are queued afresh on the next pass. It is the manager's
 // and the owner's way past a draft or debate turn that failed or never ran.
 func (s *Controller) RetryChange(ctx context.Context, host config.WorkstreamID, id string) (WorkgroupChange, *APIError) {
 	wt, g, _, close, err := s.ChangeContext(ctx, string(host))

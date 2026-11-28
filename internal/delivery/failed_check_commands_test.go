@@ -78,7 +78,7 @@ func TestFailedCloudRunGivesEverySurfaceEachFailedCheckWithItsTraceCommand(t *te
 	lint := "- lint: Dagger Cloud posted no trace id for this check; status: https://dagger.cloud/acme/checks/github.com/acme/widgets@" + pushedCommit + "?check=lint"
 	surfaces := map[string]string{
 		"reader evidence": FinalCheckEvidence(last),
-		"chief notice":    f.noticeOf(),
+		"manager notice":    f.noticeOf(),
 	}
 	for name, text := range surfaces {
 		for _, want := range []string{"- test:a: `dagger trace " + traceA + "`", "- build: `dagger trace " + traceB + "`", lint} {
@@ -88,7 +88,7 @@ func TestFailedCloudRunGivesEverySurfaceEachFailedCheckWithItsTraceCommand(t *te
 		}
 	}
 
-	got := f.call(ChecksToolOf(f.load(), f.repo, f.chief("poll")), `{"action":"poll","push":1}`)
+	got := f.call(ChecksToolOf(f.load(), f.repo, f.manager("poll")), `{"action":"poll","push":1}`)
 	if got["outcome"] != "failed" {
 		t.Fatalf("poll %v", got)
 	}
@@ -135,7 +135,7 @@ func TestFailedLoadIsTheFailedCheckLoadOnEverySurface(t *testing.T) {
 	if evidence, notice := FinalCheckEvidence(run), f.noticeOf(); !strings.Contains(evidence, want) || !strings.Contains(notice, want) {
 		t.Fatalf("evidence:\n%s\nnotice:\n%s", evidence, notice)
 	}
-	got := f.call(ChecksToolOf(f.load(), f.repo, f.chief("poll")), `{"action":"poll","push":1}`)
+	got := f.call(ChecksToolOf(f.load(), f.repo, f.manager("poll")), `{"action":"poll","push":1}`)
 	listed, _ := got["failed_checks"].([]any)
 	if got["outcome"] != "load_failed" || len(listed) != 1 || listed[0].(map[string]any)["command"] != "dagger trace "+traceLoad {
 		t.Fatalf("poll %v", got)
@@ -151,12 +151,12 @@ func TestFailedRunWithoutAFailingCheckStatusSaysSoWithTheCountsAndTheRunURL(t *t
 		t.Fatalf("run %+v", run)
 	}
 	want := fmt.Sprintf("no failing check status was found, so no failed check can be named: the run's check statuses show 91 checks, 91 passed, 0 failed; run status: %s", run.StatusURL)
-	got := f.call(ChecksToolOf(f.load(), f.repo, f.chief("poll")), `{"action":"poll","push":1}`)
+	got := f.call(ChecksToolOf(f.load(), f.repo, f.manager("poll")), `{"action":"poll","push":1}`)
 	detail, _ := got["detail"].(string)
 	if _, listed := got["failed_checks"]; listed || got["outcome"] != "failed" || !strings.Contains(detail, want) {
 		t.Fatalf("poll %v", got)
 	}
-	for name, text := range map[string]string{"reader evidence": FinalCheckEvidence(run), "chief notice": f.noticeOf()} {
+	for name, text := range map[string]string{"reader evidence": FinalCheckEvidence(run), "manager notice": f.noticeOf()} {
 		if !strings.Contains(text, want) || strings.Contains(text, "Failed checks (") {
 			t.Errorf("%s:\n%s", name, text)
 		}
@@ -213,14 +213,14 @@ func TestFailedRunLinksCarryNoCredentialOnAnySurface(t *testing.T) {
 		t.Fatalf("run %+v", run)
 	}
 
-	poll := f.call(ChecksToolOf(f.load(), f.repo, f.chief("poll")), `{"action":"poll","push":1}`)
+	poll := f.call(ChecksToolOf(f.load(), f.repo, f.manager("poll")), `{"action":"poll","push":1}`)
 	pollText, err := json.Marshal(poll)
 	if err != nil {
 		t.Fatal(err)
 	}
 	surfaces := map[string]string{
 		"reader evidence": FinalCheckEvidence(run),
-		"chief notice":    f.noticeOf(),
+		"manager notice":    f.noticeOf(),
 		"poll result":     string(pollText),
 	}
 	for name, text := range surfaces {
@@ -236,8 +236,8 @@ func TestFailedRunLinksCarryNoCredentialOnAnySurface(t *testing.T) {
 	if evidence := surfaces["reader evidence"]; !strings.Contains(evidence, "\nStatus: https://dagger.cloud/run.json\n") {
 		t.Errorf("reader evidence lacks the run's status link without its credential:\n%s", evidence)
 	}
-	if strings.Contains(surfaces["chief notice"], "run status:") || !strings.Contains(surfaces["chief notice"], "lint: Dagger Cloud posted no trace id for this check; status: https://dagger.cloud/acme/checks/github.com/acme/widgets@"+pushedCommit+"?check=lint") {
-		t.Errorf("chief notice:\n%s", surfaces["chief notice"])
+	if strings.Contains(surfaces["manager notice"], "run status:") || !strings.Contains(surfaces["manager notice"], "lint: Dagger Cloud posted no trace id for this check; status: https://dagger.cloud/acme/checks/github.com/acme/widgets@"+pushedCommit+"?check=lint") {
+		t.Errorf("manager notice:\n%s", surfaces["manager notice"])
 	}
 
 	recorded := f.runs()

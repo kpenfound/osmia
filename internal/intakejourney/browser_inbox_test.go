@@ -56,10 +56,10 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	}
 	first := ask(fixturekit.DemoAgent, fixturekit.DemoThread, "Where does upload state live?")
 	second := ask("agent_mason_history", "thread_mason_history", "May I rewrite the branch history?")
-	_, err := live.EscalateQuestions(ctx, trace.ChiefOfStaff, f.Chief, trace.EscalationRequest{Questions: []string{first.ID}, Rephrasing: "Where should upload state live?",
+	_, err := live.EscalateQuestions(ctx, trace.Manager, f.Manager, trace.EscalationRequest{Questions: []string{first.ID}, Rephrasing: "Where should upload state live?",
 		Blocked: "The upload unit.", Options: []string{"Files", "A database"}, Recommendation: "Keep it in files."}, at)
 	fixturekit.Must(t, err)
-	_, err = live.EscalateQuestions(ctx, trace.ChiefOfStaff, f.Chief, trace.EscalationRequest{Questions: []string{second.ID}, Rephrasing: "May the mason rewrite the branch history?",
+	_, err = live.EscalateQuestions(ctx, trace.Manager, f.Manager, trace.EscalationRequest{Questions: []string{second.ID}, Rephrasing: "May the mason rewrite the branch history?",
 		Blocked: "The upload unit.", Recommendation: "Force-push the cleaned branch."}, at)
 	fixturekit.Must(t, err)
 	plantReport(t, live, fixturekit.Stream, "index", at)
@@ -258,8 +258,8 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	ws := f.HandIn(t, "design", fixturekit.HandedDesign)
 	f.AwaitShed(t, ws, "concluded-1")
 	faults.Check(t)
-	f.ChiefDecides(t, ws, veto, shed.Escalate, "The veto cites the small-changes rule.")
-	f.ChiefDecides(t, ws, size, shed.Escalate, "Splitting the unit is a judgement call.")
+	f.ManagerDecides(t, ws, veto, shed.Escalate, "The veto cites the small-changes rule.")
+	f.ManagerDecides(t, ws, size, shed.Escalate, "Splitting the unit is a judgement call.")
 	var entries []api.InboxEntry
 	intakefixture.Soon(t, "the ratification entry", func() bool {
 		entries = f.InboxEntries(t, ws, api.InboxRatification)
@@ -287,7 +287,7 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	p.AwaitText(card+`[data-objection="`+veto+`"] [data-field=standing]`, "blocking")
 	p.AwaitText(card+`[data-objection="`+veto+`"]`, "charter by "+intake.CommitteeAgent(1)+" in round 1 on spec#2")
 	p.AwaitText(card+`[data-objection="`+size+`"] [data-field=argument]`, "It does not hold.")
-	p.AwaitText(card+`[data-objection="`+veto+`"] [data-field=escalation]`, "Chief of staff: The veto cites the small-changes rule.")
+	p.AwaitText(card+`[data-objection="`+veto+`"] [data-field=escalation]`, "Manager: The veto cites the small-changes rule.")
 	if got := choices(); slices.Contains(got, "ratify") || !slices.Contains(got, "overrule "+veto) || !slices.Contains(got, "sustain "+size) || !slices.Contains(got, "redraft") {
 		t.Fatalf("the decisions offered while objections block: %v", got)
 	}
@@ -338,7 +338,7 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	faults.Check(t)
 }
 
-func TestBrowserPageFoldsObjectionsTheChiefOfStaffDismissed(t *testing.T) {
+func TestBrowserPageFoldsObjectionsTheManagerDismissed(t *testing.T) {
 	t.Parallel()
 	f := journey.NewDebateFixtureWith(t, 2, 1, servicetest.ListenWeb, nil)
 	t.Cleanup(func() { f.Stop(t) })
@@ -352,8 +352,8 @@ func TestBrowserPageFoldsObjectionsTheChiefOfStaffDismissed(t *testing.T) {
 	ws := f.HandIn(t, "design", fixturekit.HandedDesign)
 	f.AwaitShed(t, ws, "concluded-1")
 	faults.Check(t)
-	f.ChiefDecides(t, ws, veto, shed.Dismiss, "Each unit is one small change with its own test.")
-	f.ChiefDecides(t, ws, size, shed.Escalate, "Splitting the unit is a judgement call.")
+	f.ManagerDecides(t, ws, veto, shed.Dismiss, "Each unit is one small change with its own test.")
+	f.ManagerDecides(t, ws, size, shed.Escalate, "Splitting the unit is a judgement call.")
 	var entries []api.InboxEntry
 	intakefixture.Soon(t, "the ratification entry", func() bool {
 		entries = f.InboxEntries(t, ws, api.InboxRatification)
@@ -365,9 +365,9 @@ func TestBrowserPageFoldsObjectionsTheChiefOfStaffDismissed(t *testing.T) {
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(ws)
 	p.AwaitText(card+"[data-field=kind]", "Ratification")
-	p.AwaitText(card+`[data-objection="`+size+`"] [data-field=escalation]`, "Chief of staff: Splitting the unit is a judgement call.")
-	p.AwaitText(card+"[data-field=dismissed] summary", "Dismissed by the chief of staff (1)")
-	p.AwaitText(card+`[data-field=dismissed] [data-objection="`+veto+`"] [data-field=note]`, "Chief of staff: Each unit is one small change with its own test.")
+	p.AwaitText(card+`[data-objection="`+size+`"] [data-field=escalation]`, "Manager: Splitting the unit is a judgement call.")
+	p.AwaitText(card+"[data-field=dismissed] summary", "Dismissed by the manager (1)")
+	p.AwaitText(card+`[data-field=dismissed] [data-objection="`+veto+`"] [data-field=note]`, "Manager: Each unit is one small change with its own test.")
 	var choices []string
 	p.Eval(`[...document.querySelectorAll(`+browsertest.Quote(card+"[data-decision-choice]")+`)].map((o) => o.dataset.decisionChoice)`, &choices)
 	if !slices.Contains(choices, "ratify") || !slices.Contains(choices, "overrule "+size) || slices.ContainsFunc(choices, func(c string) bool { return strings.HasSuffix(c, " "+veto) }) {

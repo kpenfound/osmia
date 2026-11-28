@@ -14,7 +14,7 @@ import (
 // MaxNote bounds a steering note.
 const MaxNote = 2000
 
-// Note is one steering note: words the chief of staff leaves for the climb's
+// Note is one steering note: words the manager leaves for the climb's
 // next attempts.
 type Note struct {
 	Number int       `json:"number"`

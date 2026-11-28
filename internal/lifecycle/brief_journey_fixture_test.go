@@ -45,7 +45,7 @@ type briefPlan struct {
 	Calls       []briefCall
 }
 
-type briefChief struct {
+type briefManager struct {
 	mu      sync.Mutex
 	plans   map[int]briefPlan
 	gate    chan struct{}
@@ -57,17 +57,17 @@ type briefChief struct {
 	heard   []string
 }
 
-func newBriefChief() *briefChief {
-	return &briefChief{plans: map[int]briefPlan{}, results: map[string][]string{}, early: map[int][]string{}, called: map[int][]string{}}
+func newBriefManager() *briefManager {
+	return &briefManager{plans: map[int]briefPlan{}, results: map[string][]string{}, early: map[int][]string{}, called: map[int][]string{}}
 }
 
-func (c *briefChief) plan(review int, p briefPlan) {
+func (c *briefManager) plan(review int, p briefPlan) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.plans[review] = p
 }
 
-func (c *briefChief) hold() {
+func (c *briefManager) hold() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.gate == nil {
@@ -75,7 +75,7 @@ func (c *briefChief) hold() {
 	}
 }
 
-func (c *briefChief) release() {
+func (c *briefManager) release() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.gate != nil {
@@ -84,25 +84,25 @@ func (c *briefChief) release() {
 	}
 }
 
-func (c *briefChief) started() int {
+func (c *briefManager) started() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.starts
 }
 
-func (c *briefChief) result(id string) []string {
+func (c *briefManager) result(id string) []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.results[id]
 }
 
-func (c *briefChief) calls(review int) []string {
+func (c *briefManager) calls(review int) []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]string(nil), c.called[review]...)
 }
 
-func (c *briefChief) heardOf(text string) int {
+func (c *briefManager) heardOf(text string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	n := 0
@@ -114,7 +114,7 @@ func (c *briefChief) heardOf(text string) int {
 	return n
 }
 
-func (c *briefChief) earlyResults(review int) []string {
+func (c *briefManager) earlyResults(review int) []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.early[review]
@@ -128,7 +128,7 @@ func briefToolCall(ctx context.Context, tools *mcp.ClientSession, call briefCall
 	return out
 }
 
-func (c *briefChief) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+func (c *briefManager) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 	prompt := intakefixture.OwnPrompt(req.Prompt)
 	c.mu.Lock()
 	c.heard = append(c.heard, prompt)
@@ -203,7 +203,7 @@ func (c *briefChief) turn(ctx context.Context, req agent.Request, _ *agent.Turn,
 	return finish("Handled the final review notice.")
 }
 
-func (c *briefChief) problems() []string {
+func (c *briefManager) problems() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]string(nil), c.refused...)
@@ -211,7 +211,7 @@ func (c *briefChief) problems() []string {
 
 type briefJourney struct {
 	*journey.PublicationFixture
-	chief   *briefChief
+	manager *briefManager
 	running bool
 }
 
@@ -238,7 +238,7 @@ func newBriefFixture(t *testing.T, extra string) *briefJourney {
 
 func newBriefFixtureAt(t *testing.T, extra string, now func() time.Time) *briefJourney {
 	t.Helper()
-	f := journey.NewDebateFixtureWith(t, 1, 1, intakefixture.ChiefRole+extra, func(opts *journey.Options) {
+	f := journey.NewDebateFixtureWith(t, 1, 1, intakefixture.ManagerRole+extra, func(opts *journey.Options) {
 		opts.WriteTimeout = time.Minute
 		if now != nil {
 			opts.Reconciliation.Now = now
@@ -246,11 +246,11 @@ func newBriefFixtureAt(t *testing.T, extra string, now func() time.Time) *briefJ
 		enforced := journey.Enforce(*opts, service.Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts})
 		opts.Threads, opts.Controls = enforced.Threads, enforced.Controls
 	})
-	chief := newBriefChief()
+	manager := newBriefManager()
 	f.Engine.Mu.Lock()
-	f.Engine.Turns["*"] = chief.turn
+	f.Engine.Turns["*"] = manager.turn
 	f.Engine.Mu.Unlock()
-	return &briefJourney{PublicationFixture: &journey.PublicationFixture{ShedFixture: f}, chief: chief}
+	return &briefJourney{PublicationFixture: &journey.PublicationFixture{ShedFixture: f}, manager: manager}
 }
 
 func (j *briefJourney) assemble(t *testing.T, stream config.WorkstreamID, dir, resume, dedupe string) api.FinalReport {
@@ -326,14 +326,14 @@ func (j *briefJourney) run(t *testing.T) {
 	j.Start(t)
 	if !j.running {
 		t.Cleanup(func() { j.Stop(t) })
-		t.Cleanup(j.chief.release)
+		t.Cleanup(j.manager.release)
 	}
 	j.running = true
 }
 
 func (j *briefJourney) halt(t *testing.T) {
 	t.Helper()
-	j.chief.release()
+	j.manager.release()
 	j.Stop(t)
 	repository, err := trace.Open(j.S.Cfg.Root, j.S.Cfg.Project)
 	fixturekit.Must(t, err)
@@ -344,7 +344,7 @@ func (j *briefJourney) halt(t *testing.T) {
 
 func (j *briefJourney) awaitStarts(t *testing.T, n int) {
 	t.Helper()
-	intakefixture.Eventually(t, "the chief of staff never began the turn for the final review notice", func() bool { return j.chief.started() >= n })
+	intakefixture.Eventually(t, "the manager never began the turn for the final review notice", func() bool { return j.manager.started() >= n })
 }
 
 func (j *briefJourney) entries(t *testing.T, stream config.WorkstreamID) []api.InboxEntry {
@@ -393,8 +393,8 @@ func (j *briefJourney) ask(t *testing.T, stream config.WorkstreamID, id string, 
 	_, err = j.C.Send(context.Background(), stream, briefDirective+string(data))
 	fixturekit.Must(t, err)
 	var out []string
-	intakefixture.Eventually(t, "the chief of staff never made the calls of "+id, func() bool {
-		out = j.chief.result(id)
+	intakefixture.Eventually(t, "the manager never made the calls of "+id, func() bool {
+		out = j.manager.result(id)
 		return out != nil
 	})
 	return out

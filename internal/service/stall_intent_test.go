@@ -56,7 +56,7 @@ func (f *stallFixture) finalReport(t *testing.T, report api.FinalReport) {
 
 func (f *stallFixture) move(t *testing.T, n int, note string) {
 	t.Helper()
-	data, err := json.Marshal(api.WorkstreamMove{Move: n, From: AssembledState, To: BuildingState, Note: note, By: "the chief of staff"})
+	data, err := json.Marshal(api.WorkstreamMove{Move: n, From: AssembledState, To: BuildingState, Note: note, By: "the manager"})
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: f.stallDocument(lifecycle.WorkstreamMoveDocument(n), 1), Path: lifecycle.WorkstreamMovePath(n), Content: string(data) + "\n"}}))
 }

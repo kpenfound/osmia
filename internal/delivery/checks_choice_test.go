@@ -33,12 +33,12 @@ func (f *watchFixture) secondPush() FinalReport {
 	return FinalReport{Review: 2, Operation: "review-2", Commit: secondReviewedCommit}
 }
 
-func (f *watchFixture) chief(turn string) coreadapter.Scope {
+func (f *watchFixture) manager(turn string) coreadapter.Scope {
 	f.t.Helper()
 	if f.scope == nil {
-		_, err := f.repo.EnsureChiefOfStaff(context.Background(), stream, fixturekit.DemoStart, fixturekit.ServiceActor)
+		_, err := f.repo.EnsureManager(context.Background(), stream, fixturekit.DemoStart, fixturekit.ServiceActor)
 		fixturekit.Must(f.t, err)
-		scope := fixturekit.ClaimTurn(f.t, f.repo, f.t.TempDir(), stream, trace.ChiefOfStaff, trace.ChiefOfStaff, turn, fixturekit.DemoStart)
+		scope := fixturekit.ClaimTurn(f.t, f.repo, f.t.TempDir(), stream, trace.Manager, trace.Manager, turn, fixturekit.DemoStart)
 		f.scope = &scope
 	}
 	return *f.scope
@@ -66,7 +66,7 @@ func (f *watchFixture) entry() (InboxEntry, bool) {
 
 func (f *watchFixture) offer(push int, note string) map[string]any {
 	f.t.Helper()
-	tool := ChecksChoiceToolOf(f.load(), f.repo, f.chief("offer"))
+	tool := ChecksChoiceToolOf(f.load(), f.repo, f.manager("offer"))
 	return f.call(tool, `{"push":`+itoa(push)+`,"note":"`+note+`"}`)
 }
 
@@ -82,13 +82,13 @@ func (f *watchFixture) answer(e InboxEntry, decision string) (ChecksChoiceRespon
 	return f.reviewer.S.AnswerChecksChoice(context.Background(), string(stream), req)
 }
 
-func TestChiefPollsNowAndRerunsOnlyTheCurrentPush(t *testing.T) {
+func TestManagerPollsNowAndRerunsOnlyTheCurrentPush(t *testing.T) {
 	t.Parallel()
 	f := newWatchFixture(t)
 	f.cfg.Project.Fork, f.cfg.Dagger.Organization = "", "acme"
 	f.assemble()
 	f.api.set(f.loaded(), f.pending(2, 40*time.Second))
-	poll := ChecksToolOf(f.load(), f.repo, f.chief("poll"))
+	poll := ChecksToolOf(f.load(), f.repo, f.manager("poll"))
 
 	got := f.call(poll, `{"action":"poll","push":1}`)
 	if got["done"] != true || got["outcome"] != "pending" || f.api.readCount() != 1 || f.api.commits[0] != "acme/widgets@"+pushedCommit {
@@ -126,7 +126,7 @@ func TestChecksToolsAreRefusedForOtherRoles(t *testing.T) {
 	t.Parallel()
 	f := newWatchFixture(t)
 	f.assemble()
-	scope := f.chief("other")
+	scope := f.manager("other")
 	scope.Role = "mason"
 	for _, tool := range []coreadapter.Tool{ChecksToolOf(f.load(), f.repo, scope), ChecksChoiceToolOf(f.load(), f.repo, scope)} {
 		input := `{"action":"rerun","push":1}`

@@ -190,7 +190,7 @@ func TestArchitectQuestionParksTheAmendmentUntilItsAnswer(t *testing.T) {
 		t.Fatalf("amendment after the restart: %+v %v", state, err)
 	}
 
-	journey.ChiefAnswers(t, f.ShedFixture, f.repo, f.stream, "1", intakefixture.AskedAnswer, "charter#1")
+	journey.ManagerAnswers(t, f.ShedFixture, f.repo, f.stream, "1", intakefixture.AskedAnswer, "charter#1")
 	f.reopen(t)
 	fixturekit.Must(t, f.drafter().Pass(ctx))
 	fixturekit.Must(t, f.drafter().Pass(ctx))
@@ -248,7 +248,7 @@ func TestAmendmentAnswerInterruptedByAStopIsRepeated(t *testing.T) {
 		})
 	})
 	f.parkFirst(t, p)
-	journey.ChiefAnswers(t, f.ShedFixture, f.repo, f.stream, "1", intakefixture.AskedAnswer, "charter#1")
+	journey.ManagerAnswers(t, f.ShedFixture, f.repo, f.stream, "1", intakefixture.AskedAnswer, "charter#1")
 	fixturekit.Must(t, f.drafter().Pass(ctx))
 
 	_, err := f.repo.ClaimTurn(ctx, f.stream, intake.ArchitectAgent, "claim-"+answering, filepath.Join(f.S.Current().Root.String(), "interrupted"), f.Clock.Now())
@@ -290,7 +290,7 @@ func TestParkedAmendmentLeavesNoAnswerBlockingTheNext(t *testing.T) {
 		t.Fatalf("amendment 2 ended %+v", result)
 	}
 
-	journey.ChiefAnswers(t, f.ShedFixture, f.repo, f.stream, "1", intakefixture.AskedAnswer, "charter#1")
+	journey.ManagerAnswers(t, f.ShedFixture, f.repo, f.stream, "1", intakefixture.AskedAnswer, "charter#1")
 	fileAmendment(t, f.ArchitectFixture, f.repo, f.stream, "3")
 	fixturekit.Must(t, f.drafter().Pass(ctx))
 	if ops := f.drafts(t); len(ops) != 4 {

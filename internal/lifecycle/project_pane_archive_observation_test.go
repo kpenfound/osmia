@@ -161,9 +161,9 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 					fixturekit.Must(t, err)
 					return wait == ""
 				})
-				await("chief of staff archives and cleans up the merged member", func() bool {
+				await("manager archives and cleans up the merged member", func() bool {
 					a, ok := intakefixture.ArchiveRecord(t, f.S.Store, members[0].stream)
-					return ok && a.Actor == runtime.ArchiveActorChief && !a.CleanedAt.IsZero()
+					return ok && a.Actor == runtime.ArchiveActorManager && !a.CleanedAt.IsZero()
 				})
 				archived = members[1:]
 			}

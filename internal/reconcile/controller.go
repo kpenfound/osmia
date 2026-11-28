@@ -19,7 +19,7 @@ const turnAction = "thread-turn"
 
 type Options struct {
 	// Workstreams supplies an explicit operation scope when the repository
-	// aggregate omits it, such as a shared chief's synthetic host.
+	// aggregate omits it, such as a shared manager's synthetic host.
 	// Nil scans Repository.Workstreams.
 	Workstreams func() ([]config.WorkstreamID, error)
 	Worker      string

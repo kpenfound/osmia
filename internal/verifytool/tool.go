@@ -33,7 +33,7 @@ const (
 
 var serviceActor = trace.Actor{Kind: "service", ID: "osmia"}
 
-// Input is the tool's input. Workstream and Unit are the chief of staff's: a
+// Input is the tool's input. Workstream and Unit are the manager's: a
 // reviewer verifies its own candidate and the final reviewer its own review's
 // head.
 type Input struct {
@@ -187,9 +187,9 @@ func Tool(e Env) coreadapter.Tool {
 	var mu sync.Mutex
 	properties := `"call":{"type":"array","items":{"type":"string"},"minItems":1},"timeout":{"type":"string"}`
 	text := description
-	if e.Scope.Role == trace.ChiefOfStaff {
+	if e.Scope.Role == trace.Manager {
 		properties += `,"workstream":{"type":"string"},"unit":{"type":"string"}`
-		text += " Set workstream to the member to verify (required for a shared chief). It verifies that member's feature-branch head, or its recorded candidate when you set unit."
+		text += " Set workstream to the member to verify (required for a shared manager). It verifies that member's feature-branch head, or its recorded candidate when you set unit."
 	} else if e.About != "" {
 		text += " It verifies " + e.About + "."
 	}
@@ -216,8 +216,8 @@ func (e Env) handle(ctx context.Context, tool coreadapter.Tool, raw json.RawMess
 	if err := decoder.Decode(&in); err != nil {
 		return limitation("invalid verify arguments")
 	}
-	if e.Scope.Role != trace.ChiefOfStaff && (in.Workstream != "" || in.Unit != "") {
-		return limitation("only the chief of staff names a workstream or unit; omit them to verify your own target")
+	if e.Scope.Role != trace.Manager && (in.Workstream != "" || in.Unit != "") {
+		return limitation("only the manager names a workstream or unit; omit them to verify your own target")
 	}
 	hash := strings.TrimPrefix(trace.ToolCallID(e.Scope, ToolName, raw), "tool-")
 	own := config.WorkstreamID(e.Scope.Workstream)
@@ -265,13 +265,13 @@ func (e Env) handle(ctx context.Context, tool coreadapter.Tool, raw json.RawMess
 		if _, err := e.Repo.BeginTool(ctx, e.Scope, tool, raw, e.Now); err != nil {
 			return nil, err
 		}
-		if e.Scope.Role == trace.ChiefOfStaff && in.Workstream == "" {
+		if e.Scope.Role == trace.Manager && in.Workstream == "" {
 			members, err := e.Repo.WorkgroupMembers(own)
 			if err != nil {
 				return limitation(err.Error())
 			}
 			if len(members) > 1 {
-				return limitation("a shared chief must qualify workstream for verify")
+				return limitation("a shared manager must qualify workstream for verify")
 			}
 		}
 		var refusal string
@@ -293,7 +293,7 @@ func (e Env) handle(ctx context.Context, tool coreadapter.Tool, raw json.RawMess
 			return limitation(err.Error())
 		}
 	}
-	memberRepo, stream, refusal, err := e.Repo.ChiefMember(own, op.Workstream)
+	memberRepo, stream, refusal, err := e.Repo.ManagerMember(own, op.Workstream)
 	if err != nil {
 		return limitation(err.Error())
 	}
@@ -493,7 +493,7 @@ func Restore(ctx context.Context, repo *trace.Repository, scope coreadapter.Scop
 		if op.Scope.Turn != scope.Turn && op.Finished {
 			continue
 		}
-		member, stream, refusal, err := repo.ChiefMember(own, op.Workstream)
+		member, stream, refusal, err := repo.ManagerMember(own, op.Workstream)
 		if err != nil {
 			return err
 		}

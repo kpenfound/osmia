@@ -263,7 +263,7 @@ func changeFailureNotices(t *testing.T, repo *trace.Repository, stream config.Wo
 	return bodies
 }
 
-func TestFailedChangeSettlesItsRequesterAndTellsTheChief(t *testing.T) {
+func TestFailedChangeSettlesItsRequesterAndTellsTheManager(t *testing.T) {
 	t.Parallel()
 	f, stream, repo := journey.NewApprovedFixture(t, "failed-contract")
 	defer repo.Close()
@@ -272,7 +272,7 @@ func TestFailedChangeSettlesItsRequesterAndTellsTheChief(t *testing.T) {
 	groups, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.S.Now(), intake.ServiceActor, "fixture")
 	fixturekit.Must(t, err)
 	g, _ := trace.WorkgroupOf(groups, stream)
-	_, err = repo.EnsureChiefOfStaff(ctx, stream, f.S.Now(), intake.ServiceActor)
+	_, err = repo.EnsureManager(ctx, stream, f.S.Now(), intake.ServiceActor)
 	fixturekit.Must(t, err)
 	st, err := repo.Workflow(stream, trace.UnitSubject("resume"))
 	fixturekit.Must(t, err)
@@ -318,7 +318,7 @@ func TestFailedChangeSettlesItsRequesterAndTellsTheChief(t *testing.T) {
 	}
 	notices := changeFailureNotices(t, repo, stream, c.ID)
 	if len(notices) != 1 || !strings.Contains(notices[0], "the architect never delivered the delta") || !strings.Contains(notices[0], "retry_change") {
-		t.Fatalf("chief notices of the failed change: %v", notices)
+		t.Fatalf("manager notices of the failed change: %v", notices)
 	}
 	if got := journey.CurrentChange(t, f.S, stream, c.ID); !got.FailureSettled {
 		t.Fatalf("the failed change is not settled: %+v", got)
@@ -335,11 +335,11 @@ func TestFailedChangeSettlesItsRequesterAndTellsTheChief(t *testing.T) {
 	}
 	advance()
 	if notices := changeFailureNotices(t, repo, stream, c.ID); len(notices) != 2 || !slices.ContainsFunc(notices, func(n string) bool { return strings.Contains(n, "the retry stalled too.") }) {
-		t.Fatalf("chief notices after the retried change failed: %v", notices)
+		t.Fatalf("manager notices after the retried change failed: %v", notices)
 	}
 }
 
-func TestFailedCrossRepoChangeTellsTheChiefThroughTheLeader(t *testing.T) {
+func TestFailedCrossRepoChangeTellsTheManagerThroughTheLeader(t *testing.T) {
 	t.Parallel()
 	f := journey.NewConfiguredProductionDesignFixture(t, journey.ProductionDesignConfiguration{Options: func(opts *journey.Options) {
 		opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
@@ -366,12 +366,12 @@ func TestFailedCrossRepoChangeTellsTheChiefThroughTheLeader(t *testing.T) {
 		leader, leaderProject, other, otherProject = f.Stream2, f.Project2, f.Stream1, f.Project
 	}
 	leaderRepo, otherRepo := mustRepo(t, f.S, leaderProject), mustRepo(t, f.S, otherProject)
-	journey.LifecycleAwait(t, f, "the leader's events tell the chief", func() bool {
+	journey.LifecycleAwait(t, f, "the leader's events tell the manager", func() bool {
 		return len(changeFailureNotices(t, leaderRepo, leader, c.ID)) > 0
 	})
 	notices := changeFailureNotices(t, leaderRepo, leader, c.ID)
 	if len(notices) != 1 || !strings.Contains(notices[0], "the delta turns never ran") || !strings.Contains(notices[0], "retry_change") {
-		t.Fatalf("chief notices of the failed shared change: %v", notices)
+		t.Fatalf("manager notices of the failed shared change: %v", notices)
 	}
 	if got := changeFailureNotices(t, otherRepo, other, c.ID); len(got) != 0 {
 		t.Fatalf("the failure was told through a member other than the leader: %v", got)

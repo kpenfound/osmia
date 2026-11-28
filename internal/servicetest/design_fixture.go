@@ -29,18 +29,18 @@ type DesignEnforcement struct {
 	Enforcement service.Enforcement
 }
 
-// PrepareDesignEnforcement writes before ahead of the chief-of-staff and
+// PrepareDesignEnforcement writes before ahead of the manager and
 // designer role tables of the root's configuration and after at the end of the
 // designer's. Both roles run in a container sandbox, the only mode every
 // platform can enforce.
 func PrepareDesignEnforcement(t *testing.T, before, after string) DesignEnforcement {
 	t.Helper()
-	return PrepareDesignEnforcementRoles(t, before, "[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.designer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"+after)
+	return PrepareDesignEnforcementRoles(t, before, "[roles.manager]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.designer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"+after)
 }
 
 // PrepareDesignEnforcementRoles is PrepareDesignEnforcement with the role
 // tables given in full: before ahead of them and roles in place of the
-// chief-of-staff and designer tables, so a configuration can leave either
+// manager and designer tables, so a configuration can leave either
 // role out.
 func PrepareDesignEnforcementRoles(t *testing.T, before, roles string) DesignEnforcement {
 	t.Helper()

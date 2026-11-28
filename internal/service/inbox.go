@@ -38,7 +38,7 @@ func driftEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEn
 	e := decision(InboxDrift, w.Workstream, held.At, "/rebase/"+string(w.Workstream), map[string]any{})
 	e.Revision = k
 	e.Question = fmt.Sprintf("Drift rebase %d is held: %s.", k, held.Reason)
-	e.Blocked = "Rebasing the feature branch onto upstream. No drift rebase is asked for on the upstream_rebase cadence until you ask for one with osmia rebase " + string(w.Workstream) + ", or ask the chief of staff in a message to hand it back with what its drift mason or reviewer should do differently."
+	e.Blocked = "Rebasing the feature branch onto upstream. No drift rebase is asked for on the upstream_rebase cadence until you ask for one with osmia rebase " + string(w.Workstream) + ", or ask the manager in a message to hand it back with what its drift mason or reviewer should do differently."
 	return e, true, nil
 }
 
@@ -69,7 +69,7 @@ func baseEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEnt
 	path := fmt.Sprintf("/base/%s/upstream", w.Workstream)
 	e := decision(InboxBase, w.Workstream, parked.At, path, map[string]any{"base": string(dependency.Base)})
 	e.Question = fmt.Sprintf("The workstream is parked: %s.", parked.Reason)
-	e.Blocked = "Everything on the workstream but the chief of staff and the check of its base."
+	e.Blocked = "Everything on the workstream but the manager and the check of its base."
 	if parent.Value == AbandonedState {
 		e.Options = []string{api.BaseDecisionUpstream}
 		e.Question += fmt.Sprintf(" If upstream already holds the changes of %s this workstream builds on, it can continue from upstream: the service moves it there only once merging them into upstream changes nothing, and its next drift rebase replays its own commits onto upstream. Otherwise abandon it.", dependency.Base)
@@ -124,7 +124,7 @@ func (s *Service) contestedEntry(repository *trace.Repository, stream config.Wor
 	if moveContest(contest, unit) {
 		e.Question = fmt.Sprintf("Unit %s is contested: you moved it here from %s.", unit, contest.From)
 		if rulerName(contest.Actor) != "owner" {
-			e.Question = fmt.Sprintf("Unit %s is contested: the chief of staff moved it here from %s for you to rule on.", unit, contest.From)
+			e.Question = fmt.Sprintf("Unit %s is contested: the manager moved it here from %s for you to rule on.", unit, contest.From)
 		}
 	}
 	e.Blocked = fmt.Sprintf("Unit %s.", unit)

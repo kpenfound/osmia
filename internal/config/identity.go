@@ -13,7 +13,7 @@ type ProjectID string
 type WorkstreamID string
 
 // WorkgroupID identifies a workgroup: one or more workstreams of a project
-// sharing a chief of staff.
+// sharing a manager.
 type WorkgroupID string
 
 var idPattern = regexp.MustCompile(`^[pwg]_[0-9a-f]{32}$`)

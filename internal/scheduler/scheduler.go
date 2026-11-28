@@ -48,7 +48,7 @@ type Options struct {
 	// Capacity bounds the turns in flight. Masons, reviewers and committee
 	// members share their role kind's slots across workstreams; every other
 	// role runs one turn at a time per workstream. Each workstream also runs at
-	// most PerWorkstream turns. Chief-of-staff turns take no slot. Nil leaves
+	// most PerWorkstream turns. Manager turns take no slot. Nil leaves
 	// dispatch unbounded.
 	Capacity *config.Capacity
 	// Priorities returns the runtime priority order of workstreams, read once
@@ -406,7 +406,7 @@ type Wait struct {
 // Slots is the slot accounting of a shared pool, as its projects' passes
 // last published it.
 type Slots struct {
-	// Used counts the turns in flight by role, chief-of-staff turns aside.
+	// Used counts the turns in flight by role, manager turns aside.
 	Used map[string]int
 	// Waiting lists, in the order the passes offered them, the queued turns
 	// that Holds did not hold and that found no free slot.
@@ -493,7 +493,7 @@ func loadSnapshot(repository *trace.Repository, all []config.WorkstreamID) (load
 			return loaded{}, fmt.Errorf("workstream %s: %w", stream, err)
 		}
 		if _, known := kinds.Lookup(kind); !known {
-			threads = slices.DeleteFunc(threads, func(t trace.Thread) bool { return t.Identity.Role != trace.ChiefOfStaff })
+			threads = slices.DeleteFunc(threads, func(t trace.Thread) bool { return t.Identity.Role != trace.Manager })
 		}
 		records, err := repository.Operations(stream)
 		if err != nil {
@@ -600,7 +600,7 @@ func rotationKey(project config.ProjectID, stream config.WorkstreamID, role stri
 }
 
 func (u usage) add(project config.ProjectID, stream config.WorkstreamID, role string) {
-	if trace.ChiefLike(role) {
+	if trace.ManagerLike(role) {
 		return
 	}
 	u.roles[role]++
@@ -622,7 +622,7 @@ func (u usage) merge(other usage) {
 
 func (s *Scheduler) refusal(used usage, c Candidate) string {
 	limits, role := s.options.Capacity, c.Thread.Identity.Role
-	if limits == nil || trace.ChiefLike(role) {
+	if limits == nil || trace.ManagerLike(role) {
 		return ""
 	}
 	if used.streams[streamKey{c.Project, c.Workstream}] >= limits.PerWorkstream {
@@ -633,7 +633,7 @@ func (s *Scheduler) refusal(used usage, c Candidate) string {
 
 func (s *Scheduler) roleRefusal(used usage, c Candidate) string {
 	limits, role := s.options.Capacity, c.Thread.Identity.Role
-	if limits == nil || trace.ChiefLike(role) {
+	if limits == nil || trace.ManagerLike(role) {
 		return ""
 	}
 	fits := used.local[localKey{c.Project, c.Workstream, role}] < 1
@@ -706,7 +706,7 @@ func Dispatch(ctx context.Context, repository *trace.Repository, c Candidate, at
 	}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: c.Workstream, Unit: req.Unit, At: at, Actor: Actor, Cause: req.ID, Depth: req.Depth}
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: req.TurnID,
-		Reason: fmt.Sprintf("Queued turn %s dispatched on thread %s", req.TurnID, req.ThreadID)},
+		Reason: fmt.Sprintf("Queued turn %s dispatched on thread %s", req.TurnID, trace.DisplayRole(req.ThreadID))},
 		Events: []trace.Event{{ID: event, Kind: "turn", Body: "Run turn " + req.TurnID, Operation: &op}}}
 	_, err = repository.Transact(ctx, tx)
 	return err

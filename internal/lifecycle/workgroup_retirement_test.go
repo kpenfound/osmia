@@ -147,7 +147,7 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 	deliverResolutionMembers(t, f)
 	repo, err := f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	authority, host, _, release, err := f.S.Lifecycle().ChiefRepository(ctx, repo, f.Stream1)
+	authority, host, _, release, err := f.S.Lifecycle().ManagerRepository(ctx, repo, f.Stream1)
 	fixturekit.Must(t, err)
 	approval, pins, found, err := trace.ReadGroupApproval(authority, host)
 	fixturekit.Must(t, err)

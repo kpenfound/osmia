@@ -58,7 +58,7 @@ func (s *Service) recoverThread(ctx context.Context, cfg *config.Config, reposit
 				continue
 			}
 			if err := repository.AbandonTurn(ctx, stream, th.Identity.ID, q.Request.TurnID, s.now()); err != nil {
-				return fmt.Errorf("recover %s turn %s: %w", th.Identity.ID, q.Request.TurnID, err)
+				return fmt.Errorf("recover %s turn %s: %w", trace.DisplayRole(th.Identity.ID), q.Request.TurnID, err)
 			}
 		} else {
 			if th.Active != "" && th.Identity.Role == masonRole {
@@ -85,13 +85,13 @@ func (s *Service) recoverThread(ctx context.Context, cfg *config.Config, reposit
 				continue
 			}
 			if err := repository.RecoverUnclaimedTurn(ctx, stream, th.Identity.ID, q.Request.TurnID, dir, s.now()); err != nil {
-				return fmt.Errorf("recover unclaimed %s turn %s: %w", th.Identity.ID, q.Request.TurnID, err)
+				return fmt.Errorf("recover unclaimed %s turn %s: %w", trace.DisplayRole(th.Identity.ID), q.Request.TurnID, err)
 			}
 		}
 	}
-	if trace.ChiefLike(th.Identity.Role) && s.options.Threads != nil {
+	if trace.ManagerLike(th.Identity.Role) && s.options.Threads != nil {
 		if err := s.recoverContinuations(ctx, repository, stream, th.Identity.ID, func(turn string) error {
-			return s.recoverChief(ctx, repository, stream, th.Identity.Role, th.Identity.ID, turn)
+			return s.recoverManager(ctx, repository, stream, th.Identity.Role, th.Identity.ID, turn)
 		}); err != nil {
 			return err
 		}
@@ -106,7 +106,7 @@ func (s *Service) recoverThread(ctx context.Context, cfg *config.Config, reposit
 	return nil
 }
 
-func (s *Service) recoverWorkgroupChiefSessions(ctx context.Context, projects []*activeProject) error {
+func (s *Service) recoverWorkgroupManagerSessions(ctx context.Context, projects []*activeProject) error {
 	seen := map[config.WorkgroupID]bool{}
 	for _, p := range projects {
 		ids, err := s.crossRepoWorkgroupIDs(ctx, p.repository)
@@ -118,15 +118,15 @@ func (s *Service) recoverWorkgroupChiefSessions(ctx context.Context, projects []
 				continue
 			}
 			seen[id] = true
-			if err := s.recoverWorkgroupChiefSession(ctx, id); err != nil {
-				return fmt.Errorf("recover workgroup %s chief-of-staff thread: %w", id, err)
+			if err := s.recoverWorkgroupManagerSession(ctx, id); err != nil {
+				return fmt.Errorf("recover workgroup %s manager thread: %w", id, err)
 			}
 		}
 	}
 	return nil
 }
 
-func (s *Service) recoverWorkgroupChiefSession(ctx context.Context, id config.WorkgroupID) error {
+func (s *Service) recoverWorkgroupManagerSession(ctx context.Context, id config.WorkgroupID) error {
 	_, projects := s.runtimes()
 	if len(projects) == 0 {
 		return nil
@@ -154,7 +154,7 @@ func (s *Service) recoverWorkgroupChiefSession(ctx context.Context, id config.Wo
 	}
 	defer wt.Close()
 	host := g.Members[0]
-	th, err := wt.Thread(host, trace.ChiefOfStaff)
+	th, err := wt.Thread(host, trace.Manager)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -167,7 +167,7 @@ func (s *Service) recoverWorkgroupChiefSession(ctx context.Context, id config.Wo
 	if g.Conversation != nil {
 		for _, q := range th.Turns {
 			if q.Response != nil && q.Status() == "interrupted" && q.Response.Result.Cancelled && q.Response.Stop == nil {
-				if err := s.recoverChief(ctx, wt, host, trace.ChiefOfStaff, trace.ChiefOfStaff, q.Request.TurnID); err != nil {
+				if err := s.recoverManager(ctx, wt, host, trace.Manager, trace.Manager, q.Request.TurnID); err != nil {
 					return err
 				}
 			}
@@ -312,7 +312,7 @@ func (s *Service) recoverContinuation(ctx context.Context, repository *trace.Rep
 	return "", nil
 }
 
-func (s *Service) recoverChief(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, role, agent, turn string) error {
+func (s *Service) recoverManager(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, role, agent, turn string) error {
 	profile, _, err := s.roleExecution(s.current(), role)
 	if err != nil {
 		return err

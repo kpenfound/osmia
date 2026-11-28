@@ -60,15 +60,15 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) *CapacityStatus {
 		role.Waiting = append(role.Waiting, SlotWait{Project: w.Project, Workstream: w.Workstream, Unit: w.Unit, Review: w.Review, Session: w.Session, Preview: w.Preview, Verify: w.Verify, Reason: DeferCapacity})
 	}
 	out.Roles = append(out.Roles, role)
-	out.Roles = append(out.Roles, s.chiefCapacity(limits.Chief))
+	out.Roles = append(out.Roles, s.managerCapacity(limits.Manager))
 	return out
 }
 
-func (s *Service) chiefCapacity(limit int) RoleCapacity {
-	chief := s.ChiefSlots()
-	role := RoleCapacity{Role: chiefRole, Limit: &limit, Used: chief.Used, Waiting: []SlotWait{}}
-	for _, w := range chief.Waiting {
-		role.Waiting = append(role.Waiting, SlotWait{Project: w.Project, Workstream: w.Workstream, Agent: w.Agent, Turn: w.Turn, Reason: DeferCapacity})
+func (s *Service) managerCapacity(limit int) RoleCapacity {
+	manager := s.ManagerSlots()
+	role := RoleCapacity{Role: managerRole, Limit: &limit, Used: manager.Used, Waiting: []SlotWait{}}
+	for _, w := range manager.Waiting {
+		role.Waiting = append(role.Waiting, SlotWait{Project: w.Project, Workstream: w.Workstream, Agent: trace.DisplayRole(w.Agent), Turn: w.Turn, Reason: DeferCapacity})
 	}
 	return role
 }
@@ -121,17 +121,17 @@ func (s *Service) providerUsage(state runtime.State, profiles map[string]Effecti
 				break
 			}
 		}
-		for _, role := range slices.Sorted(maps.Keys(cfg.Roles)) {
-			configured := cfg.Roles[role].Profile
-			registry := name == runtime.SandboxRegistryLimit && cfg.Roles[role].Sandbox == "sbx"
+		for _, role := range trace.ConfiguredRoles(cfg) {
+			configured := cfg.Roles[trace.ConfigRole(role)].Profile
+			registry := name == runtime.SandboxRegistryLimit && cfg.Roles[trace.ConfigRole(role)].Sandbox == "sbx"
 			if (cfg.Profiles[configured].Agent != name && !registry) || usage.Limit == nil {
 				continue
 			}
 			switch p := profiles[role]; p.Source {
 			case "provider_fallback":
-				usage.Fallbacks = append(usage.Fallbacks, RoleFallback{Role: role, Configured: configured, Profile: p.Name})
+				usage.Fallbacks = append(usage.Fallbacks, RoleFallback{Role: trace.DisplayRole(role), Configured: configured, Profile: p.Name})
 			case "provider_pause":
-				usage.PausedRoles = append(usage.PausedRoles, role)
+				usage.PausedRoles = append(usage.PausedRoles, trace.DisplayRole(role))
 			}
 		}
 		out.Providers = append(out.Providers, usage)
@@ -197,7 +197,7 @@ func providerSpend(costs []trace.Cost) (ProviderSpend, error) {
 }
 
 func (c *runtimeControls) capacity(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	return coreadapter.Tool{Name: "capacity", Effect: coreadapter.ToolRead, Description: "Read factory-wide role, check and chief slot limits, usage, waiting work, and pauses. The clients list shows the local client and every connected client: its identity, slots used and total, lease health, draining state, the profiles it can and cannot run with their fixes, the fallback profiles it skips, why it takes no new turn, the turns running on it and the turns that failed there. A waiting turn with reason client waits for a slot of a client (the one holding its session, named in client); with reason no-client no connected client can run its profile. A numeric limit on a pool (mason, reviewer, committee, checks, chief) is its configured factory-wide limit: it comes from config.toml and applies on reload. The chief pool (capacity.chief) bounds the background chief-of-staff turns running at once across every workstream and project: used counts the background turns holding a slot and waiting lists the queued ones in admission order; turns the owner starts take no chief slot. A pool with no limit field and unbounded true (architect) is not bounded factory-wide: it runs at most one turn per workstream, no configuration setting controls it, and there is nothing to raise. Never read it as zero slots. Its used and waiting entries still show its turns.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	return coreadapter.Tool{Name: "capacity", Effect: coreadapter.ToolRead, Description: "Read factory-wide role, check and manager slot limits, usage, waiting work, and pauses. The clients list shows the local client and every connected client: its identity, slots used and total, lease health, draining state, the profiles it can and cannot run with their fixes, the fallback profiles it skips, why it takes no new turn, the turns running on it and the turns that failed there. A waiting turn with reason client waits for a slot of a client (the one holding its session, named in client); with reason no-client no connected client can run its profile. A numeric limit on a pool (mason, reviewer, committee, checks, manager) is its configured factory-wide limit: it comes from config.toml and applies on reload. The manager pool (capacity.manager) bounds the background manager turns running at once across every workstream and project: used counts the background turns holding a slot and waiting lists the queued ones in admission order; turns the owner starts take no manager slot. A pool with no limit field and unbounded true (architect) is not bounded factory-wide: it runs at most one turn per workstream, no configuration setting controls it, and there is nothing to raise. Never read it as zero slots. Its used and waiting entries still show its turns.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return nil, err
@@ -205,7 +205,7 @@ func (c *runtimeControls) capacity(repo *trace.Repository, scope coreadapter.Sco
 		if input == nil || len(input) != 0 {
 			return nil, errors.New("capacity accepts an empty object")
 		}
-		if _, _, err := repo.OwnerTurn(trace.ChiefOfStaff, scope); err != nil {
+		if _, _, err := repo.OwnerTurn(trace.Manager, scope); err != nil {
 			return nil, err
 		}
 		if err := ctx.Err(); err != nil {
@@ -224,6 +224,6 @@ func (c *runtimeControls) capacity(repo *trace.Repository, scope coreadapter.Sco
 		return json.Marshal(struct {
 			Capacity *CapacityStatus `json:"capacity"`
 			Pauses   []runtime.Pause `json:"pauses"`
-		}{slots, state.Pauses})
+		}{slots, displayState(state).Pauses})
 	}}
 }

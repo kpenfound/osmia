@@ -42,7 +42,7 @@ type ClimbApprovalResponse struct {
 // ClimbConcludeRequest is the owner's decision to conclude a Hill Climb
 // workstream now, whatever its stop rules say.
 type ClimbConcludeRequest struct {
-	Note string `json:"note,omitempty" description:"Why the climb is concluded, which the chief of staff reads."`
+	Note string `json:"note,omitempty" description:"Why the climb is concluded, which the manager reads."`
 }
 
 // ClimbConcludeResponse reports a climb that moved to concluding: no attempt

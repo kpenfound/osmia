@@ -202,6 +202,21 @@ func TestPassDispatchesEachThreadsNextTurnOnce(t *testing.T) {
 	}
 }
 
+func TestTheDispatchOfAManagerTurnNamesTheManager(t *testing.T) {
+	ctx := context.Background()
+	f, repo := setup(t)
+	defer repo.Close()
+	th, err := repo.EnsureManager(ctx, stream, f.clock.Now(), owner)
+	must(t, err)
+	req := f.queue(t, repo, trace.Manager, "one")
+	must(t, Dispatch(ctx, repo, Candidate{Project: f.project.ID, Workstream: stream, Thread: th, Turn: trace.QueuedTurn{Request: req}}, f.clock.Now()))
+	transitions, err := trace.Read[trace.Transition](repo, stream)
+	must(t, err)
+	if len(transitions) != 1 || transitions[0].Reason != "Queued turn one dispatched on thread manager" || transitions[0].Subject != Subject(trace.Manager) {
+		t.Fatalf("dispatch transitions: %+v", transitions)
+	}
+}
+
 func TestPassLeavesThreadsWithATurnInFlight(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t, "claimed", "operated")

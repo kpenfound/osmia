@@ -19,7 +19,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// WiringSetup supplies two projects and their shared chief's fake execution backend.
+// WiringSetup supplies two projects and their shared manager's fake execution backend.
 type WiringSetup struct {
 	Config  *config.Config
 	Clock   *fixturekit.FixedClock
@@ -65,17 +65,17 @@ clone = "`+home2+`"
 	}
 	views := filepath.Join(cfg.Root.String(), "views")
 	fixturekit.Must(t, os.Mkdir(views, 0700))
-	every := append([]string{"file_read", questions.AskTool}, questions.ChiefTools...)
+	every := append([]string{"file_read", questions.AskTool}, questions.ManagerTools...)
 	f.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		observe(r)
 		turns := &isolation.Turns{Workspaces: &fixturekit.DemoWorkspaces{}, Views: isolation.Views{Directory: views}, Engine: f.Engine,
-			Grants: map[string]coreadapter.Capabilities{"mason": {Tools: every}, "reviewer": {Tools: every}, trace.ChiefOfStaff: {Tools: every}, trace.Designer: {Tools: every}},
+			Grants: map[string]coreadapter.Capabilities{"mason": {Tools: every}, "reviewer": {Tools: every}, trace.Manager: {Tools: every}, trace.Designer: {Tools: every}},
 			Select: func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 				list, err := questions.Tools(r, agents[scope.Thread], scope, clock.Now)
-				if scope.Role == trace.ChiefOfStaff {
+				if scope.Role == trace.Manager {
 					list = jevfixture.AutoDecide(r, config.WorkstreamID(scope.Workstream), list)
 				}
 				return list, err

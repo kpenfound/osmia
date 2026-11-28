@@ -234,7 +234,7 @@ func decisions(name string, args map[string]any) (calls []map[string]any) {
 	return calls
 }
 
-// CallTool calls the tool on the session. A chief-of-staff outcome tool that
+// CallTool calls the tool on the session. A manager outcome tool that
 // needs a decide result for its subject is preceded by the decide call a
 // turn makes first, when the session holds the decide tool; its refusal or
 // absence leaves the outcome tool to say so.

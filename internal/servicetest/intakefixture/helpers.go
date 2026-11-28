@@ -352,13 +352,13 @@ func CheckChartered(t *testing.T, repo *trace.Repository, want string, number in
 			t.Fatalf("charter notices of %s: %+v", ws, b.CharterNotices)
 		}
 		text := b.Render()
-		if strings.Count(text, "<<< osmia:charter_rule | chief of staff proposal, ratified by the owner | bytes=31 >>>\n| "+CharterRule+"\n<<< /osmia:charter_rule >>>\n") != 1 ||
+		if strings.Count(text, "<<< osmia:charter_rule | manager proposal, ratified by the owner | bytes=31 >>>\n| "+CharterRule+"\n<<< /osmia:charter_rule >>>\n") != 1 ||
 			!strings.Contains(text, "- charter#"+string(rune('0'+number))+" [Standing rulings]: "+CharterRule+"\n") {
 			t.Fatalf("bundle of %s:\n%s", ws, text)
 		}
 	}
 	if events := CharterEvents(t, repo, fixturekit.Stream); len(events) != 1 || !strings.HasPrefix(events[0], "Charter rule "+string(rune('0'+number))+" is recorded from the owner's ruling on question 1") {
-		t.Fatalf("chief of staff notices %q", events)
+		t.Fatalf("manager notices %q", events)
 	}
 }
 
@@ -470,7 +470,7 @@ func RecordDesignDraft(t *testing.T, repository *trace.Repository, stream config
 func RecordDesignDraftRevision(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, revision int, content string) error {
 	t.Helper()
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: intake.DesignDraftDocument, Revision: revision,
-		Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: intake.ChiefActor, Cause: intake.DraftBriefToolName}
+		Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: intake.ManagerActor, Cause: intake.DraftBriefToolName}
 	data, err := json.Marshal(intake.DesignBriefRecord{Content: content})
 	if err != nil {
 		return err
@@ -622,7 +622,7 @@ func (d *ExitDemo) Debates(raise []Objection, concede ...string) fixturekit.Demo
 	}
 }
 
-// ExitAttention is what the fake chief of staff puts in front of the owner for
+// ExitAttention is what the fake manager puts in front of the owner for
 // a packet's recommendation, in words.
 func ExitAttention(recommendation string) string {
 	switch {
@@ -634,10 +634,10 @@ func ExitAttention(recommendation string) string {
 	return "Ratify the spec and plan: no objection stands."
 }
 
-// Chief is the fake chief of staff. It escalates the committee's question,
+// Manager is the fake manager. It escalates the committee's question,
 // relays the owner's ruling, and makes every packet it is told of the
 // attention item of its status.
-func (d *ExitDemo) Chief(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+func (d *ExitDemo) Manager(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 	title, err := d.Design(req)
 	if err != nil {
 		return nil, err
@@ -646,7 +646,7 @@ func (d *ExitDemo) Chief(ctx context.Context, req agent.Request, _ *agent.Turn, 
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Nothing built", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
 	if !strings.HasPrefix(req.Name, "events_") {
-		d.Problem("chief of staff turn %s of %q", req.Name, title)
+		d.Problem("manager turn %s of %q", req.Name, title)
 	}
 	d.Mu.Lock()
 	d.Ran[title] = append(d.Ran[title], "events")
@@ -672,7 +672,7 @@ func (d *ExitDemo) Chief(ctx context.Context, req agent.Request, _ *agent.Turn, 
 			d.Problem("%s of %q: %s %v", status.ToolName, title, out, err)
 		}
 	}
-	return &agent.Result{ClaudeID: "session-chief", ResultText: "Noted", SessionDir: req.SessionDir, NumTurns: 1}, nil
+	return &agent.Result{ClaudeID: "session-manager", ResultText: "Noted", SessionDir: req.SessionDir, NumTurns: 1}, nil
 }
 
 const DoneTool = "done"
@@ -700,7 +700,7 @@ const (
 	AskedAnswer   = "Yes: the store is a file under the root, and files survive restarts."
 	OwnerRuling   = "Yes, the store is durable; do not object on that account."
 	RelayedRuling = "The store keeps acknowledged chunks across a restart: it is durable."
-	ChiefRole     = "[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
+	ManagerRole   = "[roles.manager]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
 	PinOne        = "spec.md revision 1 and plan.json revision 1"
 )
 
@@ -709,13 +709,13 @@ var (
 	OwnerRuled   = regexp.MustCompile(`The owner ruled on inbox entry \d+, \S+ \(questions ([^)]+)\): `)
 )
 
-// Chief is the fake chief of staff of the asking fixtures. A committee
+// Manager is the fake manager of the asking fixtures. A committee
 // question it was told to release it answers from the record, citing the
 // charter; one it was told to hold it answers the same way and then keeps the
 // turn open until the hold closes or the turn is cancelled; any other it
 // escalates to the owner, one entry per question, and relays the owner's
 // ruling with local scope. Every other event it notes and leaves.
-type Chief struct {
+type Manager struct {
 	P        *Faults
 	Mu       sync.Mutex
 	Released map[string]bool
@@ -723,9 +723,9 @@ type Chief struct {
 	Routes   map[string]map[string]any
 }
 
-// Route has the chief of staff route question id to an amendment with the
+// Route has the manager route question id to an amendment with the
 // given citations, change and reason.
-func (c *Chief) Route(id string, citations []string, change, reason string) {
+func (c *Manager) Route(id string, citations []string, change, reason string) {
 	c.Mu.Lock()
 	defer c.Mu.Unlock()
 	if c.Routes == nil {
@@ -734,23 +734,23 @@ func (c *Chief) Route(id string, citations []string, change, reason string) {
 	c.Routes[id] = map[string]any{"question": id, "citations": citations, "change": change, "reason": reason}
 }
 
-// Release has the chief of staff answer question id from the record.
-func (c *Chief) Release(id string) {
+// Release has the manager answer question id from the record.
+func (c *Manager) Release(id string) {
 	c.Mu.Lock()
 	defer c.Mu.Unlock()
 	c.Released[id] = true
 }
 
-// Hold has the chief of staff answer question id from the record and keep
+// Hold has the manager answer question id from the record and keep
 // its turn open until the returned channel closes.
-func (c *Chief) Hold(id string) chan struct{} {
+func (c *Manager) Hold(id string) chan struct{} {
 	c.Mu.Lock()
 	defer c.Mu.Unlock()
 	c.Held[id] = make(chan struct{})
 	return c.Held[id]
 }
 
-func (c *Chief) Turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+func (c *Manager) Turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 
 	if strings.HasPrefix(req.Name, intake.ReviewerRole+"-") {
 		<-ctx.Done()
@@ -783,12 +783,12 @@ func (c *Chief) Turn(ctx context.Context, req agent.Request, _ *agent.Turn, tool
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return QuestionResult(req, "session-chief", "Chosen"), nil
+	return QuestionResult(req, "session-manager", "Chosen"), nil
 }
 
 // Choose calls one question tool and reports a refusal, except one saying the
 // question was chosen for already: a prompt replays earlier events.
-func (c *Chief) Choose(ctx context.Context, tools *mcp.ClientSession, name string, args map[string]any) {
+func (c *Manager) Choose(ctx context.Context, tools *mcp.ClientSession, name string, args map[string]any) {
 	got, err := fixturekit.CallTool(ctx, tools, name, args)
 	if err != nil {
 
@@ -1029,9 +1029,9 @@ type ChangeRaceGate struct {
 	Once    sync.Once
 }
 
-// ChiefEvent reports whether e is an event the chief of staff receives as
+// ManagerEvent reports whether e is an event the manager receives as
 // information: a notice or routine progress.
-func ChiefEvent(e trace.Event) bool {
+func ManagerEvent(e trace.Event) bool {
 	return e.Kind == trace.NoticeKind || e.Kind == trace.ProgressKind
 }
 
@@ -1143,7 +1143,7 @@ type FakeMasons struct {
 	Problems []string
 	Play     map[string]func(context.Context, agent.Request, *mcp.ClientSession) error
 	Response map[string]string
-	Chief    *Chief
+	Manager  *Manager
 }
 
 // Handle runs a tool's handler with input and returns its result.
@@ -1154,17 +1154,17 @@ func Handle(t *testing.T, tool coreadapter.Tool, input string) string {
 	return string(out)
 }
 
-// NoticeOf returns the notice the transition raised for the chief of staff.
+// NoticeOf returns the notice the transition raised for the manager.
 func NoticeOf(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, transition string) string {
 	t.Helper()
 	outbox, err := repository.Outbox(stream)
 	fixturekit.Must(t, err)
 	for _, entry := range outbox {
-		if entry.TransitionID == transition && ChiefEvent(entry.Event) {
+		if entry.TransitionID == transition && ManagerEvent(entry.Event) {
 			return entry.Event.Body
 		}
 	}
-	t.Fatalf("transition %s told the chief of staff nothing", transition)
+	t.Fatalf("transition %s told the manager nothing", transition)
 	return ""
 }
 
@@ -1312,9 +1312,9 @@ func TransitionByID(t *testing.T, repository *trace.Repository, stream config.Wo
 func Turn(id config.ProjectID, name string) string { return string(id[len(id)-4:]) + "-" + name }
 
 const (
-	ChiefAgent  = "agent_chief"
-	ChiefThread = "thread_chief"
-	Quiet       = config.WorkstreamID("w_fedcba9876543210fedcba9876543210")
+	ManagerAgent  = "agent_manager"
+	ManagerThread = "thread_manager"
+	Quiet         = config.WorkstreamID("w_fedcba9876543210fedcba9876543210")
 )
 
 func (g *ChangeRaceGate) Await(t *testing.T) {
@@ -1500,9 +1500,9 @@ const DisjointPlan = `{"version": 2, "units": [
 // AmendedSpec is ValidSpec with its first criterion rewritten.
 var AmendedSpec = strings.Replace(fixturekit.ValidSpec, "1. An interrupted upload resumes from the last acknowledged chunk.", "1. An interrupted upload resumes from a durable checkpoint.", 1)
 
-// MasonRoles runs the chief of staff, designer, mason and reviewer in containers, the
+// MasonRoles runs the manager, designer, mason and reviewer in containers, the
 // sandbox the fake engine's boundary check accepts.
-const MasonRoles = ChiefRole + "[roles.designer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
+const MasonRoles = ManagerRole + "[roles.designer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
 
 // TestDrift is the drift rebase request a test makes.
 func TestDrift(config.WorkstreamID) (string, error) { return "the test asks for a drift rebase", nil }

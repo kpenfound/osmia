@@ -36,7 +36,7 @@ func startNotifying(t *testing.T, opts Options, inbox *fixturekit.NotificationIn
 }
 
 // The notifier reads the service's own inbox: an escalation that opens after
-// the webhook is set is posted with the chief of staff's rephrasing and
+// the webhook is set is posted with the manager's rephrasing and
 // recommendation, and the delivery already open is not.
 func TestNotifyReadsTheServiceInbox(t *testing.T) {
 	t.Parallel()
@@ -74,7 +74,7 @@ func TestNotifyReadsTheServiceInbox(t *testing.T) {
 	}
 	_, err := repository.Ask(ctx, fixturekit.DemoAgent, claim(fixturekit.DemoAgent, fixturekit.DemoThread, "build"), "Where does state live?", at)
 	fixturekit.Must(t, err)
-	_, err = repository.EscalateQuestions(ctx, trace.ChiefOfStaff, claim(trace.ChiefOfStaff, trace.ChiefOfStaff, "events"),
+	_, err = repository.EscalateQuestions(ctx, trace.Manager, claim(trace.Manager, trace.Manager, "events"),
 		trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "Where should state live?", Blocked: "The unit.", Options: []string{"Files"}, Recommendation: "In files."}, at)
 	fixturekit.Must(t, err)
 	n.pass(ctx)

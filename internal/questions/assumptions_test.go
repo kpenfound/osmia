@@ -11,7 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestSharedChiefAssumptionToolValidatesAffectedWorkstreams(t *testing.T) {
+func TestSharedManagerAssumptionToolValidatesAffectedWorkstreams(t *testing.T) {
 	t.Parallel()
 	f := setupCrossRepo(t)
 	wg, g, err := trace.CreateWorkgroupTrace(context.Background(), f.root, []trace.CrossRepoMember{{Workstream: crossMember1, Project: f.r1}, {Workstream: crossMember2, Project: f.r2}}, start, owner, "workgroup")
@@ -20,8 +20,8 @@ func TestSharedChiefAssumptionToolValidatesAffectedWorkstreams(t *testing.T) {
 	}
 	defer wg.Close()
 	host := g.Members[0]
-	scope := claimCrossRepoTurn(t, wg, wg.Project(), host, trace.ChiefOfStaff, trace.ChiefOfStaff, "", "assumptions")
-	tools, err := questions.Tools(wg, trace.ChiefOfStaff, scope, func() time.Time { return start })
+	scope := claimCrossRepoTurn(t, wg, wg.Project(), host, trace.Manager, trace.Manager, "", "assumptions")
+	tools, err := questions.Tools(wg, trace.Manager, scope, func() time.Time { return start })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,5 +60,5 @@ func TestSharedChiefAssumptionToolValidatesAffectedWorkstreams(t *testing.T) {
 		}
 		return
 	}
-	t.Fatal("shared chief has no log_assumption tool")
+	t.Fatal("shared manager has no log_assumption tool")
 }

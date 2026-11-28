@@ -36,14 +36,14 @@ func TestAMoveToSketchedDraftsAStoppedWorkstreamAgain(t *testing.T) {
 	}
 
 	moves := service.InspectForTest(f.S.Core()).LifecycleController()
-	chief := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
 	note := "Drop the dependency between the units; they share no state."
-	out, apiErr := moves.MoveWorkstream(ctx, f.Repository(), stream, lifecycle.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, chief, "chief-turn-1")
+	out, apiErr := moves.MoveWorkstream(ctx, f.Repository(), stream, lifecycle.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "manager-turn-1")
 	if apiErr != nil {
 		t.Fatal(apiErr)
 	}
 	if out.State != intake.HandedState || !strings.Contains(out.Detail, "new run of up to 3 drafts") {
-		t.Fatalf("chief's move: %+v", out)
+		t.Fatalf("manager's move: %+v", out)
 	}
 	last := fmt.Sprintf("draft-%d-exhausted", 2*intake.MaxDrafts)
 	f.Await(t, stream, f.TransitionRecorded(t, stream, last))
@@ -55,7 +55,7 @@ func TestAMoveToSketchedDraftsAStoppedWorkstreamAgain(t *testing.T) {
 		byID[tr.ID] = tr
 	}
 	first := byID[fmt.Sprintf("draft-%d", intake.MaxDrafts+1)]
-	if first.Actor != chief || first.Cause != intake.DraftAgainCause || first.From != "exhausted" || !strings.Contains(first.Reason, "the chief of staff asked for another run of 3 drafts: "+note) {
+	if first.Actor != manager || first.Cause != intake.DraftAgainCause || first.From != "exhausted" || !strings.Contains(first.Reason, "the manager asked for another run of 3 drafts: "+note) {
 		t.Fatalf("first draft of the new run: %+v", first)
 	}
 	if stopped := byID[last]; stopped.From != fmt.Sprintf("invalid-%d", 2*intake.MaxDrafts) || stopped.To != "exhausted" || !strings.Contains(stopped.Reason, "none of the architect's 3 drafts") {
@@ -80,7 +80,7 @@ func TestAMoveToSketchedDraftsAStoppedWorkstreamAgain(t *testing.T) {
 	fixturekit.Must(t, err)
 	notices := map[string]int{}
 	for _, e := range outbox {
-		if e.Event.Operation == nil && intakefixture.ChiefEvent(e.Event) {
+		if e.Event.Operation == nil && intakefixture.ManagerEvent(e.Event) {
 			notices[e.TransitionID]++
 		}
 	}

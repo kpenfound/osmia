@@ -28,7 +28,7 @@ func TestGateRecordsDecidedByJevRoundTripWithTheirJudgment(t *testing.T) {
 	for name, broken := range map[string]func(*shed.Ratification){
 		"Jev without a judgment": func(r *shed.Ratification) { r.Judgment = "" },
 		"a judgment without Jev": func(r *shed.Ratification) { r.DecidedBy = "" },
-		"the chief of staff":     func(r *shed.Ratification) { r.DecidedBy, r.Judgment = trace.DecidedByChief, "" },
+		"the manager":     func(r *shed.Ratification) { r.DecidedBy, r.Judgment = trace.DecidedByManager, "" },
 	} {
 		next := ratification
 		broken(&next)
@@ -45,21 +45,21 @@ func TestGateRecordsDecidedByJevRoundTripWithTheirJudgment(t *testing.T) {
 	if back, err := shed.ParseRulings(data); err != nil || !reflect.DeepEqual(back, ruled) {
 		t.Fatalf("rulings round trip %+v %v", back, err)
 	}
-	ruled.Rulings[0].DecidedBy = trace.DecidedByChief
+	ruled.Rulings[0].DecidedBy = trace.DecidedByManager
 	if _, err := shed.EncodeRulings(ruled); err == nil {
-		t.Fatal("an owner ruling decided by the chief of staff was encoded")
+		t.Fatal("an owner ruling decided by the manager was encoded")
 	}
 
-	decisions := chief(1, one, shed.ChiefDecision{Objection: "a-r1-1", Decision: shed.Dismiss, Note: "Answered.", DecidedBy: trace.DecidedByJev, Judgment: "judgment_ab12"})
-	data, err = shed.EncodeChiefDecisions(decisions)
+	decisions := manager(1, one, shed.ManagerDecision{Objection: "a-r1-1", Decision: shed.Dismiss, Note: "Answered.", DecidedBy: trace.DecidedByJev, Judgment: "judgment_ab12"})
+	data, err = shed.EncodeManagerDecisions(decisions)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if back, err := shed.ParseChiefDecisions(data); err != nil || !reflect.DeepEqual(back, decisions) {
-		t.Fatalf("chief decisions round trip %+v %v", back, err)
+	if back, err := shed.ParseManagerDecisions(data); err != nil || !reflect.DeepEqual(back, decisions) {
+		t.Fatalf("manager decisions round trip %+v %v", back, err)
 	}
 	decisions.Decisions[0].Judgment = ""
-	if _, err := shed.EncodeChiefDecisions(decisions); err == nil {
+	if _, err := shed.EncodeManagerDecisions(decisions); err == nil {
 		t.Fatal("a Jev decision without a judgment was encoded")
 	}
 }

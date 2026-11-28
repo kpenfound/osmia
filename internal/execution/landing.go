@@ -728,7 +728,7 @@ func (f *foreman) refuseWith(ctx context.Context, stream config.WorkstreamID, in
 	recorded := fmt.Sprintf("unit %s did not land: %s", in.Unit, reason)
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: f.Header(id, stream, in.Unit, transition, f.s.Now()), Subject: subject, From: state.Value, To: fmt.Sprintf("refused-%d", in.Review), Reason: recorded},
-		Events:     []trace.Event{trace.Notice(id, "chief", body)}}
+		Events:     []trace.Event{trace.Notice(id, trace.ManagerKey, body)}}
 	if _, err := f.repository.Transact(ctx, tx); err != nil {
 		return coreadapter.OperationResult{}, err
 	}

@@ -44,7 +44,7 @@ func TestMemoryWatchResumesCursorAndDeduplicatesAfterRestart(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"cursor": map[int32]string{1: "cursor-1", 2: "cursor-2"}[n], "notifications": []trace.MemoryEvent{{Event: "event-1", Document: "document-1", Source: "discord", Kind: "message", Time: fixturekit.DemoStart}}})
 	}))
 	defer server.Close()
-	cfg.Hearsay = config.Hearsay{URL: server.URL, Principal: "owner", TokenEnv: "WATCH_OWNER_TOKEN", Agents: map[string]config.HearsayAgent{"orchestrator": {ID: "chief", TokenEnv: "WATCH_AGENT_TOKEN"}}}
+	cfg.Hearsay = config.Hearsay{URL: server.URL, Principal: "owner", TokenEnv: "WATCH_OWNER_TOKEN", Agents: map[string]config.HearsayAgent{"orchestrator": {ID: "manager", TokenEnv: "WATCH_AGENT_TOKEN"}}}
 	cfg.Projects[0].HearsayScope = "project"
 	cfg.Project = cfg.Projects[0]
 	repo, err := trace.Open(cfg.Root, cfg.Project)

@@ -165,10 +165,10 @@ func TestFeatureAndHillClimbTurnsReceiveTheirRolesPromptsWithPolicyOfTheirKind(t
 
 	reviewing := intake.ReviewerAgent(unit) + "-review-"
 	f.engine.Mu.Lock()
-	chief := f.engine.Turns["*"]
+	manager := f.engine.Turns["*"]
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.HasPrefix(req.Name, reviewing) {
-			return chief(ctx, req, verified, tools)
+			return manager(ctx, req, verified, tools)
 		}
 		revision.Store(4)
 		if err := intakefixture.Asks(faults, "1")(ctx, req, verified, tools); err != nil {

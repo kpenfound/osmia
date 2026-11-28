@@ -21,7 +21,7 @@ var _ reconcile.Bounded = (*Lander)(nil)
 // failure.
 func (l *Lander) Bound(op coreadapter.Operation) bool { return LandingAction(op) }
 
-// Failing has nothing to tell the chief of staff: a landing that keeps failing
+// Failing has nothing to tell the manager: a landing that keeps failing
 // ends with a notice that says so.
 func (l *Lander) Failing(context.Context, coreadapter.Operation, int, string) error { return nil }
 

@@ -118,7 +118,7 @@ var TestReapSandboxes = reapSandboxes
 var TestDriftMasonTools = driftMasonTools
 var TestMasonGrant = masonGrant
 var TestReviewerGrant = reviewerGrant
-var TestChiefContext = chiefContext
+var TestManagerContext = managerContext
 
 type TestNotifyLedger = notifyLedger
 

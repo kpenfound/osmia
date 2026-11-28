@@ -41,7 +41,7 @@ func verifyOffered(cfg *config.Config, scope coreadapter.Scope) bool {
 		return false
 	}
 	switch scope.Role {
-	case trace.ChiefOfStaff:
+	case trace.Manager:
 		return true
 	case reviewerRole:
 		return scope.Unit != "" && scope.Thread != driftReviewerAgent
@@ -51,9 +51,9 @@ func verifyOffered(cfg *config.Config, scope coreadapter.Scope) bool {
 
 func (c *runtimeControls) verify(cfg *config.Config, repo *trace.Repository, scope coreadapter.Scope, view isolation.View, now func() time.Time) coreadapter.Tool {
 	env := verifytool.Env{Config: c.currentConfig(repo, cfg), Repo: repo, Scope: scope, View: view, Now: now, Slots: c.verifySlots}
-	if scope.Role == trace.ChiefOfStaff {
+	if scope.Role == trace.Manager {
 		env.Resolve = func(ctx context.Context, in verifytool.Input) (verifytool.Target, string, error) {
-			return chiefVerifyTarget(ctx, env.Config, repo, scope, in)
+			return managerVerifyTarget(ctx, env.Config, repo, scope, in)
 		}
 	} else {
 		env.About = "the exact candidate you are reviewing"
@@ -73,8 +73,8 @@ func (c *runtimeControls) verify(cfg *config.Config, repo *trace.Repository, sco
 	return verifytool.Tool(env)
 }
 
-func chiefVerifyTarget(ctx context.Context, cfg *config.Config, repo *trace.Repository, scope coreadapter.Scope, in verifytool.Input) (verifytool.Target, string, error) {
-	target, stream, refusal, err := chiefMember(repo, scope, in.Workstream)
+func managerVerifyTarget(ctx context.Context, cfg *config.Config, repo *trace.Repository, scope coreadapter.Scope, in verifytool.Input) (verifytool.Target, string, error) {
+	target, stream, refusal, err := managerMember(repo, scope, in.Workstream)
 	if err != nil || refusal != "" {
 		return verifytool.Target{}, refusal, err
 	}

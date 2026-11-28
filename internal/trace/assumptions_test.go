@@ -25,16 +25,16 @@ func TestSharedAssumptionsSelectMembersAndRetainLocalHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	scope := claimCrossRepoTurn(t, wg, wg.Project(), host, ChiefOfStaff, ChiefOfStaff, "", "chief-assumptions")
-	shared, err := wg.LogAssumption(ctx, ChiefOfStaff, scope, "Shared retry policy.", at)
+	scope := claimCrossRepoTurn(t, wg, wg.Project(), host, Manager, Manager, "", "manager-assumptions")
+	shared, err := wg.LogAssumption(ctx, Manager, scope, "Shared retry policy.", at)
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected, err := wg.LogAssumption(ctx, ChiefOfStaff, scope, "Client backoff.", at, crossMember2)
+	selected, err := wg.LogAssumption(ctx, Manager, scope, "Client backoff.", at, crossMember2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	retry, err := wg.LogAssumption(ctx, ChiefOfStaff, scope, "Client backoff.", at, crossMember2)
+	retry, err := wg.LogAssumption(ctx, Manager, scope, "Client backoff.", at, crossMember2)
 	if err != nil || !equalAssumption(retry, selected) {
 		t.Fatalf("replay=%+v error=%v, want %+v", retry, err, selected)
 	}
@@ -77,7 +77,7 @@ func TestSharedAssumptionsSelectMembersAndRetainLocalHistory(t *testing.T) {
 	for _, targets := range [][]config.WorkstreamID{
 		{"w_00000000000000000000000000000099"}, {crossMember1, crossMember1},
 	} {
-		_, err := wg.LogAssumption(ctx, ChiefOfStaff, scope, "Invalid judgment.", at, targets...)
+		_, err := wg.LogAssumption(ctx, Manager, scope, "Invalid judgment.", at, targets...)
 		var refusal *QuestionRefused
 		if !errors.As(err, &refusal) {
 			t.Fatalf("targets %v: want refusal, got %v", targets, err)
@@ -118,7 +118,7 @@ func equalAssumption(a, b Assumption) bool {
 	return a.ID == b.ID && a.Text == b.Text && a.Thread == b.Thread && a.Turn == b.Turn && a.Actor == b.Actor && a.At.Equal(b.At) && slices.Equal(a.Workstreams, b.Workstreams)
 }
 
-func TestSameRepoChiefAssumptionsReachOnlyAffectedMembers(t *testing.T) {
+func TestSameRepoManagerAssumptionsReachOnlyAffectedMembers(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	_, r, _, p, _ := crossRepoFixture(t)
@@ -129,11 +129,11 @@ func TestSameRepoChiefAssumptionsReachOnlyAffectedMembers(t *testing.T) {
 	if _, err := CreateWorkgroup(ctx, r, []config.WorkstreamID{crossMember1, member}, at, owner, "group"); err != nil {
 		t.Fatal(err)
 	}
-	scope := claimCrossRepoTurn(t, r, p.ID, crossMember1, ChiefOfStaff, ChiefOfStaff, "", "shared-assumption")
-	if _, err := r.LogAssumption(ctx, ChiefOfStaff, scope, "Shared.", at); err != nil {
+	scope := claimCrossRepoTurn(t, r, p.ID, crossMember1, Manager, Manager, "", "shared-assumption")
+	if _, err := r.LogAssumption(ctx, Manager, scope, "Shared.", at); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.LogAssumption(ctx, ChiefOfStaff, scope, "Selected.", at, member); err != nil {
+	if _, err := r.LogAssumption(ctx, Manager, scope, "Selected.", at, member); err != nil {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {

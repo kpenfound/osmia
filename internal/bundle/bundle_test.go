@@ -351,7 +351,7 @@ func TestBundleNotices(t *testing.T) {
 		if !reflect.DeepEqual(b.Notices, want) {
 			t.Fatalf("notices of scope %+v: %#v", scope, b.Notices)
 		}
-		if !strings.Contains(b.Render(), "<<< osmia:owner_response | owner (copied by Osmia) | bytes=19 >>>\n| No new dependencies\n<<< /osmia:owner_response >>>\n<<< osmia:returned_answer | chief of staff relay | bytes=37 >>>\n| The owner allows no new\n| dependencies.\n<<< /osmia:returned_answer >>>") || strings.Count(b.Render(), "<<< osmia:owner_response") != 3 {
+		if !strings.Contains(b.Render(), "<<< osmia:owner_response | owner (copied by Osmia) | bytes=19 >>>\n| No new dependencies\n<<< /osmia:owner_response >>>\n<<< osmia:returned_answer | manager relay | bytes=37 >>>\n| The owner allows no new\n| dependencies.\n<<< /osmia:returned_answer >>>") || strings.Count(b.Render(), "<<< osmia:owner_response") != 3 {
 			t.Fatalf("render of scope %+v:\n%s", scope, b.Render())
 		}
 	}
@@ -361,7 +361,7 @@ func TestBundleNotices(t *testing.T) {
 	}
 	text := f.assemble(t, bundle.Scope{Workstream: first}).Render()
 	for _, part := range []string{
-		"  decision: ruling\n  owner: Use files\n  answer: waiting for the chief of staff to relay the ruling\n",
+		"  decision: ruling\n  owner: Use files\n  answer: waiting for the manager to relay the ruling\n",
 		"  decision: ruling\n  owner: Keep it\n  answer: Answer to local\n",
 	} {
 		if !strings.Contains(text, part) {
@@ -562,13 +562,13 @@ func TestBundleCharterNotices(t *testing.T) {
 		}
 		if !strings.Contains(b.Render(), "\n## Notices\n- "+source+"charter.json (record charter_4 revision 3, workstream "+string(first)+"): the owner ratified charter#4, recorded in charter.md revision 7, from "+source+"rulings.jsonl revision 2\n"+
 			"<<< osmia:owner_response | owner (copied by Osmia) | bytes=23 >>>\n| Keep uploads resumable.\n<<< /osmia:owner_response >>>\n"+
-			"<<< osmia:charter_rule | chief of staff proposal, ratified by the owner | bytes=15 >>>\n| Uploads resume.\n<<< /osmia:charter_rule >>>\n") {
+			"<<< osmia:charter_rule | manager proposal, ratified by the owner | bytes=15 >>>\n| Uploads resume.\n<<< /osmia:charter_rule >>>\n") {
 			t.Fatalf("render of scope %+v:\n%s", scope, b.Render())
 		}
 	}
 }
 
-func TestCharterEditsAndChiefNoticesReachOtherWorkstreams(t *testing.T) {
+func TestCharterEditsAndManagerNoticesReachOtherWorkstreams(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 	if err := f.repo.CreateWorkstream(ctx, second, timestamp, owner); err != nil {
@@ -576,22 +576,22 @@ func TestCharterEditsAndChiefNoticesReachOtherWorkstreams(t *testing.T) {
 	}
 	before := f.assemble(t, bundle.Scope{})
 	f.charter(t, "1. Keep records durable.\n")
-	h := trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: trace.ChiefOfStaff, Revision: 1, Project: project, Workstream: first, At: timestamp, Actor: owner, Cause: "test"}
+	h := trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: trace.Manager, Revision: 1, Project: project, Workstream: first, At: timestamp, Actor: owner, Cause: "test"}
 	if err := f.repo.CreateWorkstream(ctx, first, timestamp, owner); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.repo.EnsureChiefOfStaff(ctx, first, timestamp, owner); err != nil {
+	if _, err := f.repo.EnsureManager(ctx, first, timestamp, owner); err != nil {
 		t.Fatal(err)
 	}
 	h.Schema, h.ID = "osmia.trace.turn-request", "request_notice"
-	req := trace.TurnRequest{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "notice", Profile: coreadapter.Profile{Name: "test", Backend: "fake", Model: "fake"}, Prompt: "Notify the project"}
+	req := trace.TurnRequest{Header: h, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "notice", Profile: coreadapter.Profile{Name: "test", Backend: "fake", Model: "fake"}, Prompt: "Notify the project"}
 	if _, err := f.repo.EnqueueTurn(ctx, req); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.repo.ClaimTurn(ctx, first, trace.ChiefOfStaff, "claim", "/owned/notice", timestamp); err != nil {
+	if _, err := f.repo.ClaimTurn(ctx, first, trace.Manager, "claim", "/owned/notice", timestamp); err != nil {
 		t.Fatal(err)
 	}
-	scope := coreadapter.Scope{Project: string(project), Workstream: string(first), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "notice"}
+	scope := coreadapter.Scope{Project: string(project), Workstream: string(first), Role: trace.Manager, Thread: trace.Manager, Turn: "notice"}
 	if _, err := f.repo.NotifyTool(scope, func() time.Time { return timestamp }).Handle(ctx, json.RawMessage(`{"text":"Read the cache ruling before changing storage."}`)); err != nil {
 		t.Fatal(err)
 	}

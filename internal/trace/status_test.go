@@ -12,21 +12,21 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-func chiefThread(t *testing.T, r *Repository, turn string) coreadapter.Scope {
+func managerThread(t *testing.T, r *Repository, turn string) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
-	identity := Agent{Header: header("agent", "chief"), Role: StatusRole, ThreadID: "chief_thread"}
+	identity := Agent{Header: header("agent", "manager"), Role: StatusRole, ThreadID: "manager_thread"}
 	if err := r.CreateThread(ctx, identity); err != nil {
 		t.Fatal(err)
 	}
-	req := TurnRequest{Header: header("turn-request", "request_"+turn), AgentID: "chief", ThreadID: "chief_thread", TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake-model-7"}, Prompt: "Owner message"}
+	req := TurnRequest{Header: header("turn-request", "request_"+turn), AgentID: "manager", ThreadID: "manager_thread", TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake-model-7"}, Prompt: "Owner message"}
 	if _, err := r.EnqueueTurn(ctx, req); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.ClaimTurn(ctx, streamID, "chief", "token_"+turn, "/owned/"+turn, at); err != nil {
+	if _, err := r.ClaimTurn(ctx, streamID, "manager", "token_"+turn, "/owned/"+turn, at); err != nil {
 		t.Fatal(err)
 	}
-	return coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Thread: "chief_thread", Turn: turn, Role: StatusRole}
+	return coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Thread: "manager_thread", Turn: turn, Role: StatusRole}
 }
 
 func accept(StatusContent, []string, []OwnerGate) error { return nil }
@@ -46,24 +46,24 @@ func TestSetStatusStoresWholeRevisions(t *testing.T) {
 	if got := statusOf(t, r); got.Status != nil || got.State != "" || got.OpenQuestions != 0 || got.Workstream != streamID {
 		t.Fatalf("fresh workstream: %+v", got)
 	}
-	scope := chiefThread(t, r, "turn1")
+	scope := managerThread(t, r, "turn1")
 	first := StatusContent{Goal: "Ship the importer.", Attention: "Approve the plan.", Note: "The draft is ready.", Agents: []string{"The architect is drafting."}}
 	var known []string
-	revision, err := r.SetStatus(ctx, "chief", scope, first, at.Add(time.Minute), func(_ StatusContent, k []string, _ []OwnerGate) error { known = k; return nil })
+	revision, err := r.SetStatus(ctx, "manager", scope, first, at.Add(time.Minute), func(_ StatusContent, k []string, _ []OwnerGate) error { known = k; return nil })
 	if err != nil || revision != 1 {
 		t.Fatalf("first: %d %v", revision, err)
 	}
-	for _, id := range []string{string(projectID), string(streamID), "chief", "chief_thread", "turn1", "fake-model-7"} {
+	for _, id := range []string{string(projectID), string(streamID), "manager", "manager_thread", "turn1", "fake-model-7"} {
 		if !slices.Contains(known, id) {
 			t.Errorf("check did not receive known identifier %q: %v", id, known)
 		}
 	}
 	second := StatusContent{Goal: "Ship the importer.", Note: "The plan was approved.", Agents: []string{}}
-	if revision, err := r.SetStatus(ctx, "chief", scope, second, at.Add(2*time.Minute), accept); err != nil || revision != 2 {
+	if revision, err := r.SetStatus(ctx, "manager", scope, second, at.Add(2*time.Minute), accept); err != nil || revision != 2 {
 		t.Fatalf("second: %d %v", revision, err)
 	}
 	got := statusOf(t, r).Status
-	if got == nil || !reflect.DeepEqual(got.StatusContent, second) || got.Revision != 2 || got.Actor != (Actor{Kind: "agent", ID: "chief"}) || got.Cause != "request_turn1" || got.Depth != 3 || !got.At.Equal(at.Add(2*time.Minute)) {
+	if got == nil || !reflect.DeepEqual(got.StatusContent, second) || got.Revision != 2 || got.Actor != (Actor{Kind: "agent", ID: "manager"}) || got.Cause != "request_turn1" || got.Depth != 3 || !got.At.Equal(at.Add(2*time.Minute)) {
 		t.Fatalf("latest: %+v", got)
 	}
 	s := mustScoped(t, r, streamID)
@@ -92,12 +92,12 @@ func TestSetStatusStoresWholeRevisions(t *testing.T) {
 func TestSetStatusFollowsEscalationGate(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)
-	chief := chiefThread(t, r, "statusgate")
+	manager := managerThread(t, r, "statusgate")
 	asker := askerThread(t, r, "mason_gate", "mason", "askgate")
 	if _, err := r.Ask(ctx, "mason_gate", asker, "May the upload change?", at); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.EscalateQuestions(ctx, "chief", chief, EscalationRequest{Questions: []string{"1"}, Rephrasing: "May the upload change?", Blocked: "The upload unit.", Recommendation: "No."}, at); err != nil {
+	if _, err := r.EscalateQuestions(ctx, "manager", manager, EscalationRequest{Questions: []string{"1"}, Rephrasing: "May the upload change?", Blocked: "The upload unit.", Recommendation: "No."}, at); err != nil {
 		t.Fatal(err)
 	}
 	want := []OwnerGate{{Kind: "escalation", Reference: "1"}}
@@ -114,11 +114,11 @@ func TestSetStatusFollowsEscalationGate(t *testing.T) {
 		}
 		return nil
 	}
-	if _, err := r.SetStatus(ctx, "chief", chief, content, at, check); refusalStatus(err) != "attention is required while the owner holds escalation 1" {
+	if _, err := r.SetStatus(ctx, "manager", manager, content, at, check); refusalStatus(err) != "attention is required while the owner holds escalation 1" {
 		t.Fatalf("refusal: %v", err)
 	}
 	content.Attention = "Decide whether the upload may change."
-	if _, err := r.SetStatus(ctx, "chief", chief, content, at, check); err != nil {
+	if _, err := r.SetStatus(ctx, "manager", manager, content, at, check); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.Rule(ctx, 1, "Keep the current upload.", Actor{Kind: "owner", ID: "local"}, at); err != nil {
@@ -128,7 +128,7 @@ func TestSetStatusFollowsEscalationGate(t *testing.T) {
 		t.Fatalf("ruled gates: %+v", got)
 	}
 	content.Attention = ""
-	if _, err := r.SetStatus(ctx, "chief", chief, content, at, func(_ StatusContent, _ []string, gates []OwnerGate) error {
+	if _, err := r.SetStatus(ctx, "manager", manager, content, at, func(_ StatusContent, _ []string, gates []OwnerGate) error {
 		if len(gates) != 0 {
 			t.Fatalf("ruled check gates: %+v", gates)
 		}
@@ -177,9 +177,9 @@ func TestOwnerGatesForRatificationAndContestedUnit(t *testing.T) {
 func TestSetStatusRefusals(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)
-	scope := chiefThread(t, r, "turn1")
+	scope := managerThread(t, r, "turn1")
 	valid := StatusContent{Goal: "Ship it.", Note: "Going well.", Agents: []string{}}
-	_, err := r.SetStatus(ctx, "chief", scope, valid, at, func(StatusContent, []string, []OwnerGate) error { return errors.New("goal names a commit") })
+	_, err := r.SetStatus(ctx, "manager", scope, valid, at, func(StatusContent, []string, []OwnerGate) error { return errors.New("goal names a commit") })
 	var rejected *StatusRejected
 	if !errors.As(err, &rejected) || rejected.Reason != "goal names a commit" {
 		t.Fatalf("check rejection: %v", err)
@@ -191,7 +191,7 @@ func TestSetStatusRefusals(t *testing.T) {
 		"nil agents":  {Goal: "g", Note: "n"},
 		"blank agent": {Goal: "g", Note: "n", Agents: []string{" "}},
 	} {
-		if _, err := r.SetStatus(ctx, "chief", scope, content, at, accept); err == nil {
+		if _, err := r.SetStatus(ctx, "manager", scope, content, at, accept); err == nil {
 			t.Errorf("%s: stored", name)
 		}
 	}
@@ -203,17 +203,17 @@ func TestSetStatusRefusals(t *testing.T) {
 		"other turn":   altered(func(s *coreadapter.Scope) { s.Turn = "other" }),
 		"project":      altered(func(s *coreadapter.Scope) { s.Project = "p_00000000000000000000000000000002" }),
 	} {
-		if _, err := r.SetStatus(ctx, "chief", s, valid, at, accept); err == nil {
+		if _, err := r.SetStatus(ctx, "manager", s, valid, at, accept); err == nil {
 			t.Errorf("%s: stored", name)
 		}
 	}
 	if _, err := r.SetStatus(ctx, "mason", scope, valid, at, accept); err == nil {
 		t.Error("unknown agent stored")
 	}
-	if _, err := r.SetStatus(ctx, "chief", scope, valid, time.Time{}, accept); err == nil {
+	if _, err := r.SetStatus(ctx, "manager", scope, valid, time.Time{}, accept); err == nil {
 		t.Error("zero time stored")
 	}
-	if _, err := r.SetStatus(ctx, "chief", scope, valid, at, nil); err == nil {
+	if _, err := r.SetStatus(ctx, "manager", scope, valid, at, nil); err == nil {
 		t.Error("stored without a check")
 	}
 	if err := r.CreateThread(ctx, threadAgent()); err != nil {
@@ -237,17 +237,17 @@ func TestSetStatusRefusals(t *testing.T) {
 func TestSetStatusRequiresActiveTurn(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)
-	identity := Agent{Header: header("agent", "chief"), Role: StatusRole, ThreadID: "chief_thread"}
+	identity := Agent{Header: header("agent", "manager"), Role: StatusRole, ThreadID: "manager_thread"}
 	if err := r.CreateThread(ctx, identity); err != nil {
 		t.Fatal(err)
 	}
-	req := TurnRequest{Header: header("turn-request", "request_queued"), AgentID: "chief", ThreadID: "chief_thread", TurnID: "queued", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "m"}, Prompt: "p"}
+	req := TurnRequest{Header: header("turn-request", "request_queued"), AgentID: "manager", ThreadID: "manager_thread", TurnID: "queued", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "m"}, Prompt: "p"}
 	if _, err := r.EnqueueTurn(ctx, req); err != nil {
 		t.Fatal(err)
 	}
-	scope := coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Thread: "chief_thread", Turn: "queued", Role: StatusRole}
+	scope := coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Thread: "manager_thread", Turn: "queued", Role: StatusRole}
 	valid := StatusContent{Goal: "Ship it.", Note: "Going well.", Agents: []string{}}
-	if _, err := r.SetStatus(ctx, "chief", scope, valid, at, accept); err == nil {
+	if _, err := r.SetStatus(ctx, "manager", scope, valid, at, accept); err == nil {
 		t.Fatal("queued turn stored a status")
 	}
 }
@@ -308,7 +308,7 @@ func TestInternalContestDoesNotRequireOwnerAttention(t *testing.T) {
 	if got := ownerGates(records, streamID, view); len(got) != 0 {
 		t.Fatalf("internal blocker required owner attention: %v", got)
 	}
-	records = append(records, Document{Header: Header{Workstream: streamID}, Path: "units/" + subject + "/chief-" + EventID("contest-1", "chief") + ".json", Content: `{"contest":"contest-1","decision":"escalate"}`})
+	records = append(records, Document{Header: Header{Workstream: streamID}, Path: ContestDecisionPath(subject, "contest-1"), Content: `{"contest":"contest-1","decision":"escalate"}`})
 	if got := ownerGates(records, streamID, view); len(got) != 1 || got[0].Reference != "resume" {
 		t.Fatalf("explicit escalation has no owner gate: %v", got)
 	}
@@ -319,13 +319,13 @@ func TestInternalContestDoesNotRequireOwnerAttention(t *testing.T) {
 	}
 }
 
-func TestOwnerGateRecognizesChiefDecisions(t *testing.T) {
+func TestOwnerGateRecognizesManagerDecisions(t *testing.T) {
 	for _, unit := range []string{"acceptance-without-full-checks", strings.Repeat("u", 64), strings.Repeat("u", 128)} {
 		t.Run(unit, func(t *testing.T) {
 			subject := UnitSubject(unit)
 			contest := Transition{Header: Header{Workstream: streamID, Unit: unit, ID: subject + "-contested-checks-7-12"}, Subject: subject, From: "checking", To: "contested"}
 			view := &workflowView{states: map[string]WorkflowState{subject: {Value: "contested"}}}
-			path := "units/" + subject + "/chief-" + EventID(contest.ID, "chief") + ".json"
+			path := ContestDecisionPath(subject, contest.ID)
 			decision := Document{Header: Header{Workstream: streamID}, Path: path, Content: `{"contest":"` + contest.ID + `","decision":"escalate"}`}
 			got := ownerGates([]Record{contest, decision}, streamID, view)
 			if len(got) != 1 || got[0].Reference != unit {

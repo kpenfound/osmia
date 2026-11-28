@@ -140,7 +140,7 @@ func TestLandingThatKeepsFailingIsRefusedOnceItsCommitIsConfirmedAbsent(t *testi
 		t.Fatalf("notices of the refusal: %q", got)
 	}
 	if got := b.notices(t, "has failed"); len(got) != 1 {
-		t.Fatalf("the failure streak notified the chief %d times: %q", len(got), got)
+		t.Fatalf("the failure streak notified the manager %d times: %q", len(got), got)
 	}
 }
 

@@ -133,7 +133,7 @@ func (s *Service) raiseClimbStop(ctx context.Context, repository *trace.Reposito
 		TransitionID: func(router.Target) string { return id },
 		Enter: func(context.Context, router.Plan) (router.Effect, error) {
 			body := fmt.Sprintf("The climb concludes after attempt %d: %s. The best score is %v. No attempt starts again; the branch goes on to its rebase and delivery.", req.After, why, best)
-			return router.Effect{Events: []trace.Event{trace.Notice(id+"-conclude", "chief", body)}, Reason: fmt.Sprintf("a stop rule fired after attempt %d (%s), so the climb concludes", req.After, why)}, nil
+			return router.Effect{Events: []trace.Event{trace.Notice(id+"-conclude", trace.ManagerKey, body)}, Reason: fmt.Sprintf("a stop rule fired after attempt %d (%s), so the climb concludes", req.After, why)}, nil
 		},
 		Entering: map[string]router.EffectFunc{targetClimbContinue: func(context.Context, router.Plan) (router.Effect, error) {
 			doc, err := climb.StopDocument(repository, req.Stream, req.After, rules, s.now())
@@ -141,7 +141,7 @@ func (s *Service) raiseClimbStop(ctx context.Context, repository *trace.Reposito
 				return router.Effect{}, err
 			}
 			body := fmt.Sprintf("The climb goes on past a %s stop after attempt %d: %s. The best score is %v.", kind, req.After, why, best)
-			return router.Effect{Documents: []trace.Document{doc}, Events: []trace.Event{trace.Notice(id+"-continue", "chief", body)}, Reason: fmt.Sprintf("Jev judged more attempts worth making past the rule that fired after attempt %d (%s)", req.After, why)}, nil
+			return router.Effect{Documents: []trace.Document{doc}, Events: []trace.Event{trace.Notice(id+"-continue", trace.ManagerKey, body)}, Reason: fmt.Sprintf("Jev judged more attempts worth making past the rule that fired after attempt %d (%s)", req.After, why)}, nil
 		}},
 		Evidence: router.Evidence{
 			Intent:  "The climb improves one measured number by repeated attempts that Go keeps or discards by arithmetic; a stop rule fired.",
@@ -203,11 +203,11 @@ func (s *Service) concludeExit(repository *trace.Repository, stream config.Works
 	id := "climb-concluded"
 	authority := router.AuthorityOwner
 	if by.Kind != intake.OwnerActor.Kind {
-		authority = router.AuthorityChief
+		authority = router.AuthorityManager
 	}
 	who := "the owner"
-	if authority == router.AuthorityChief {
-		who = "the chief of staff"
+	if authority == router.AuthorityManager {
+		who = "the manager"
 	}
 	body := fmt.Sprintf("The climb was concluded now by %s. No attempt starts again; an attempt in flight is discarded, and the branch goes on to its rebase and delivery.", who)
 	if strings.TrimSpace(note) != "" {
@@ -221,7 +221,7 @@ func (s *Service) concludeExit(repository *trace.Repository, stream config.Works
 		Targets:      []router.Target{{Name: targetClimbConclude, State: climb.InnerConcluding, Description: "End the climb now.", Reason: "the climb was concluded now by " + who}},
 		TransitionID: func(router.Target) string { return id },
 		Enter: func(context.Context, router.Plan) (router.Effect, error) {
-			return router.Effect{Events: []trace.Event{trace.Notice(id, "chief", body)}}, nil
+			return router.Effect{Events: []trace.Event{trace.Notice(id, trace.ManagerKey, body)}}, nil
 		},
 	}
 }
@@ -277,7 +277,7 @@ func (s *Service) extendClimb(ctx context.Context, raw string, req api.ClimbExte
 			}
 			granted = e
 			body := fmt.Sprintf("The owner extended the climb's budget: %s.", extensionText(e))
-			return router.Effect{Documents: []trace.Document{doc}, Events: []trace.Event{trace.Progress(id, "chief", body)}, Reason: "the owner extended the climb's budget: " + extensionText(e)}, nil
+			return router.Effect{Documents: []trace.Document{doc}, Events: []trace.Event{trace.Progress(id, trace.ManagerKey, body)}, Reason: "the owner extended the climb's budget: " + extensionText(e)}, nil
 		},
 	}
 	res, err := s.RouteExit(ctx, x)

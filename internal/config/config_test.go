@@ -79,7 +79,7 @@ func TestDefaults(t *testing.T) {
 	if c.Root != root || c.Listen.Socket != filepath.Join(root.String(), "osmia.sock") {
 		t.Fatalf("root/socket: %+v", c)
 	}
-	if c.Capacity != (Capacity{Masons: 4, Reviewers: 2, Committee: 3, PerWorkstream: 2, Checks: 2, Chief: 3}) || c.Shed != (Shed{3, 3}) || c.Mason.MaxCleanTurns != 3 {
+	if c.Capacity != (Capacity{Masons: 4, Reviewers: 2, Committee: 3, PerWorkstream: 2, Checks: 2, Manager: 3}) || c.Shed != (Shed{3, 3}) || c.Mason.MaxCleanTurns != 3 {
 		t.Fatalf("numeric defaults: %+v", c)
 	}
 	if c.Project.ID != pid || c.Project.BaseBranch != "main" || c.Project.Landing != "commit-per-unit" || c.Project.Capacity.PerWorkstream != 2 {
@@ -260,7 +260,7 @@ socket = "local.sock"
 [capacity]
 masons = 1
 checks = 7
-chief = 5
+manager = 5
 reviewers = 1
 committee = 1
 per_workstream = 5
@@ -286,7 +286,7 @@ per_workstream = 3
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Capacity != (Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 5, Checks: 7, Chief: 5}) || c.Shed != (Shed{1, 2}) || c.Project.Capacity.PerWorkstream != 3 || c.Project.Landing != "squash" || c.Project.BaseBranch != "release/next" || c.Project.Name != "A display name" {
+	if c.Capacity != (Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 5, Checks: 7, Manager: 5}) || c.Shed != (Shed{1, 2}) || c.Project.Capacity.PerWorkstream != 3 || c.Project.Landing != "squash" || c.Project.BaseBranch != "release/next" || c.Project.Name != "A display name" {
 		t.Fatalf("overrides: %+v", c)
 	}
 	if c.EventWindow() != 250*time.Millisecond {
@@ -356,8 +356,10 @@ func TestInvalid(t *testing.T) {
 		{"negative reviews", topConfig + "[capacity]\nreviewers = -1\n", "", "capacity.reviewers"},
 		{"zero checks", topConfig + "[capacity]\nchecks = 0\n", "", "capacity.checks"},
 		{"negative checks", topConfig + "[capacity]\nchecks = -1\n", "", "capacity.checks"},
-		{"zero chief", topConfig + "[capacity]\nchief = 0\n", "", "capacity.chief"},
-		{"negative chief", topConfig + "[capacity]\nchief = -1\n", "", "capacity.chief"},
+		{"zero manager", topConfig + "[capacity]\nmanager = 0\n", "", "capacity.manager"},
+		{"negative manager", topConfig + "[capacity]\nmanager = -1\n", "", "capacity.manager"},
+		{"zero deprecated chief", topConfig + "[capacity]\nchief = 0\n", "", "capacity.chief"},
+		{"negative deprecated chief", topConfig + "[capacity]\nchief = -1\n", "", "capacity.chief"},
 		{"zero committee", topConfig + "[capacity]\ncommittee = 0\n", "", "capacity.committee"},
 		{"zero wip", topConfig + "[capacity]\nper_workstream = 0\n", "", "capacity.per_workstream"},
 		{"negative local slots", topConfig + "[capacity]\nlocal_slots = -1\n", "", "capacity.local_slots"},
@@ -710,9 +712,9 @@ func TestBranchNames(t *testing.T) {
 	}
 }
 
-func TestDesignerRoleIsAnOrdinaryRoleThatNeverFallsBackToTheChiefOfStaff(t *testing.T) {
-	chief := topConfig + "[profiles.chief]\nagent = 'codex'\nmodel = 'chief-model'\n[roles.chief_of_staff]\nprofile = 'chief'\nsandbox = 'container'\nimage = 'chief-image'\nskills = ['https://github.com/example/skills#chief-skill']\n"
-	c, err := load(fixture(t, chief, projectConfig))
+func TestDesignerRoleIsAnOrdinaryRoleThatNeverFallsBackToTheManager(t *testing.T) {
+	manager := topConfig + "[profiles.lead]\nagent = 'codex'\nmodel = 'lead-model'\n[roles.manager]\nprofile = 'lead'\nsandbox = 'container'\nimage = 'lead-image'\nskills = ['https://github.com/example/skills#lead-skill']\n"
+	c, err := load(fixture(t, manager, projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -722,14 +724,41 @@ func TestDesignerRoleIsAnOrdinaryRoleThatNeverFallsBackToTheChiefOfStaff(t *test
 	if got := c.RoleExecution("designer"); got.Mode != "none" || got.Image != "" || len(got.Skills) != 0 {
 		t.Fatalf("an unconfigured designer's execution: %+v", got)
 	}
-	configured := chief + "[roles.designer]\nprofile = 'chief'\nsandbox = 'sbx'\nimage = 'osmia:latest'\nskills = ['https://github.com/example/skills#design-skill']\n"
+	configured := manager + "[roles.designer]\nprofile = 'lead'\nsandbox = 'sbx'\nimage = 'osmia:latest'\nskills = ['https://github.com/example/skills#design-skill']\n"
 	c, err = load(fixture(t, configured, projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, settings, err := c.Execution("designer", "chief")
+	p, settings, err := c.Execution("designer", "lead")
 	if err != nil || p.Backend != "codex" || settings.Mode != "sbx" || settings.Image != "osmia:latest" || !slices.Equal(settings.Skills, []string{"https://github.com/example/skills#design-skill"}) {
 		t.Fatalf("a configured designer: %+v %+v %v", p, settings, err)
+	}
+}
+
+func TestDesignerSettingsAreTheSameWhicheverManagerKeyIsSet(t *testing.T) {
+	settings := "profile = 'lead'\nsandbox = 'container'\nimage = 'lead-image'\nskills = ['https://github.com/example/skills#lead-skill']\n"
+	base := topConfig + "[profiles.lead]\nagent = 'codex'\nmodel = 'lead-model'\n"
+	for name, roles := range map[string]string{
+		"canonical key":    "[roles.manager]\n" + settings,
+		"deprecated alias": "[roles.chief_of_staff]\n" + settings,
+		"no manager role":  "",
+	} {
+		for _, designer := range []string{"", "[roles.designer]\nprofile = 'lead'\nsandbox = 'sbx'\nimage = 'osmia:latest'\n"} {
+			c, err := load(fixture(t, base+roles+designer, projectConfig))
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			got := c.Roles["designer"]
+			if designer == "" {
+				if got.Profile != "default" || got.Sandbox != "none" || got.Image != "" || len(got.Skills) != 0 {
+					t.Fatalf("%s: an unconfigured designer: %+v", name, got)
+				}
+				continue
+			}
+			if got.Profile != "lead" || got.Sandbox != "sbx" || got.Image != "osmia:latest" || len(got.Skills) != 0 {
+				t.Fatalf("%s: a configured designer: %+v", name, got)
+			}
+		}
 	}
 }
 

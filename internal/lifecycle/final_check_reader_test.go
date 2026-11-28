@@ -77,7 +77,7 @@ func TestFinalReviewSettlesTheStatusesOfThePushedCommit(t *testing.T) {
 				_, err = fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
 				return err
 			})
-			j.chief.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst}})
+			j.manager.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst}})
 
 			j.start(t)
 			first := j.awaitPushes(t, 1)[0]

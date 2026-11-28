@@ -18,20 +18,20 @@ import (
 
 func TestHeldNoticesOfACrossRepoMemberHaveTheirInboxCard(t *testing.T) {
 	ctx := context.Background()
-	s, chief, g := workgroupFeedFixture(t, true, 2)
+	s, manager, g := workgroupFeedFixture(t, true, 2)
 	repo := s.projects[0].repository
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "held-notice", Revision: 1, Project: repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "test"}
 	_, err := repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: "held-notice", To: "changed", Reason: "seeded"},
-		Events: []trace.Event{trace.Notice("held-notice", "chief", "The notice the chief cannot take")}})
+		Events: []trace.Event{trace.Notice("held-notice", trace.ManagerKey, "The notice the manager cannot take")}})
 	fixturekit.Must(t, err)
 	d, err := events.New(repo, events.Options{Now: clock.Now,
 		Profile: func() (coreadapter.Profile, error) {
 			return coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, nil
 		},
-		ChiefTarget: func(ctx context.Context, stream config.WorkstreamID) (*trace.Repository, func(), error) {
-			target, _, _, close, err := s.chiefRepository(ctx, repo, stream)
+		ManagerTarget: func(ctx context.Context, stream config.WorkstreamID) (*trace.Repository, func(), error) {
+			target, _, _, close, err := s.managerRepository(ctx, repo, stream)
 			return target, close, err
 		}})
 	fixturekit.Must(t, err)
@@ -42,13 +42,13 @@ func TestHeldNoticesOfACrossRepoMemberHaveTheirInboxCard(t *testing.T) {
 			t.Fatalf("after %d failed deliveries the notices card is open=%v, %v", i, open, err)
 		}
 		fixturekit.Must(t, d.Pass(ctx))
-		q, err := chief.ClaimTurn(ctx, host, trace.ChiefOfStaff, fmt.Sprintf("held-%d", i), filepath.Join(t.TempDir(), "chief"), clock.Now())
+		q, err := manager.ClaimTurn(ctx, host, trace.Manager, fmt.Sprintf("held-%d", i), filepath.Join(t.TempDir(), "manager"), clock.Now())
 		fixturekit.Must(t, err)
 		rh := q.Request.Header
 		rh.Schema, rh.ID, rh.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), clock.Now()
-		fixturekit.Must(t, chief.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: rh, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision, Failure: "the provider is down",
-			Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "chief-session"}, StartedAt: q.Claim.At, SessionDirectory: q.Claim.SessionDirectory, IsError: true}}))
-		fixturekit.Must(t, chief.CompleteTurn(ctx, host, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, clock.Now()))
+		fixturekit.Must(t, manager.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: rh, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision, Failure: "the provider is down",
+			Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "manager-session"}, StartedAt: q.Claim.At, SessionDirectory: q.Claim.SessionDirectory, IsError: true}}))
+		fixturekit.Must(t, manager.CompleteTurn(ctx, host, trace.Manager, q.Request.TurnID, q.Claim.Token, clock.Now()))
 		clock.Mu.Lock()
 		clock.At = clock.At.Add(time.Hour)
 		clock.Mu.Unlock()

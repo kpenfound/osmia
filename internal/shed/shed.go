@@ -264,9 +264,9 @@ func (d Dissent) Blocking() bool {
 }
 
 // Entry is one line of the dissent record: an objection that stands, whether
-// it blocks, and how it was disposed of. By is ChiefOfStaff when the chief of
-// staff dismissed it on the owner's behalf, and empty for the owner's own
-// disposition. Escalated says the chief of staff put it to the owner, with
+// it blocks, and how it was disposed of. By is trace.Manager when the manager
+// dismissed it on the owner's behalf, and empty for the owner's own
+// disposition. Escalated says the manager put it to the owner, with
 // Escalation as its note.
 type Entry struct {
 	Dissent
@@ -282,15 +282,15 @@ type Entry struct {
 // objection with its kind, member, part, its disposition and whether it
 // blocks. A sustained objection blocks whatever its kind; a dismissed or
 // overruled one blocks no longer and is kept as the recorded disposition. The
-// chief of staff's dismissal of a committee objection is a dismissal on the
+// manager's dismissal of a committee objection is a dismissal on the
 // owner's behalf, and the owner's own ruling takes precedence over it.
-func DissentRecord(records []Record, rulings []Rulings, chief []ChiefDecisions) []Entry {
+func DissentRecord(records []Record, rulings []Rulings, manager []ManagerDecisions) []Entry {
 	ruled := map[string]Ruling{}
 	for _, one := range flatten(rulings) {
 		ruled[one.Objection] = one
 	}
-	decided := map[string]ChiefDecision{}
-	for _, round := range chief {
+	decided := map[string]ManagerDecision{}
+	for _, round := range manager {
 		for _, one := range round.Decisions {
 			decided[one.Objection] = one
 		}
@@ -307,7 +307,7 @@ func DissentRecord(records []Record, rulings []Rulings, chief []ChiefDecisions) 
 			case Escalate:
 				entries[i].Escalated, entries[i].Escalation = true, c.Note
 			case Dismiss:
-				entries[i].Disposition, entries[i].Note, entries[i].By = Dismissed, c.Note, ChiefOfStaff
+				entries[i].Disposition, entries[i].Note, entries[i].By = Dismissed, c.Note, trace.Manager
 				entries[i].Blocking = false
 			}
 		}

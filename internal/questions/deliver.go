@@ -27,9 +27,9 @@ func Prompt(q trace.Question, ruling trace.Ruling) string {
 	var b strings.Builder
 	opening := "Answer to your question %s."
 	if ruling.Decision == trace.DecisionRuling {
-		opening = "The owner ruled on your question %s. The chief of staff relays the ruling."
+		opening = "The owner ruled on your question %s. The manager relays the ruling."
 		if ruling.DecidedBy == trace.DecidedByJev {
-			opening = "Jev, the decision maker for the owner, ruled on your question %s. The chief of staff relays the ruling."
+			opening = "Jev, the decision maker for the owner, ruled on your question %s. The manager relays the ruling."
 		}
 	}
 	fmt.Fprintf(&b, opening+"\n\n", q.ID)
@@ -76,7 +76,7 @@ func Deliver(ctx context.Context, repository *trace.Repository, q trace.Question
 	}
 	p, err := profile(thread.Identity.Role, thread.Identity.ID)
 	if err != nil {
-		return false, fmt.Errorf("profile of role %s: %w", thread.Identity.Role, err)
+		return false, fmt.Errorf("profile of role %s: %w", trace.DisplayRole(thread.Identity.Role), err)
 	}
 	turn := TurnID(asked.ID)
 	_, err = repository.EnqueueTurn(ctx, trace.TurnRequest{

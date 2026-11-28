@@ -17,6 +17,6 @@ func newMoveFixture(t *testing.T, key string) *moveFixture {
 	c := newContestFixture(t, key)
 	controls := &runtimeControls{}
 	controls.service.Store(c.f.s)
-	scope := intakefixture.ChiefEventScope(c.f.project, c.stream)
+	scope := intakefixture.ManagerEventScope(c.f.project, c.stream)
 	return &moveFixture{contestFixture: c, move: controls.moveUnit(c.repo, scope)}
 }

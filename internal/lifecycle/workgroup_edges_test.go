@@ -110,12 +110,12 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 		if !merged && view.Dependencies[0].BuildBranch == "" {
 			t.Fatal("dependent has no upstream branch or commit to build against")
 		}
-		chief, _, bundleStream, closeChief, err := f.S.Lifecycle().ChiefRepository(ctx, repository, stream)
+		manager, _, bundleStream, closeManager, err := f.S.Lifecycle().ManagerRepository(ctx, repository, stream)
 		fixturekit.Must(t, err)
-		context, err := service.TestChiefContext(ctx, provider, chief, closeChief, repository.Project(), bundleStream)
+		context, err := service.TestManagerContext(ctx, provider, manager, closeManager, repository.Project(), bundleStream)
 		fixturekit.Must(t, err)
 		if !strings.Contains(context, "Use the upstream interface.") || !strings.Contains(context, "Downstream depends on upstream.") || !strings.Contains(context, "source: "+trace.ProjectSpecsPath+" (record "+trace.ProjectSpecsDocument) {
-			t.Fatal("shared chief lost the ratified project contract")
+			t.Fatal("shared manager lost the ratified project contract")
 		}
 	}
 	assertContext(false)
@@ -369,7 +369,7 @@ func exerciseReadyDependentBaseGap(t *testing.T, p *journey.PublicationFixture, 
 		t.Fatalf("later maintenance gap: %+v reason %q state %s", report, reason, p.Feature(t))
 	}
 	if body := intakefixture.NoticeOf(t, repo, stream, fmt.Sprintf("final-review-%d-reviewed", in.Review)); !strings.Contains(body, "move the workstream to building with move_workstream") {
-		t.Fatalf("the chief heard %q", body)
+		t.Fatalf("the manager heard %q", body)
 	}
 	after, err := followup.Read(repo, stream)
 	fixturekit.Must(t, err)

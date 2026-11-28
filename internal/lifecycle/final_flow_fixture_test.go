@@ -355,7 +355,7 @@ func (j *flowJourney) loadMissingNotices(t *testing.T, review, push int) int {
 	fixturekit.Must(t, err)
 	n := 0
 	for _, e := range entries {
-		if e.Event.ID == trace.EventID(fmt.Sprintf("final-checks-%d-push-%d-load-missing", review, push), "chief") {
+		if e.Event.ID == trace.EventID(fmt.Sprintf("final-checks-%d-push-%d-load-missing", review, push), trace.ManagerKey) {
 			n++
 		}
 	}
@@ -371,5 +371,5 @@ func (j *flowJourney) feature(t *testing.T) string {
 
 func (j *flowJourney) awaitHeard(t *testing.T, text string) {
 	t.Helper()
-	intakefixture.Eventually(t, "the chief of staff never heard "+text, func() bool { return j.chief.heardOf(text) > 0 })
+	intakefixture.Eventually(t, "the manager never heard "+text, func() bool { return j.manager.heardOf(text) > 0 })
 }

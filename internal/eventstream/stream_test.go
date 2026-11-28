@@ -37,12 +37,12 @@ func TestTraceCommitsAnnounceTheirViews(t *testing.T) {
 		want   []api.Event
 	}{
 		{"status", trace.Commit{Paths: []string{prefix + "status.jsonl"}}, []api.Event{ws}},
-		{"question", trace.Commit{Paths: []string{prefix + "questions/1/question.jsonl", prefix + "questions/1/rulings.jsonl", wf}, Workflow: &trace.WorkflowChange{Threads: []string{trace.ChiefOfStaff}}}, []api.Event{ws, inbox, chat}},
+		{"question", trace.Commit{Paths: []string{prefix + "questions/1/question.jsonl", prefix + "questions/1/rulings.jsonl", wf}, Workflow: &trace.WorkflowChange{Threads: []string{trace.Manager}}}, []api.Event{ws, inbox, chat}},
 		{"another thread", trace.Commit{Paths: []string{wf}, Workflow: &trace.WorkflowChange{Threads: []string{"agent_mason"}}}, []api.Event{ws}},
-		{"chief thread", trace.Commit{Paths: []string{wf}, Workflow: &trace.WorkflowChange{Threads: []string{"agent_mason", trace.ChiefOfStaff}}}, []api.Event{ws, chat}},
+		{"manager thread", trace.Commit{Paths: []string{wf}, Workflow: &trace.WorkflowChange{Threads: []string{"agent_mason", trace.Manager}}}, []api.Event{ws, chat}},
 		{"deliveries", trace.Commit{Paths: []string{wf}, Workflow: &trace.WorkflowChange{Deliveries: true}}, []api.Event{ws, inbox}},
 		{"transactions only", trace.Commit{Paths: []string{wf}, Workflow: &trace.WorkflowChange{}}, []api.Event{ws}},
-		{"chief log", trace.Commit{Paths: []string{prefix + "agents/" + trace.ChiefOfStaff + "/log.jsonl", prefix + "agents/agent_mason/log.jsonl"}}, []api.Event{ws, chat}},
+		{"manager log", trace.Commit{Paths: []string{prefix + "agents/" + trace.Manager + "/log.jsonl", prefix + "agents/agent_mason/log.jsonl"}}, []api.Event{ws, chat}},
 		{"feature transition", trace.Commit{Paths: []string{prefix + "events.jsonl"}}, []api.Event{ws, inbox}},
 		{"packet", trace.Commit{Paths: []string{prefix + "documents.jsonl"}}, []api.Event{ws, inbox}},
 		{"climb running state", trace.Commit{Paths: []string{prefix + "documents.jsonl", prefix + "climb/running.json"}}, []api.Event{ws, inbox, {Kind: api.EventClimbPhase, Project: project, Workstream: stream}}},

@@ -166,15 +166,15 @@ func TestImageBytesNeverAppearInTheFeedEventsOrConfiguration(t *testing.T) {
 }
 
 type groupImage struct {
-	s      *Service
-	chief  *trace.Repository
-	g      trace.Workgroup
-	repo   *trace.Repository
-	member config.WorkstreamID
-	host   config.WorkstreamID
-	header trace.Header
-	image  trace.Image
-	data   []byte
+	s       *Service
+	manager *trace.Repository
+	g       trace.Workgroup
+	repo    *trace.Repository
+	member  config.WorkstreamID
+	host    config.WorkstreamID
+	header  trace.Header
+	image   trace.Image
+	data    []byte
 }
 
 func eachGroupKind(t *testing.T, check func(t *testing.T, cross bool)) {
@@ -185,7 +185,7 @@ func eachGroupKind(t *testing.T, check func(t *testing.T, cross bool)) {
 
 func newGroupImage(t *testing.T, cross bool) *groupImage {
 	t.Helper()
-	s, chief, g := workgroupFeedFixture(t, cross, 2)
+	s, manager, g := workgroupFeedFixture(t, cross, 2)
 	ctx := context.Background()
 	member := fixturekit.Quiet
 	repo := s.projects[len(s.projects)-1].repository
@@ -193,14 +193,14 @@ func newGroupImage(t *testing.T, cross bool) *groupImage {
 	h := trace.Header{Project: repo.Project(), Workstream: member, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "preview"}
 	v, err := repo.RecordImage(ctx, h, "preview", "image/png", data, "turn")
 	fixturekit.Must(t, err)
-	host, err := chief.ChiefOfStaffHost(g.Members[0])
+	host, err := manager.ManagerHost(g.Members[0])
 	fixturekit.Must(t, err)
-	h.Project, h.Workstream = chief.Project(), host
+	h.Project, h.Workstream = manager.Project(), host
 	for range 2 {
-		_, err = chief.PublishImageReference(ctx, h, member, v.ID, "turn")
+		_, err = manager.PublishImageReference(ctx, h, member, v.ID, "turn")
 		fixturekit.Must(t, err)
 	}
-	return &groupImage{s: s, chief: chief, g: g, repo: repo, member: member, host: host, header: h, image: v, data: data}
+	return &groupImage{s: s, manager: manager, g: g, repo: repo, member: member, host: host, header: h, image: v, data: data}
 }
 
 func (i *groupImage) feedImages(t *testing.T) []FeedEntry {
@@ -223,8 +223,8 @@ func (i *groupImage) archiveMember(t *testing.T, cross bool) runtime.Archive {
 	ctx := context.Background()
 	if cross {
 		pins := []trace.GroupMemberApproval{{Project: i.s.projects[0].id, Workstream: fixturekit.Stream}, {Project: i.repo.Project(), Workstream: i.member}}
-		fixturekit.Must(t, trace.RecordGroupApproval(ctx, i.chief, i.g.Members[0], trace.GroupApproval{Workgroup: i.g.ID, Members: pins, Complete: true}, fixturekit.DemoStart, ownerActor))
-		fixturekit.Must(t, i.chief.PreserveMemberQuestions(ctx, i.g, trace.CrossRepoMember{Workstream: i.member, Project: i.repo}, fixturekit.DemoStart, serviceActor))
+		fixturekit.Must(t, trace.RecordGroupApproval(ctx, i.manager, i.g.Members[0], trace.GroupApproval{Workgroup: i.g.ID, Members: pins, Complete: true}, fixturekit.DemoStart, ownerActor))
+		fixturekit.Must(t, i.manager.PreserveMemberQuestions(ctx, i.g, trace.CrossRepoMember{Workstream: i.member, Project: i.repo}, fixturekit.DemoStart, serviceActor))
 	}
 	a := runtime.Archive{Project: i.repo.Project(), Workstream: i.member, Workgroup: i.g.ID, State: AbandonedState, Title: "member", Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: fixturekit.DemoStart, CleanupStartedAt: fixturekit.DemoStart, CleanedAt: fixturekit.DemoStart}
 	fixturekit.Must(t, i.s.store.SetArchived(a))
@@ -251,7 +251,7 @@ func TestWorkgroupFeedShowsAMembersImageOnceWithItsAttributionAndURL(t *testing.
 func TestPublishingAnImageReferenceTwiceKeepsOneReference(t *testing.T) {
 	eachGroupKind(t, func(t *testing.T, cross bool) {
 		i := newGroupImage(t, cross)
-		refs, err := trace.Read[trace.ImageReference](i.chief, i.host)
+		refs, err := trace.Read[trace.ImageReference](i.manager, i.host)
 		fixturekit.Must(t, err)
 		if len(refs) != 1 {
 			t.Fatalf("refs %d", len(refs))
@@ -261,12 +261,12 @@ func TestPublishingAnImageReferenceTwiceKeepsOneReference(t *testing.T) {
 
 func TestACrossProjectWorkgroupHoldsNoImageBytes(t *testing.T) {
 	i := newGroupImage(t, true)
-	images, err := trace.Read[trace.Image](i.chief, i.host)
+	images, err := trace.Read[trace.Image](i.manager, i.host)
 	fixturekit.Must(t, err)
 	if len(images) != 0 {
 		t.Fatal("bytes in group")
 	}
-	if _, err = i.chief.RecordImage(context.Background(), i.header, "forbidden", "image/png", i.data, "turn"); err == nil {
+	if _, err = i.manager.RecordImage(context.Background(), i.header, "forbidden", "image/png", i.data, "turn"); err == nil {
 		t.Fatal("group accepted bytes")
 	}
 }

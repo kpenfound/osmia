@@ -40,7 +40,7 @@ func Unbounded(role string, used int, waiting []api.SlotWait) api.RoleCapacity {
 }
 
 // CapacityWire checks the JSON a service serialized for its capacity view
-// (the "capacity" member of the chief's capacity tool result or of
+// (the "capacity" member of the manager's capacity tool result or of
 // /v1/status) and returns the decoded pool entries in order. The pools
 // bounded factory-wide carry a numeric limit; the architect carries
 // none, says in words that it has no factory-wide limit, runs at most one
@@ -95,7 +95,7 @@ func CapacityWire(t *testing.T, raw []byte) []map[string]any {
 			t.Fatalf("%s entry has no waiting list: %v", role, r)
 		}
 	}
-	if got, want := strings.Join(order, ","), "mason,reviewer,committee,architect,checks,chief"; got != want {
+	if got, want := strings.Join(order, ","), "mason,reviewer,committee,architect,checks,manager"; got != want {
 		t.Fatalf("capacity pool order %s, want %s", got, want)
 	}
 	return doc.Capacity.Roles

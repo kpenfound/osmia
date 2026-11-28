@@ -64,7 +64,7 @@ func TestDesignProductionLifecycleResolverAcrossArchiveCleanup(t *testing.T) {
 	f.AwaitApproved(t)
 	right, err := f.S.Repository(f.Project2)
 	fixturekit.Must(t, err)
-	target, host, _, closeTarget, err := f.S.Lifecycle().ChiefRepository(ctx, right, f.Stream2)
+	target, host, _, closeTarget, err := f.S.Lifecycle().ManagerRepository(ctx, right, f.Stream2)
 	fixturekit.Must(t, err)
 	defer func() { closeTarget() }()
 	groups, _, err := trace.Workgroups(target)
@@ -81,7 +81,7 @@ func TestDesignProductionLifecycleResolverAcrossArchiveCleanup(t *testing.T) {
 	f.Engine.Mu.Lock()
 	f.Engine.Turns["resolver-survivor-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "survivor-after-resolver-cleanup"})
-		return intakefixture.QuestionResult(req, "session-worker", "Asked the original chief."), err
+		return intakefixture.QuestionResult(req, "session-worker", "Asked the original manager."), err
 	}
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		names, err := intakefixture.ToolNames(ctx, tools)
@@ -105,7 +105,7 @@ func TestDesignProductionLifecycleResolverAcrossArchiveCleanup(t *testing.T) {
 			}
 		}
 		_, err = fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Keep the contract.", "note": "Shared authority remains available.", "agents": []string{}})
-		return intakefixture.QuestionResult(req, "session-chief", "Read original authority."), err
+		return intakefixture.QuestionResult(req, "session-manager", "Read original authority."), err
 	}
 	f.Engine.Mu.Unlock()
 	_, err = f.C.Abandon(ctx, f.Stream1, "The owner cancelled the source member.")
@@ -145,7 +145,7 @@ func TestDesignProductionLifecycleResolverAcrossArchiveCleanup(t *testing.T) {
 		t.Helper()
 		right, err := f.S.Repository(f.Project2)
 		fixturekit.Must(t, err)
-		current, currentHost, _, closeCurrent, err := f.S.Lifecycle().ChiefRepository(ctx, right, f.Stream2)
+		current, currentHost, _, closeCurrent, err := f.S.Lifecycle().ManagerRepository(ctx, right, f.Stream2)
 		fixturekit.Must(t, err)
 		defer closeCurrent()
 		ids, rev, err := trace.ResolvedWorkgroups(current)
@@ -160,9 +160,9 @@ func TestDesignProductionLifecycleResolverAcrossArchiveCleanup(t *testing.T) {
 		if !found || !intakefixture.EqualJSONTest(got, approval) || !intakefixture.EqualJSONTest(doc, approvalDoc) {
 			t.Fatal("resolver transition changed effective approval pins")
 		}
-		chief, err := current.Thread(host, trace.ChiefOfStaff)
+		manager, err := current.Thread(host, trace.Manager)
 		fixturekit.Must(t, err)
-		if !intakefixture.EqualJSONTest(chief.Identity, f.Before.Identity) || !intakefixture.EqualJSONTest(chief.Turns[:len(f.Before.Turns)], f.Before.Turns) {
+		if !intakefixture.EqualJSONTest(manager.Identity, f.Before.Identity) || !intakefixture.EqualJSONTest(manager.Turns[:len(f.Before.Turns)], f.Before.Turns) {
 			t.Fatal("resolver transition replaced adopted conversation history")
 		}
 		spec, _, _, err := right.CrossRepoProjectSpec(group.ID)
@@ -194,7 +194,7 @@ func TestDesignProductionLifecycleResolverAcrossArchiveCleanup(t *testing.T) {
 		}
 		outbox, err := right.Outbox(f.Stream2)
 		fixturekit.Must(t, err)
-		chief, err := target.Thread(host, trace.ChiefOfStaff)
+		manager, err := target.Thread(host, trace.Manager)
 		fixturekit.Must(t, err)
 		for _, e := range outbox {
 			if e.Event.Operation != nil || !strings.Contains(e.Event.Body, "survivor-after-resolver-cleanup") {
@@ -213,7 +213,7 @@ func TestDesignProductionLifecycleResolverAcrossArchiveCleanup(t *testing.T) {
 					claims[events.TurnID(action.Token)] = true
 				}
 			}
-			for _, turn := range chief.Turns {
+			for _, turn := range manager.Turns {
 				if claims[turn.Request.TurnID] && !turn.CompletedAt.IsZero() && turn.Status() == "idle" {
 					deliveries++
 				}

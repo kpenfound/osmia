@@ -12,7 +12,7 @@ import (
 )
 
 // KindUnrecognisedSubject is the workflow subject that records the one notice
-// a workstream of an unregistered kind raises to its chief of staff.
+// a workstream of an unregistered kind raises to its manager.
 const KindUnrecognisedSubject = "workstream-kind"
 
 // KindUnrecognisedTransition identifies that notice's transition.
@@ -40,14 +40,14 @@ func KindRunnable(repository *trace.Repository, stream config.WorkstreamID) (boo
 
 // ObservedWorkstreams lists the workstreams that are not sessions, whatever
 // their kind: the workstreams whose records are read, accounted and told to
-// their chief of staff. NonSessionWorkstreams lists the subset that moves work
+// their manager. NonSessionWorkstreams lists the subset that moves work
 // and that waits when its kind is not registered.
 func ObservedWorkstreams(repo *trace.Repository) ([]config.WorkstreamID, error) {
 	return discoverWorkstreams(repo, nil, nil, true)
 }
 
 // KindUnrecognisedBody is the notice a workstream of an unregistered kind
-// raises to its chief of staff.
+// raises to its manager.
 func KindUnrecognisedBody(stored string) string {
 	return fmt.Sprintf("This workstream's kind %q is not registered by this build, so it waits and no work moves on it. It is never run as another kind. Registered kinds: %s. Run it with a build that registers its kind.", stored, strings.Join(kinds.Names(), ", "))
 }

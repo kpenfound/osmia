@@ -504,7 +504,7 @@ func assertFrozenSliceRefusal(t *testing.T, f *journey.ProductionDesignFixture, 
 	}
 	repo, err := f.S.Repository(project)
 	fixturekit.Must(t, err)
-	wt, host, _, closeAuthority, err := f.S.Lifecycle().ChiefRepository(context.Background(), repo, survivor)
+	wt, host, _, closeAuthority, err := f.S.Lifecycle().ManagerRepository(context.Background(), repo, survivor)
 	fixturekit.Must(t, err)
 	defer closeAuthority()
 	th, err := wt.Thread(host, intake.ArchitectAgent)

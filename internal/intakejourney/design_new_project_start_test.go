@@ -58,7 +58,7 @@ func newNewProjectStartFixture(t *testing.T, creation bool) *newProjectStart {
 	f.remote, f.readme = servicetest.SeedRemote(t, dir, "gadget", "main")
 	f.github.Remote = func(string) string { return f.remote }
 	opts.Repositories = f.github.Client()
-	text := "[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.designer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
+	text := "[roles.manager]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.designer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
 	if creation {
 		text += fmt.Sprintf("[projects]\nrepo_owner = \"owner\"\nclone_dir = %q\n", f.cloneDir)
 	}
@@ -343,16 +343,16 @@ func TestNewProjectStartCreatesTheProjectAndAllocatesIt(t *testing.T) {
 	}
 
 	r := f.homeRepository(t)
-	chief, host, _, release, err := f.s.ChiefRepository(ctx, r, stream)
+	manager, host, _, release, err := f.s.ManagerRepository(ctx, r, stream)
 	fixturekit.Must(t, err)
 	defer release()
-	if _, shared := trace.WorkgroupProjectID(chief.Project()); !shared {
-		t.Fatalf("the conversation stayed in %s", chief.Project())
+	if _, shared := trace.WorkgroupProjectID(manager.Project()); !shared {
+		t.Fatalf("the conversation stayed in %s", manager.Project())
 	}
-	if _, err := chief.Thread(host, trace.ChiefOfStaff); err != nil {
-		t.Fatalf("the workgroup holds no chief of staff thread: %v", err)
+	if _, err := manager.Thread(host, trace.Manager); err != nil {
+		t.Fatalf("the workgroup holds no manager thread: %v", err)
 	}
-	if _, err := r.Thread(stream, trace.ChiefOfStaff); !errors.Is(err, os.ErrNotExist) {
+	if _, err := r.Thread(stream, trace.Manager); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the host project keeps the conversation: %v", err)
 	}
 	streams, err := r.Workstreams()

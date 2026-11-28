@@ -41,7 +41,7 @@ func (s *Controller) RecordMerge(ctx context.Context, raw string) (MergeResponse
 // and changes nothing, so fast-forward, merge, squash and rebase merges
 // count. Nothing is pushed and no pull request is opened. One
 // commit records final/merge.json, the move to delivered with a notice for
-// the chief of staff, and the refusal of a publication that waits for a
+// the manager, and the refusal of a publication that waits for a
 // GitHub token. While this service could still carry out a requested
 // publication, the merge is refused until the publication has an outcome.
 func (s *Controller) MergedOutside(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (MergeResponse, *APIError) {

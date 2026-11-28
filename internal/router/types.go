@@ -124,15 +124,15 @@ const (
 	// AuthorityJevGate is one of Jev's existing gate decisions. The exit is a
 	// pinned move.
 	AuthorityJevGate = trace.DecidedByJevGate
-	// AuthorityChief is a move or ruling of the chief of staff, which works
+	// AuthorityManager is a move or ruling of the manager, which works
 	// outside the loop. The exit is a pinned move for every target but an
 	// owner gate and approval, which it never authorises.
-	AuthorityChief = trace.DecidedByChief
+	AuthorityManager = trace.DecidedByManager
 )
 
 // Authority is the authority an exit carries. Only a reviewer verdict, the
 // owner or one of Jev's existing gate decisions authorise a reserved target; a
-// chief of staff's move pins any other target, and a decide-transition answer
+// manager's move pins any other target, and a decide-transition answer
 // carries none.
 type Authority struct {
 	Kind string
@@ -152,7 +152,7 @@ type Authority struct {
 }
 
 func (a *Authority) pinned() bool {
-	return a != nil && (a.Kind == AuthorityOwner || a.Kind == AuthorityJevGate || a.Kind == AuthorityChief)
+	return a != nil && (a.Kind == AuthorityOwner || a.Kind == AuthorityJevGate || a.Kind == AuthorityManager)
 }
 
 // Entry is one record of an exit's evidence: the kind of record, its ID and
@@ -221,11 +221,11 @@ type Exit struct {
 	HeaderCause string
 	// Actor is who the transition is attributed to.
 	Actor trace.Actor
-	// Note and Turn are the words of the owner or the chief of staff behind a
+	// Note and Turn are the words of the owner or the manager behind a
 	// move and the turn that made it; the target's effect records them.
 	Note string
 	Turn string
-	// Proposed is the target a proposal of the chief of staff asks for, which
+	// Proposed is the target a proposal of the manager asks for, which
 	// may differ from the default when a policy sets the default to leave the
 	// subject where it is. It is recorded, so a proposal recovered after a
 	// restart is rebuilt with the target that was asked for.
@@ -325,7 +325,7 @@ func (x Exit) validate() error {
 	}
 	if a := x.Authority; a != nil {
 		switch {
-		case a.Kind != AuthorityReviewer && a.Kind != AuthorityOwner && a.Kind != AuthorityJevGate && a.Kind != AuthorityChief:
+		case a.Kind != AuthorityReviewer && a.Kind != AuthorityOwner && a.Kind != AuthorityJevGate && a.Kind != AuthorityManager:
 			return fmt.Errorf("%q is not an authority", a.Kind)
 		case !seen[a.Target]:
 			return fmt.Errorf("the authorised target %q is not among the targets", a.Target)

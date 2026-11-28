@@ -21,8 +21,8 @@ var MigrationActor = trace.Actor{Kind: "service", ID: "osmia"}
 var EnsureWorkgroupsInterrupt func(config.ProjectID) error
 
 // EnsureWorkgroups wraps every non-session workstream of each project that is
-// in no workgroup in its own one-workstream workgroup, whose chief of staff is
-// the workstream's existing chief-of-staff thread. It runs on every start
+// in no workgroup in its own one-workstream workgroup, whose manager is
+// the workstream's existing manager thread. It runs on every start
 // before the project schedules work, and is resumable and idempotent. A
 // workstream that already belongs to a recorded workgroup, including a
 // cross-repo workgroup recorded in another project's trace, is left alone.

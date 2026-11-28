@@ -395,7 +395,7 @@ func notificationBody(project config.ProjectID, e InboxEntry, link string) strin
 		opening = "Osmia holds a drift rebase for you."
 	}
 	if e.Kind == InboxNotices {
-		opening = "Osmia cannot reach the chief of staff."
+		opening = "Osmia cannot reach the manager."
 	}
 	if e.Kind == InboxLoop {
 		opening = "Osmia paused a workstream that is not making progress."

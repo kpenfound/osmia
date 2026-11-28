@@ -482,7 +482,7 @@ func TestIncompleteChecksHoldTheUnitAndRunAgain(t *testing.T) {
 		return e.TransitionID == CheckDocumentID("resume", 1)+"-incomplete" && e.Event.Kind == trace.NoticeKind
 	})
 	if i < 0 || !strings.Contains(outbox[i].Event.Body, "held in checking") || !strings.Contains(outbox[i].Event.Body, "engine unreachable") {
-		t.Fatalf("chief notices %+v", outbox)
+		t.Fatalf("manager notices %+v", outbox)
 	}
 
 	runChecks(t, f.s, repository, stream)
@@ -711,7 +711,7 @@ func TestUnitReviewSystemPromptCarriesTheProtocol(t *testing.T) {
 		"Test passing is decided by the service-owned check gate",
 		"read-only", "workstream_diff",
 		"factory_context", "record_discovery",
-		"ask puts a question to the chief of staff when a decision is needed", "review resumes when the answer arrives",
+		"ask puts a question to the manager when a decision is needed", "review resumes when the answer arrives",
 		"verdict records your decision",
 	})
 }

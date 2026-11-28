@@ -104,7 +104,7 @@ const (
 )
 
 // BlockingFinding is one thing that stops a reviewed report from authorising
-// delivery on its own, named so the chief of staff can triage it: a sealed
+// delivery on its own, named so the manager can triage it: a sealed
 // criterion no merged unit serves, or a finding the reader called blocking.
 type BlockingFinding struct {
 	// ID names the finding within its final review: "gap-<criterion>" for an
@@ -660,7 +660,7 @@ func (a *FinalReviewer) Inspect(ctx context.Context, op coreadapter.Operation) (
 // the charter in a read-only view and records evidence or a gap for every
 // sealed criterion.
 // One commit records final/report.json with the review's move to reviewed or
-// failed and a notice for the chief of staff. A review whose inputs changed,
+// failed and a notice for the manager. A review whose inputs changed,
 // whose replay conflicted, or whose reader recorded no report fails with the
 // reason in its report. Storage, fetch and Git errors, a missing committee
 // runner and a pause covering the workstream leave the operation pending for
@@ -1374,7 +1374,7 @@ func (a *FinalReviewer) Stage(ctx context.Context, cfg *config.Config, stream co
 }
 
 // Record commits the next revision of final/report.json with the review's
-// move to reviewed or failed and a notice for the chief of staff, and
+// move to reviewed or failed and a notice for the manager, and
 // returns the review's result. A review already recorded returns its result
 // and records nothing more.
 func (a *FinalReviewer) Record(ctx context.Context, stream config.WorkstreamID, report FinalReport) (coreadapter.OperationResult, error) {
@@ -1436,7 +1436,7 @@ func (a *FinalReviewer) Record(ctx context.Context, stream config.WorkstreamID, 
 	plain := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: at, Actor: FinalReviewActor, Cause: report.Operation},
 			Subject: FinalReviewSubject, From: state.Value, To: fmt.Sprintf("%s-%d", report.Outcome, report.Review), Reason: reason},
-		Events: []trace.Event{trace.Notice(id, "chief", body)}}
+		Events: []trace.Event{trace.Notice(id, trace.ManagerKey, body)}}
 	documents := []trace.Document{doc}
 	if measure, ok := a.finalMeasure(stream, report); ok {
 		documents = append(documents, measure)
@@ -1500,7 +1500,7 @@ func CountSeverity(findings []FinalFinding, severity string) int {
 	return n
 }
 
-// FinalReviewNotice is what the chief of staff hears of a reviewed final
+// FinalReviewNotice is what the manager hears of a reviewed final
 // report: what blocks delivery, what is advisory, and what to do about it.
 // rounds counts the workstream's final reviews with blocking problems,
 // this one included, and edgePending says a delivered workstream's
@@ -1535,14 +1535,14 @@ func FinalReviewNotice(report FinalReport, blocking []string, rounds int, edgePe
 	return b.String()
 }
 
-// BriefNotice is what the chief of staff is told, with a reviewed final
+// BriefNotice is what the manager is told, with a reviewed final
 // report, about recording its delivery brief: the review number and report
 // revision to name, the brief's content, proof, deployment checklist and
 // limits, and what to do when the owner pushes back. revision is the report
 // document's revision.
 func BriefNotice(report FinalReport, revision int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Delivery brief: the owner reads a short brief before deciding delivery, and the delivery card waits for it. Record it with %s, naming review %d and review_revision %d, which are the review you read here; name the workstream too when you share a chief of staff. The brief answers one question: does what was built match what the owner asked for? It is not a summary of the final review and does not point to it.", BriefToolName, report.Review, revision)
+	fmt.Fprintf(&b, "Delivery brief: the owner reads a short brief before deciding delivery, and the delivery card waits for it. Record it with %s, naming review %d and review_revision %d, which are the review you read here; name the workstream too when you share a manager. The brief answers one question: does what was built match what the owner asked for? It is not a summary of the final review and does not point to it.", BriefToolName, report.Review, revision)
 	fmt.Fprintf(&b, "\nContent of text, in this order: (1) how the approved intent shows up in the product, as a user or API caller sees it, functional changes only; (2) at most one line on how it was implemented; (3) a short note on anything that departs from the intent or covers it only in part, if there is any. Never list tests, test names, files or commits. text is at most %d characters.", MaxBriefText)
 	fmt.Fprintf(&b, "\nProof: when the change is visible (a UI), take screenshots with preview of the exact commit this review read, %s, which is the feature branch head, so leave unit unset; pass at most %d of their image_id values in screenshots. Screenshots do not count toward the text limit. For API, CLI-only and other changes that cannot be seen, text alone is enough. When the app cannot be run for a screenshot, or a capture of a visible change fails, say so in one line of text.", report.Commit, MaxBriefScreenshots)
 	fmt.Fprintf(&b, "\nBefore you ship: on every delivery, check the changes at %s for what must be done to deploy them, and pass before_you_ship only when you find any of: new, renamed or removed secrets and environment variables; new required config keys, deprecated or removed keys, and changed defaults that change behaviour; data or state migrations, especially one-way ones that make rollback unsafe; new external services, ports or token permissions; manual steps such as a restart or a re-login; breaking changes for API or CLI callers. Optional new keys with safe defaults are left out unless they change default behaviour. Give one short line per item, at most %d characters in total, and omit before_you_ship when you find nothing.", report.Commit, MaxBriefItems)
@@ -1639,9 +1639,9 @@ func (a *FinalReviewer) FinalMoveNote(repository *trace.Repository, stream confi
 	}
 	m := moves[n-1]
 	if m.From == m.To {
-		return fmt.Sprintf("The %s asked for this review with this note: %s", m.By, m.Note), nil
+		return fmt.Sprintf("The %s asked for this review with this note: %s", trace.DisplayRuler(m.By), m.Note), nil
 	}
-	return fmt.Sprintf("The %s moved the workstream from %s to %s, which asked for this review, with this note: %s", m.By, m.From, m.To, m.Note), nil
+	return fmt.Sprintf("The %s moved the workstream from %s to %s, which asked for this review, with this note: %s", trace.DisplayRuler(m.By), m.From, m.To, m.Note), nil
 }
 
 // PreviousFinalReport returns the latest reviewed report of a final review
@@ -1864,10 +1864,10 @@ Every planned unit has landed on the feature branch after its own reviewer verif
 - The branch was rebased onto upstream: changes a rebase or a drift resolution needed so that both upstream's behaviour and the feature's stand are part of the feature branch whatever the sealed spec, plan or unit footprints name, and upstream's own changes are not the feature's. Neither is a finding on its own; judge them only where they break the feature or fail a criterion.
 
 ## Your part of the state machine
-The final review runs once the last unit has landed. The chief of staff triages each blocking finding of your report, and the owner decides whether the work is delivered; advisory findings are noted for the owner to read.
+The final review runs once the last unit has landed. The manager triages each blocking finding of your report, and the owner decides whether the work is delivered; advisory findings are noted for the owner to read.
 
 ## Output format
-One report recorded with %[3]s: a summary and your findings. A finding is blocking only when the feature as a whole fails the spec's intent or breaks a charter rule, because the chief of staff must triage every blocking finding; anything else worth the owner's attention is advisory. Report nothing you cannot point at in the branch, so that the owner can check each finding.
+One report recorded with %[3]s: a summary and your findings. A finding is blocking only when the feature as a whole fails the spec's intent or breaks a charter rule, because the manager must triage every blocking finding; anything else worth the owner's attention is advisory. Report nothing you cannot point at in the branch, so that the owner can check each finding.
 
 ## When you are done
 You are done when %[3]s has recorded your report, with an empty findings list when there are none. End your turn then.`, p.Name, p.Upstream, FinalReportTool, finalCheckReviewInstructions)

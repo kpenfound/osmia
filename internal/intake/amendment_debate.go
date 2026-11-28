@@ -113,6 +113,36 @@ func RoundRecords(records []shed.Record, round int) []shed.Record {
 	return out
 }
 
+type amendmentPacket struct {
+	Round          int             `json:"round"`
+	Request        trace.Amendment `json:"request"`
+	Spec           string          `json:"spec"`
+	Plan           string          `json:"plan"`
+	Affected       json.RawMessage `json:"affected"`
+	Dissent        []shed.Entry    `json:"dissent"`
+	Reply          json.RawMessage `json:"reply"`
+	Recommendation string          `json:"recommendation"`
+}
+
+func shownPacket(content string) json.RawMessage {
+	stored := json.RawMessage(content)
+	var packet amendmentPacket
+	if json.Unmarshal(stored, &packet) != nil {
+		return stored
+	}
+	r := &packet.Request
+	if !slices.Contains([]string{r.Role, r.Thread, r.Requester.ID, r.Actor.ID}, trace.Manager) {
+		return stored
+	}
+	r.Role, r.Thread = trace.DisplayRole(r.Role), trace.DisplayRole(r.Thread)
+	r.Requester, r.Actor = r.Requester.Display(), r.Actor.Display()
+	shown, err := json.MarshalIndent(packet, "", "  ")
+	if err != nil {
+		return stored
+	}
+	return shown
+}
+
 func AmendmentDissent(records []shed.Record) []shed.Entry {
 	return shed.DissentRecord(records, nil, nil)
 }
@@ -124,14 +154,14 @@ func AmendmentCommitteeSystemPrompt(project config.Project, in RoundInput) strin
 	return fmt.Sprintf(`You are a member of the committee reviewing an amendment to a sealed spec and plan for the %[1]s project (%[2]s).
 
 ## Purpose and setting
-A unit asked for a change to the sealed documents, and the architect drafted the revision. You test the revision before it is applied: the charter's rules are vetoes, and fit, size and acceptance objections are advice. The chief of staff decides plan-only engineering revisions that preserve approved intent; a change to intent requires the owner.
+A unit asked for a change to the sealed documents, and the architect drafted the revision. You test the revision before it is applied: the charter's rules are vetoes, and fit, size and acceptance objections are advice. The manager decides plan-only engineering revisions that preserve approved intent; a change to intent requires the owner.
 
 ## Tools and gates
 - You read; you hold no tool that writes or runs. You contribute only through %[3]s and %[4]s, and every objection cites what it rests on, so the architect and the owner can check it.
 - When your view does not settle something you must know, call %[5]s: the round waits for the answer, which arrives as your next turn.
 
 ## Your part of the state machine
-The amendment is debated in an automatic round, and the owner or the chief of staff may ask for another. The architect answers what stands, and the amendment is then decided.
+The amendment is debated in an automatic round, and the owner or the manager may ask for another. The architect answers what stands, and the amendment is then decided.
 
 ## Output format
 Objections and concessions recorded with %[3]s and %[4]s. Ending your turn without objecting or conceding says you have no new dissent on this revision.
@@ -746,16 +776,7 @@ func (a AmendmentDebate) Present(ctx context.Context, stream config.WorkstreamID
 	}
 	dissent := AmendmentDissent(records)
 	recommendation := AmendmentRecommendation(dissent, records, round < a.S.Current().Shed.MaxRounds)
-	packet := struct {
-		Round          int             `json:"round"`
-		Request        trace.Amendment `json:"request"`
-		Spec           string          `json:"spec"`
-		Plan           string          `json:"plan"`
-		Affected       json.RawMessage `json:"affected"`
-		Dissent        []shed.Entry    `json:"dissent"`
-		Reply          json.RawMessage `json:"reply"`
-		Recommendation string          `json:"recommendation"`
-	}{round, req, spec, graph, json.RawMessage(affected), dissent, json.RawMessage(reply), recommendation}
+	packet := amendmentPacket{round, req, spec, graph, json.RawMessage(affected), dissent, json.RawMessage(reply), recommendation}
 	data, err := json.MarshalIndent(packet, "", "  ")
 	if err != nil {
 		return err

@@ -111,13 +111,13 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 		})
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Project spec delivered", SessionDir: req.SessionDir, NumTurns: 1}, err
 	}
-	chiefTurn := f.Engine.Turns["*"]
+	managerTurn := f.Engine.Turns["*"]
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.Contains(req.Prompt, "Report the shared workgroup goal.") {
 			_, err := fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Ship resumable uploads.", "note": "Both repos share one design.", "agents": []string{}})
-			return intakefixture.QuestionResult(req, "pane-chief-status", "Reported the shared goal."), err
+			return intakefixture.QuestionResult(req, "pane-manager-status", "Reported the shared goal."), err
 		}
-		return chiefTurn(ctx, req, turn, tools)
+		return managerTurn(ctx, req, turn, tools)
 	}
 	f.Engine.Mu.Unlock()
 	p := browsertest.OpenBrowser(t)
@@ -209,7 +209,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 			t.Fatalf("workgroup feed lost the adopted design reply: %+v", shared.Entries)
 		}
 		p.OpenActivity()
-		p.Await("member activity excludes the shared conversation", `document.querySelector('#workstream-activity [data-kind="transition"]') !== null && !document.querySelector('#workstream-activity [data-kind="message"], #workstream-activity [data-kind="response"], #workstream-activity [data-kind="status"], #workstream-activity [data-kind="action"], #workstream-activity [data-kind="session"][data-role="chief_of_staff"], #workstreams [data-kind="message"], #workstreams [data-kind="response"], #workstreams [data-kind="status"], #workstreams [data-kind="action"]')`)
+		p.Await("member activity excludes the shared conversation", `document.querySelector('#workstream-activity [data-kind="transition"]') !== null && !document.querySelector('#workstream-activity [data-kind="message"], #workstream-activity [data-kind="response"], #workstream-activity [data-kind="status"], #workstream-activity [data-kind="action"], #workstream-activity [data-kind="session"][data-role="manager"], #workstreams [data-kind="message"], #workstreams [data-kind="response"], #workstreams [data-kind="status"], #workstreams [data-kind="action"]')`)
 		p.OpenConversation()
 	}
 	assertSharedDesignConversation()
@@ -250,7 +250,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	f.Engine.Mu.Lock()
 	f.Engine.Turns["pane-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "May the acknowledged offset contract change?"})
-		return intakefixture.QuestionResult(req, "pane-worker", "Asked the chief."), err
+		return intakefixture.QuestionResult(req, "pane-worker", "Asked the manager."), err
 	}
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.Contains(req.Prompt, "Present the shared decision") && escalated.CompareAndSwap(false, true) {
@@ -259,9 +259,9 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 				"rephrasing": "May the acknowledged offset contract change?", "blocked": "Both asking origins.",
 				"options": []string{"Keep", "Change"}, "recommendation": "Keep the contract stable.",
 			})
-			return intakefixture.QuestionResult(req, "pane-chief", "Asked the owner."), err
+			return intakefixture.QuestionResult(req, "pane-manager", "Asked the owner."), err
 		}
-		return intakefixture.QuestionResult(req, "pane-chief", "Following the agreed design."), nil
+		return intakefixture.QuestionResult(req, "pane-manager", "Following the agreed design."), nil
 	}
 	f.Engine.Mu.Unlock()
 	lifecycleWorker(t, f, f.Project, f.Stream1, "worker_first", "pane-ask", "Check the contract.")
@@ -302,7 +302,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	p.Click("#project-home")
 	p.Click(`[data-drilldown="` + string(f.Stream2) + `"]`)
 	p.Await("the member excludes the shared decision and composer", `!document.querySelector('[data-view=workstream]').hidden && !document.querySelector('#workstreams [data-kind=escalation], #workstreams .composer')`)
-	p.Click("#workstream-head [data-ask-chief]")
+	p.Click("#workstream-head [data-ask-manager]")
 	p.AwaitText("#workgroup-content [data-kind=escalation]", "May the acknowledged offset contract change?")
 	p.TypeInto("#workgroup-content [data-kind=escalation] textarea", "Keep the acknowledged offset contract stable.")
 	p.Click("#workgroup-content [data-kind=escalation] button[type=submit]")

@@ -356,7 +356,7 @@ func (p *Publisher) Inspect(_ context.Context, op coreadapter.Operation) (coread
 // and checked. A maintenance retarget instead reconciles the recorded request
 // and updates its base and approved text. One commit then records the opened
 // publication and the operation's outcome. A refusal records the reason and
-// tells the chief of staff. Git, GitHub and storage errors leave the
+// tells the manager. Git, GitHub and storage errors leave the
 // operation pending for another attempt, which inspects the push repository
 // and pull requests again.
 func (p *Publisher) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
@@ -667,7 +667,7 @@ func (p *Publisher) MarkReady(ctx context.Context, stream config.WorkstreamID, o
 }
 
 // DeliverReady records, in one commit, final/ready.json, the workstream's move
-// from assembled to delivered with a notice for the chief of staff, and the
+// from assembled to delivered with a notice for the manager, and the
 // outcome of the approval's operation.
 func (p *Publisher) DeliverReady(ctx context.Context, stream config.WorkstreamID, op coreadapter.Operation, in PublishInput, push Push) (coreadapter.OperationResult, error) {
 	return p.deliverReady(ctx, stream, op, in, push, "")
@@ -848,7 +848,7 @@ func (p *Publisher) RecordPublication(ctx context.Context, stream config.Workstr
 }
 
 // Deliver records, in one commit, the opened publication, the workstream's
-// move from assembled to delivered with a notice for the chief of staff, and
+// move from assembled to delivered with a notice for the manager, and
 // the publication's outcome.
 func (p *Publisher) Deliver(ctx context.Context, stream config.WorkstreamID, in PublishInput, record DeliveryPublication) (coreadapter.OperationResult, error) {
 	return p.deliver(ctx, stream, in, record, "")
@@ -909,7 +909,7 @@ func (p *Publisher) deliver(ctx context.Context, stream config.WorkstreamID, in 
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
 }
 
-// Refuse records why the approval was refused, tells the chief of staff, and
+// Refuse records why the approval was refused, tells the manager, and
 // returns the refusal as the operation's result. The workstream stays
 // assembled; approving again asks for another application.
 func (p *Publisher) Refuse(ctx context.Context, stream config.WorkstreamID, in PublishInput, reason string) (coreadapter.OperationResult, error) {
@@ -928,7 +928,7 @@ func (p *Publisher) refuse(ctx context.Context, stream config.WorkstreamID, in P
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: p.Repository.Project(), Workstream: stream, At: p.S.Now(), Actor: foremanActor, Cause: transition}
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: PublicationSubject, From: state.Value, To: fmt.Sprintf("refused-%d", in.Approval), Reason: recorded},
-		Events:     []trace.Event{trace.Notice(id, "chief", body)}}
+		Events:     []trace.Event{trace.Notice(id, trace.ManagerKey, body)}}
 	if _, err := p.Repository.Transact(ctx, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			if result, outcomeErr := p.Outcome(stream, in.Approval); outcomeErr == nil && result != nil {

@@ -184,7 +184,7 @@ func TestInterruptedReviewQueuesOneContinuation(t *testing.T) {
 	}()
 	masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Built")
 	entered := make(chan struct{})
-	chief := &intakefixture.Chief{P: &intakefixture.Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
+	manager := &intakefixture.Manager{P: &intakefixture.Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	f.Engine.Mu.Lock()
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, intake.ReviewerAgent("resume")+"-review-") {
@@ -192,7 +192,7 @@ func TestInterruptedReviewQueuesOneContinuation(t *testing.T) {
 			<-ctx.Done()
 			return nil, ctx.Err()
 		}
-		return chief.Turn(ctx, req, turn, tools)
+		return manager.Turn(ctx, req, turn, tools)
 	}
 	f.Engine.Mu.Unlock()
 	stream := seedBuilding(f, t, "interrupted-review", intakefixture.IndependentPlan)
@@ -233,7 +233,7 @@ func TestReviewerQuestionResumesSameCandidateAfterOwnerAnswer(t *testing.T) {
 	for _, answerVerdict := range []bool{true, false} {
 		t.Run(fmt.Sprintf("answer-verdict-%t", answerVerdict), func(t *testing.T) {
 			p := &intakefixture.Faults{}
-			f, masons, chief := newAskingMasonFixture(t, 1, intakefixture.IndependentPlan, p)
+			f, masons, manager := newAskingMasonFixture(t, 1, intakefixture.IndependentPlan, p)
 			defer f.Stop(t)
 			masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Built")
 			var reviews atomic.Int32
@@ -269,7 +269,7 @@ func TestReviewerQuestionResumesSameCandidateAfterOwnerAnswer(t *testing.T) {
 					}
 					return &agent.Result{ClaudeID: "asked", ResultText: "Asked", SessionDir: req.SessionDir, NumTurns: 1}, nil
 				}
-				return chief.Turn(ctx, req, turn, tools)
+				return manager.Turn(ctx, req, turn, tools)
 			}
 			f.Engine.Mu.Unlock()
 			f.Answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
@@ -345,7 +345,7 @@ func TestContestedReviewRulingSurvivesRestart(t *testing.T) {
 	defer f.Stop(t)
 	f.S.Cfg.Shed.MaxBounces = 1
 	masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Built")
-	chief := &intakefixture.Chief{P: &intakefixture.Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
+	manager := &intakefixture.Manager{P: &intakefixture.Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	f.Engine.Mu.Lock()
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, intake.ReviewerAgent("resume")+"-review-") {
@@ -355,7 +355,7 @@ func TestContestedReviewRulingSurvivesRestart(t *testing.T) {
 			}
 			return &agent.Result{ClaudeID: "reviewed", ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 		}
-		return chief.Turn(ctx, req, turn, tools)
+		return manager.Turn(ctx, req, turn, tools)
 	}
 	f.Engine.Mu.Unlock()
 	stream := seedBuilding(f, t, "contested", intakefixture.IndependentPlan)
@@ -538,8 +538,8 @@ func TestRepeatedlyInterruptedReviewContestsTheUnit(t *testing.T) {
 		t.Fatalf("the contest %+v", contest)
 	}
 
-	if _, apiErr := f.S.Execution().MoveUnit(ctx, repository, stream, "resume", (api.UnitMoveRequest{To: intake.UnitReviewing, Note: "The service is stable again; review it."}), intake.ChiefActor, ""); apiErr != nil {
-		t.Fatalf("the chief's move: %+v", apiErr)
+	if _, apiErr := f.S.Execution().MoveUnit(ctx, repository, stream, "resume", (api.UnitMoveRequest{To: intake.UnitReviewing, Note: "The service is stable again; review it."}), intake.ManagerActor, ""); apiErr != nil {
+		t.Fatalf("the manager's move: %+v", apiErr)
 	}
 	state, err = repository.Workflow(stream, subject)
 	fixturekit.Must(t, err)

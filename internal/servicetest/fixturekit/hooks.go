@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // HooksPost is one request a fake Hearsay connectors listener received.
@@ -49,7 +51,7 @@ func NewHooksOn(t *testing.T, addr string) *Hooks {
 		if r.Method != http.MethodPost || !strings.HasPrefix(r.URL.Path, "/hooks/") || json.Unmarshal(raw, &post.Body) != nil {
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
-		if post.Body["kind"] == "decision" && !slices.Contains([]string{"owner", "chief_of_staff", "committee"}, post.Str("decider")) {
+		if post.Body["kind"] == "decision" && !slices.Contains([]string{"owner", trace.Manager, "committee"}, post.Str("decider")) {
 			t.Errorf("a decision carries decider %q, which Hearsay's connector contract refuses: %s", post.Str("decider"), raw)
 		}
 		h.mu.Lock()

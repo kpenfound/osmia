@@ -102,14 +102,14 @@ clone = "`+home2+`"
 	}
 	views := filepath.Join(cfg.Root.String(), "views")
 	fixturekit.Must(t, os.Mkdir(views, 0700))
-	agents := map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff, "thread_mason": fixturekit.DemoAgent, "thread_mason2": "agent_mason2", "thread_u1": "agent_u1", "thread_u2": "agent_u2"}
-	every := append([]string{"file_read", questions.AskTool}, questions.ChiefTools...)
+	agents := map[string]string{trace.Manager: trace.Manager, "thread_mason": fixturekit.DemoAgent, "thread_mason2": "agent_mason2", "thread_u1": "agent_u1", "thread_u2": "agent_u2"}
+	every := append([]string{"file_read", questions.AskTool}, questions.ManagerTools...)
 	f.cfg.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		f.mu.Lock()
 		f.live[r.Project()] = r
 		f.mu.Unlock()
 		turns := &isolation.Turns{Workspaces: &fixturekit.DemoWorkspaces{}, Views: isolation.Views{Directory: views}, Engine: f.engine,
-			Grants: map[string]coreadapter.Capabilities{"mason": {Tools: every}, "reviewer": {Tools: every}, trace.ChiefOfStaff: {Tools: every}, trace.Designer: {Tools: every}},
+			Grants: map[string]coreadapter.Capabilities{"mason": {Tools: every}, "reviewer": {Tools: every}, trace.Manager: {Tools: every}, trace.Designer: {Tools: every}},
 			Select: func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			},
@@ -118,7 +118,7 @@ clone = "`+home2+`"
 				if err != nil {
 					return nil, err
 				}
-				if scope.Role == trace.ChiefOfStaff {
+				if scope.Role == trace.Manager {
 					list = jevfixture.AutoDecide(r, config.WorkstreamID(scope.Workstream), list)
 				}
 				return list, nil
@@ -277,9 +277,9 @@ func (f *crossRepoInboxFixture) snapshot(s *journey.Service) (bool, string) {
 			inspect(p.Repository, stream)
 		}
 	}
-	target, host, _, close, err := s.Lifecycle().ChiefRepository(context.Background(), projects[0].Repository, f.stream1)
+	target, host, _, close, err := s.Lifecycle().ManagerRepository(context.Background(), projects[0].Repository, f.stream1)
 	if err != nil {
-		return false, strings.Join(details, "; ") + fmt.Sprintf("; shared chief: %v", err)
+		return false, strings.Join(details, "; ") + fmt.Sprintf("; shared manager: %v", err)
 	}
 	inspect(target, host)
 	close()
@@ -378,7 +378,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			flagMu.Lock()
 			relayed = true
 			flagMu.Unlock()
-			return intakefixture.QuestionResult(req, "session-chief", "Relayed"), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Relayed"), nil
 		case !escalated1 && !escalated2 && strings.Contains(req.Prompt, "asked by the mason: "+question1) && strings.Contains(req.Prompt, "asked by the mason: "+question2):
 			flagMu.Unlock()
 			out, err := fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{string(f.stream1) + ":1", string(f.stream2) + ":1"},
@@ -389,7 +389,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			flagMu.Lock()
 			escalated1, escalated2 = true, true
 			flagMu.Unlock()
-			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Escalated"), nil
 		case !escalatedU1 && strings.Contains(req.Prompt, "asked by the mason: "+questionU1):
 			flagMu.Unlock()
 			out, err := fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{"1"},
@@ -400,7 +400,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			flagMu.Lock()
 			escalatedU1 = true
 			flagMu.Unlock()
-			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Escalated"), nil
 		case !escalatedU2 && strings.Contains(req.Prompt, "asked by the mason: "+questionU2):
 			flagMu.Unlock()
 			out, err := fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{"1"},
@@ -411,14 +411,14 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			flagMu.Lock()
 			escalatedU2 = true
 			flagMu.Unlock()
-			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Escalated"), nil
 		}
 		flagMu.Unlock()
 		if strings.Contains(req.Prompt, "asked by the mason:") || strings.Contains(req.Prompt, "escalation_1") {
-			return intakefixture.QuestionResult(req, "session-chief", "Nothing further"), nil
+			return intakefixture.QuestionResult(req, "session-manager", "Nothing further"), nil
 		}
-		f.problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
-		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
+		f.problem("unexpected manager turn:\n%s", req.Prompt)
+		return intakefixture.QuestionResult(req, "session-manager", "Nothing to do"), nil
 	}
 	f.engine.Turns[questions.TurnID("1")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		return intakefixture.QuestionResult(req, "session-"+req.Name, "Continued"), nil
@@ -600,16 +600,16 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		}{
 			{repo1, f.stream1, fixturekit.DemoAgent}, {repo2, f.stream2, "agent_mason2"},
 			{repo1, unrelatedStream1, "agent_u1"}, {repo2, unrelatedStream2, "agent_u2"},
-			{repo1, unrelatedStream1, trace.ChiefOfStaff}, {repo2, unrelatedStream2, trace.ChiefOfStaff},
+			{repo1, unrelatedStream1, trace.Manager}, {repo2, unrelatedStream2, trace.Manager},
 		} {
 			th, err := m.repo.Thread(m.stream, m.agent)
 			fixturekit.Must(t, err)
 			threads = append(threads, th)
 		}
-		target, host, _, close, err := s.Lifecycle().ChiefRepository(ctx, repo1, f.stream1)
+		target, host, _, close, err := s.Lifecycle().ManagerRepository(ctx, repo1, f.stream1)
 		fixturekit.Must(t, err)
 		defer close()
-		th, err := target.ChiefOfStaffThread(host)
+		th, err := target.ManagerThread(host)
 		fixturekit.Must(t, err)
 		threads = append(threads, th)
 		data, err := json.Marshal(threads)
@@ -634,7 +634,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 	f.waitCompleted(t, s, "completed state after restart")
 	afterThreads := threadsSnapshot()
 	if string(afterThreads) != string(beforeThreads) {
-		t.Fatalf("restart changed durable worker or chief threads: before=%s after=%s", beforeThreads, afterThreads)
+		t.Fatalf("restart changed durable worker or manager threads: before=%s after=%s", beforeThreads, afterThreads)
 	}
 	afterInbox, err := c.Inbox(ctx)
 	fixturekit.Must(t, err)

@@ -129,7 +129,7 @@ func resolutionGroupState(t *testing.T, f *journey.ProductionDesignFixture, want
 		if _, archived := f.S.Lifecycle().ArchivedWorkstream(string(m.stream)); archived {
 			continue
 		}
-		for _, role := range []string{intake.MasonRole, trace.ChiefOfStaff} {
+		for _, role := range []string{intake.MasonRole, trace.Manager} {
 			b, err := f.S.Context().Assemble(ctx, m.project, bundle.Scope{Role: role, Workstream: m.stream})
 			fixturekit.Must(t, err)
 			if (b.ProjectSpec != nil) == wantResolved {
@@ -302,7 +302,7 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 			if after != calls {
 				t.Fatalf("finished own PRs polled after restart: %d -> %d", calls, after)
 			}
-			journey.LifecycleAwait(t, f, "chief of staff archives of the merged members", func() bool {
+			journey.LifecycleAwait(t, f, "manager archives of the merged members", func() bool {
 				for _, m := range resolutionMembers(f) {
 					if a, ok := intakefixture.ArchiveRecord(t, f.S.Store, m.stream); !ok || a.CleanedAt.IsZero() {
 						return false
@@ -313,7 +313,7 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 			resolutionGroupState(t, f, true)
 			for i, m := range resolutionMembers(f) {
 				a, _ := intakefixture.ArchiveRecord(t, f.S.Store, m.stream)
-				if a.Actor != runtime.ArchiveActorChief || !lifecycle.ArchiveResolved(a) || a.ResolutionEvidence != "merged" || a.Publication.PullRequest != publications[i].PullRequest || a.MergeCommit != fmt.Sprintf("merged-%d", i) {
+				if a.Actor != runtime.ArchiveActorManager || !lifecycle.ArchiveResolved(a) || a.ResolutionEvidence != "merged" || a.Publication.PullRequest != publications[i].PullRequest || a.MergeCommit != fmt.Sprintf("merged-%d", i) {
 					t.Fatalf("archive of %s=%+v", m.stream, a)
 				}
 			}

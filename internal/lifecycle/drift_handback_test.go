@@ -35,7 +35,7 @@ func holdDrift(t *testing.T, f *journey.ShedFixture, d journey.Drifter, stream c
 	}
 }
 
-func TestChiefOfStaffHandsAHeldDriftRebaseBack(t *testing.T) {
+func TestManagerHandsAHeldDriftRebaseBack(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, _ := journey.NewFinalFixtureWith(t, "drift-handback", "")
 	f.S.Cfg.Shed.MaxBounces = 1
@@ -71,7 +71,7 @@ func TestChiefOfStaffHandsAHeldDriftRebaseBack(t *testing.T) {
 		t.Fatalf("the inbox lists the drift rebase handed back: %+v %v", decisions, err)
 	}
 	later := f.S.Now().Add(48 * time.Hour)
-	if why, err := fm.DriftDriver().DriftDue(stream, later); err != nil || !strings.HasPrefix(why, "the chief of staff asked for a drift rebase at ") {
+	if why, err := fm.DriftDriver().DriftDue(stream, later); err != nil || !strings.HasPrefix(why, "the manager asked for a drift rebase at ") {
 		t.Fatalf("the handback does not make the workstream due: %q %v", why, err)
 	}
 
@@ -79,7 +79,7 @@ func TestChiefOfStaffHandsAHeldDriftRebaseBack(t *testing.T) {
 	journey.AwaitResolution(t, f.S, d, stream, op, "its mason's resolution")
 	th, err := repository.Thread(stream, intake.DriftMasonAgent)
 	fixturekit.Must(t, err)
-	if resolve := th.Turns[len(th.Turns)-1]; resolve.Request.TurnID != lifecycle.DriftResolveTurnID(2, 1) || !strings.Contains(resolve.Request.Prompt, "Drift rebase 1 was held for the owner, and the chief of staff handed it back with this note, which this drift rebase answers: "+note) {
+	if resolve := th.Turns[len(th.Turns)-1]; resolve.Request.TurnID != lifecycle.DriftResolveTurnID(2, 1) || !strings.Contains(resolve.Request.Prompt, "Drift rebase 1 was held for the owner, and the manager handed it back with this note, which this drift rebase answers: "+note) {
 		t.Fatalf("the resolve turn %s:\n%s", resolve.Request.TurnID, resolve.Request.Prompt)
 	}
 	holdDrift(t, f, d, stream, op, "/internal/ @feature\n")
@@ -96,7 +96,7 @@ func TestChiefOfStaffHandsAHeldDriftRebaseBack(t *testing.T) {
 	if k, err := fm.DriftDriver().AskDrift(ctx, stream, f.S.Now()); err != nil || k != 5 {
 		t.Fatalf("the owner's request answers drift rebase %d: %v", k, err)
 	}
-	if n, err := lifecycle.ChiefHandbacks(repository, stream); err != nil || n != 0 {
-		t.Fatalf("chief handbacks after the owner's request: %d %v", n, err)
+	if n, err := lifecycle.ManagerHandbacks(repository, stream); err != nil || n != 0 {
+		t.Fatalf("manager handbacks after the owner's request: %d %v", n, err)
 	}
 }

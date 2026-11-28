@@ -30,9 +30,9 @@ func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
 	runnerIntent(t, opts)
 	cfg, err := projectstore.LoadConfig(opts.Config)
 	fixturekit.Must(t, err)
-	chief := cfg.Roles[trace.ChiefOfStaff]
-	chief.Sandbox, chief.Image, chief.Skills = "container", "loaded-image", []string{"https://github.com/acme/skills#skills/triage"}
-	cfg.Roles[trace.ChiefOfStaff] = chief
+	manager := cfg.Roles[config.ManagerRole]
+	manager.Sandbox, manager.Image, manager.Skills = "container", "loaded-image", []string{"https://github.com/acme/skills#skills/triage"}
+	cfg.Roles[config.ManagerRole] = manager
 	mason := cfg.Roles[masonRole]
 	mason.Sandbox, mason.Skills = "sbx", []string{"https://github.com/acme/skills#skills/tdd"}
 	cfg.Roles[masonRole] = mason
@@ -54,10 +54,10 @@ func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
 		t.Fatalf("thread clock %v is not UTC", now)
 	}
 	turns := dispatcher.Runner.Turns.(*questions.Turns).Turns.(*verdictTurns).Turns.(*reportingTurns).Turns.(*retriedTurns).Turns.(*isolation.Turns)
-	scope := coreadapter.Scope{Project: string(cfg.Project.ID), Workstream: string(fixturekit.Stream), Role: trace.ChiefOfStaff}
+	scope := coreadapter.Scope{Project: string(cfg.Project.ID), Workstream: string(fixturekit.Stream), Role: trace.Manager}
 	selection, err := turns.Select(context.Background(), scope)
 	fixturekit.Must(t, err)
-	if selection.Execution.Mode != "container" || selection.Execution.Image != "loaded-image" || selection.Execution.Dagger != nil || !slices.Equal(selection.Execution.Skills, chief.Skills) {
+	if selection.Execution.Mode != "container" || selection.Execution.Image != "loaded-image" || selection.Execution.Dagger != nil || !slices.Equal(selection.Execution.Skills, manager.Skills) {
 		t.Fatalf("execution %+v", selection.Execution)
 	}
 	if _, err := turns.Select(context.Background(), coreadapter.Scope{Project: string(cfg.Project.ID), Role: "classifier"}); err == nil {
@@ -97,30 +97,30 @@ func TestSkillCacheFollowsLoadedRefreshPolicy(t *testing.T) {
 }
 
 // Isolation serves a turn only the tools its role's grant names, so the
-// chief of staff's grant names every tool a chief-of-staff turn is given.
-func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
+// manager's grant names every tool a manager turn is given.
+func TestManagerGrantNamesEveryManagerTool(t *testing.T) {
 	t.Parallel()
-	f, stream, repository := newReviewFixture(t, "chief-grant")
-	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "turn"}
-	tools, err := chiefTools(f.s.cfg, repository, &runtimeControls{}, scope, time.Now)
+	f, stream, repository := newReviewFixture(t, "manager-grant")
+	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: "turn"}
+	tools, err := managerTools(f.s.cfg, repository, &runtimeControls{}, scope, time.Now)
 	fixturekit.Must(t, err)
 	tools = append(tools, (&runtimeControls{}).preview(f.s.cfg, repository, scope, previewView(t), time.Now))
 	var names []string
 	for _, tool := range tools {
 		names = append(names, tool.Name)
-		if !slices.Contains(chiefGrant.Tools, tool.Name) {
-			t.Errorf("chief-of-staff tool %s is not in the chief's grant", tool.Name)
+		if !slices.Contains(managerGrant.Tools, tool.Name) {
+			t.Errorf("manager tool %s is not in the manager's grant", tool.Name)
 		}
 		if tool.Name == ProjectContextTool && tool.Effect != coreadapter.ToolRead {
 			t.Errorf("project context effect %v, want read", tool.Effect)
 		}
 	}
-	want := slices.DeleteFunc(ChiefOrdinaryToolsOf("feature"), func(name string) bool { return name == "file_read" })
+	want := slices.DeleteFunc(ManagerOrdinaryToolsOf("feature"), func(name string) bool { return name == "file_read" })
 	slices.Sort(want)
 	registered := slices.Clone(names)
 	slices.Sort(registered)
 	if !slices.Equal(registered, want) {
-		t.Errorf("ordinary chief handlers %v, want %v", registered, want)
+		t.Errorf("ordinary manager handlers %v, want %v", registered, want)
 	}
 	bound, err := Enforce(f.s.options, Enforcement{}).Threads(repository, f.s.cfg)
 	fixturekit.Must(t, err)
@@ -135,25 +135,25 @@ func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
 		wrappedNames = append(wrappedNames, tool.Name)
 	}
 	slices.Sort(wrappedNames)
-	all := slices.DeleteFunc(slices.Clone(chiefGrant.Tools), func(name string) bool {
+	all := slices.DeleteFunc(slices.Clone(managerGrant.Tools), func(name string) bool {
 		return name == "file_read" || name == climbSteerTool || name == climbConcludeTool
 	})
 	slices.Sort(all)
 	if !slices.Equal(wrappedNames, all) {
-		t.Errorf("production chief registry %v, want %v", wrappedNames, all)
+		t.Errorf("production manager registry %v, want %v", wrappedNames, all)
 	}
 	count := 0
-	for _, name := range turns.Grants[trace.ChiefOfStaff].Tools {
+	for _, name := range turns.Grants[trace.Manager].Tools {
 		if name == ProjectContextTool {
 			count++
 		}
 	}
 	if count != 1 {
-		t.Errorf("production chief project context grants: %d, want one", count)
+		t.Errorf("production manager project context grants: %d, want one", count)
 	}
 	for _, name := range []string{moveUnitTool, handBackDriftTool, resolveContestedTool, ProjectContextTool} {
 		if !slices.Contains(names, name) {
-			t.Errorf("a chief-of-staff turn is not given %s: %v", name, names)
+			t.Errorf("a manager turn is not given %s: %v", name, names)
 		}
 	}
 }

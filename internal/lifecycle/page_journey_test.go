@@ -67,7 +67,7 @@ func newJourney(t *testing.T) *pageJourney {
 	at := fixturekit.DemoStart.Add(10 * time.Minute)
 	fixturekit.FeedDocument(t, repository, first, "unit-dedupe-checks-1", "units/dedupe/checks-1.json", 1, at,
 		service.UnitCheckRun{Unit: "dedupe", Run: 1, Status: "passed", StartedAt: at, FinishedAt: at})
-	j.chief.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst, briefShipNext}, Screenshots: []string{screenshot}})
+	j.manager.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst, briefShipNext}, Screenshots: []string{screenshot}})
 	return &pageJourney{briefJourney: j, other: other, screenshot: screenshot}
 }
 

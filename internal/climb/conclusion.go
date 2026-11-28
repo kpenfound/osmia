@@ -296,7 +296,7 @@ func (c *Concluder) pin(ctx context.Context, stream config.WorkstreamID, state t
 	}
 	reason := fmt.Sprintf("the climb concluded with %d attempts recorded and %d kept; its branch %s, at %s, is rebased once onto %s/%s at %s, pinned now", rec.Attempts, len(rec.Kept), branch, tip, target.Remote, target.Branch, target.Commit)
 	body := fmt.Sprintf("The climb concludes with %d attempts recorded and %d kept. Its branch is rebased once onto %s/%s at %s, and measured again on the rebased commit. Final before the rebase: %v.", rec.Attempts, len(rec.Kept), target.Remote, target.Branch, target.Commit, rec.Pre.Score)
-	return c.record(ctx, stream, state, rec, reason, trace.Progress("climb-conclusion-pinned", "chief", body))
+	return c.record(ctx, stream, state, rec, reason, trace.Progress("climb-conclusion-pinned", trace.ManagerKey, body))
 }
 
 func (c *Concluder) prepare(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, rec Conclusion) error {
@@ -314,11 +314,11 @@ func (c *Concluder) prepare(ctx context.Context, stream config.WorkstreamID, sta
 	if len(conflicts) > 0 {
 		rec.Phase, rec.Conflicts = ConcludeConflicted, conflicts
 		reason := fmt.Sprintf("the climb branch %s does not rebase cleanly onto %s/%s at %s: %s conflicted; the branch is left at %s", rec.Branch, rec.Target.Remote, rec.Target.Branch, rec.Target.Commit, strings.Join(conflicts, ", "), rec.Before)
-		return c.record(ctx, stream, state, rec, reason, trace.Notice("climb-conclusion-conflicted", "chief", "The climb cannot be concluded: "+reason+". Its kept attempts are on the branch, which stays where it is until the owner decides."))
+		return c.record(ctx, stream, state, rec, reason, trace.Notice("climb-conclusion-conflicted", trace.ManagerKey, "The climb cannot be concluded: "+reason+". Its kept attempts are on the branch, which stays where it is until the owner decides."))
 	}
 	rec.Phase, rec.Rebased = ConcludePrepared, commit
 	reason := fmt.Sprintf("the climb branch %s replays onto %s/%s at %s as %s; the branch moves to it next", rec.Branch, rec.Target.Remote, rec.Target.Branch, rec.Target.Commit, commit)
-	return c.record(ctx, stream, state, rec, reason, trace.Progress("climb-conclusion-prepared", "chief", "The climb branch was replayed onto the pinned upstream commit as "+commit+"."))
+	return c.record(ctx, stream, state, rec, reason, trace.Progress("climb-conclusion-prepared", trace.ManagerKey, "The climb branch was replayed onto the pinned upstream commit as "+commit+"."))
 }
 
 func (c *Concluder) move(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, rec Conclusion) error {
@@ -346,7 +346,7 @@ func (c *Concluder) move(ctx context.Context, stream config.WorkstreamID, state 
 	}
 	rec.Phase = ConcludeMoved
 	reason := fmt.Sprintf("the climb branch %s moved from %s to the rebased commit %s", rec.Branch, rec.Before, rec.Rebased)
-	return c.record(ctx, stream, state, rec, reason, trace.Progress("climb-conclusion-moved", "chief", "The climb branch moved to the rebased commit "+rec.Rebased+". The evaluator measures it next."))
+	return c.record(ctx, stream, state, rec, reason, trace.Progress("climb-conclusion-moved", trace.ManagerKey, "The climb branch moved to the rebased commit "+rec.Rebased+". The evaluator measures it next."))
 }
 
 func (c *Concluder) measure(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, rec Conclusion) error {
@@ -390,9 +390,9 @@ func (c *Concluder) measure(ctx context.Context, stream config.WorkstreamID, sta
 	rec.Phase, rec.Post = ConcludeMeasured, &post
 	reason := fmt.Sprintf("the evaluator measured the rebased commit %s again: %s", rec.Rebased, finalWords(post))
 	body := fmt.Sprintf("The climb is concluded. Final before the rebase: %v on %s. Final after the rebase: %s on %s. The branch is assembled for the final review next.", rec.Pre.Score, rec.Pre.Commit, finalWords(post), rec.Rebased)
-	event := trace.Progress("climb-conclusion-measured", "chief", body)
+	event := trace.Progress("climb-conclusion-measured", trace.ManagerKey, body)
 	if !post.Valid {
-		event = trace.Notice("climb-conclusion-measured", "chief", body)
+		event = trace.Notice("climb-conclusion-measured", trace.ManagerKey, body)
 	}
 	return c.record(ctx, stream, state, rec, reason, event)
 }

@@ -18,7 +18,7 @@ import (
 
 const jevJudgment = "judgment_0123456789abcdef"
 
-var contractDeciders = []string{"owner", "chief_of_staff", "committee"}
+var contractDeciders = []string{"owner", trace.Manager, "committee"}
 
 func requireWorkDecision(t *testing.T, p fixturekit.HooksPost, judgment string) {
 	t.Helper()
@@ -78,7 +78,7 @@ func TestPublishJevRulingIsAWorkDecisionAndTheOwnersStaysTheOwners(t *testing.T)
 	f.escalate(stream, "2", "Is the upload cap 10 MiB or unbounded?", hr(2))
 	f.ruling(stream, "1", 1, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Cap uploads at 10 MiB."}, hr(3), owner)
 	f.ruling(stream, "2", 1, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Stream without a cap.", DecidedBy: trace.DecidedByJev, Judgment: jevJudgment}, hr(3), trace.JevActor)
-	f.ruling(stream, "2", 2, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Stream without a cap.", ReturnedAnswer: "RELAYED-TO-THE-ASKERS", Scope: trace.ScopeLocal, DecidedBy: trace.DecidedByJev, Judgment: jevJudgment}, hr(4), chiefActor)
+	f.ruling(stream, "2", 2, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Stream without a cap.", ReturnedAnswer: "RELAYED-TO-THE-ASKERS", Scope: trace.ScopeLocal, DecidedBy: trace.DecidedByJev, Judgment: jevJudgment}, hr(4), managerActor)
 	f.ruling(stream, "3", 1, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "Resume is in scope.", Citations: []string{"spec#1"}, DecidedBy: trace.DecidedByJev, Judgment: jevJudgment}, hr(5), trace.JevActor)
 
 	posts, _ := f.pass()
@@ -95,7 +95,7 @@ func TestPublishJevRulingIsAWorkDecisionAndTheOwnersStaysTheOwners(t *testing.T)
 	if jev.Str("outcome") != "Stream without a cap." || jev.Str("question") != string(stream)+":2" || jev.Str("workstream") != string(stream) {
 		t.Fatalf("Jev's ruling: %s", jev.Raw)
 	}
-	for _, want := range []string{"Should uploads be capped?", "spec.md: Upload limits", "- Stream without a cap", "The chief of staff recommended: Cap at 10 MiB"} {
+	for _, want := range []string{"Should uploads be capped?", "spec.md: Upload limits", "- Stream without a cap", "The manager recommended: Cap at 10 MiB"} {
 		if !strings.Contains(jev.Str("context")+jev.Str("rationale"), want) {
 			t.Fatalf("Jev's ruling lacks %q: %s", want, jev.Raw)
 		}
@@ -110,7 +110,7 @@ func TestPublishJevRulingIsAWorkDecisionAndTheOwnersStaysTheOwners(t *testing.T)
 	}
 	for _, p := range posts {
 		if strings.Contains(p.Raw, "RELAYED-TO-THE-ASKERS") {
-			t.Fatalf("a post carries the chief's relay: %s", p.Raw)
+			t.Fatalf("a post carries the manager's relay: %s", p.Raw)
 		}
 		if p.Source == "osmia-owner" && strings.Contains(p.Raw, "Jev") {
 			t.Fatalf("Jev's decision reached the owner source: %s", p.Raw)
@@ -169,8 +169,8 @@ func TestPublishJevDiscoveryDispositionSaysJevDecidedIt(t *testing.T) {
 		fixturekit.Must(t, err)
 		f.document(stream, id, revision, "discoveries/"+id+".json", string(data), when, actor)
 	}
-	record(1, workDiscovery{ID: id, Description: "Handle empty uploads", Criterion: "spec#1", Disposition: "open"}, hr(1), chiefActor)
-	record(2, workDiscovery{ID: id, Description: "Handle empty uploads", Criterion: "spec#1", Disposition: "declined", Reason: "Outside the approved intent.", DecidedBy: trace.DecidedByJev, Judgment: jevJudgment}, hr(2), chiefActor)
+	record(1, workDiscovery{ID: id, Description: "Handle empty uploads", Criterion: "spec#1", Disposition: "open"}, hr(1), managerActor)
+	record(2, workDiscovery{ID: id, Description: "Handle empty uploads", Criterion: "spec#1", Disposition: "declined", Reason: "Outside the approved intent.", DecidedBy: trace.DecidedByJev, Judgment: jevJudgment}, hr(2), managerActor)
 
 	posts, _ := f.pass()
 	got := fixturekit.Decisions(posts)
@@ -225,7 +225,7 @@ func TestPublishJevRatifiedSealIsInferredWorkContentWithNoAuthor(t *testing.T) {
 }
 
 // An amendment's reseal belongs to whoever decided the amendment. A plan-only
-// amendment the chief of staff decided leaves the spec with whoever ratified
+// amendment the manager decided leaves the spec with whoever ratified
 // the seal before it.
 func TestPublishSealsFollowTheDeciderOfTheAmendmentThatProducedThem(t *testing.T) {
 	f := newPublisherFixture(t)
@@ -238,7 +238,7 @@ func TestPublishSealsFollowTheDeciderOfTheAmendmentThatProducedThem(t *testing.T
 	f.recordSeal(stream, 2, "# Spec\n\nJev approved amendment.\n")
 	f.applied(stream, "1", 2, hr(3))
 	f.amendment(stream, "2", []string{"plan#upload"}, "Split.", "r", "", hr(4))
-	f.amendmentDecision(stream, "2", 1, "approve", "Fine.", hr(5), chiefActor)
+	f.amendmentDecision(stream, "2", 1, "approve", "Fine.", hr(5), managerActor)
 	f.recordSeal(stream, 3, "# Spec\n\nJev approved amendment.\n")
 	f.applied(stream, "2", 3, hr(5))
 	f.amendment(stream, "3", []string{"spec#2"}, "Change three.", "r", "", hr(6))

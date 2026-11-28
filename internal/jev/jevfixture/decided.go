@@ -1,4 +1,4 @@
-// Package jevfixture is test support for fixtures whose chief of staff turns
+// Package jevfixture is test support for fixtures whose manager turns
 // call the outcome tools of subjects Jev decides: it records the decide result
 // those tools require.
 package jevfixture
@@ -63,8 +63,8 @@ func Decide(j *jev.Judge, repo *trace.Repository, project config.ProjectID, stre
 	return j.Decide(context.Background(), repo, req)
 }
 
-// DecideQuestion leaves the decide result of the open question id of the chief of
-// staff's workstream host (or of the member a qualified id names) as a
+// DecideQuestion leaves the decide result of the open question id of the manager's
+// workstream host (or of the member a qualified id names) as a
 // fallback, unless a result is recorded. It reports the error that kept it
 // from doing so.
 func DecideQuestion(repo *trace.Repository, host config.WorkstreamID, id string) error {
@@ -88,9 +88,9 @@ func DecideQuestion(repo *trace.Repository, host config.WorkstreamID, id string)
 	return nil
 }
 
-// AutoDecide wraps the chief of staff's question tools so that a call first
-// leaves a fallback decide result for each question it names, as a chief of
-// staff turn does while Jev is unconfigured. Fixtures whose scripted turns call
+// AutoDecide wraps the manager's question tools so that a call first
+// leaves a fallback decide result for each question it names, as a manager
+// turn does while Jev is unconfigured. Fixtures whose scripted turns call
 // the outcome tools directly use it; tests of the decide requirement itself do
 // not.
 func AutoDecide(repo *trace.Repository, host config.WorkstreamID, list []coreadapter.Tool) []coreadapter.Tool {

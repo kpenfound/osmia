@@ -339,8 +339,8 @@ func (f *ArchitectFixture) AwaitRetry(t *testing.T, stream config.WorkstreamID, 
 	return reason
 }
 
-// Notice returns the body of the notice the given transition told the chief
-// of staff with.
+// Notice returns the body of the notice the given transition told the manager
+// with.
 func (f *ArchitectFixture) Notice(t *testing.T, stream config.WorkstreamID, transition string) string {
 	t.Helper()
 	return intakefixture.Notice(t, f.Repository(), stream, transition)
@@ -514,19 +514,19 @@ func (f *HandInFixture) CheckHanded(t *testing.T, out api.HandInResponse, key, n
 	fixturekit.Must(t, err)
 	var notices []trace.OutboxEntry
 	for _, e := range outbox {
-		if intakefixture.ChiefEvent(e.Event) {
+		if intakefixture.ManagerEvent(e.Event) {
 			notices = append(notices, e)
 		}
 	}
 	if len(notices) != 1 || notices[0].TransitionID != tr.ID || !strings.Contains(notices[0].Event.Body, "changed to handed") {
 		t.Fatalf("outbox %+v", outbox)
 	}
-	th, err := r.ChiefOfStaffThread(stream)
+	th, err := r.ManagerThread(stream)
 	fixturekit.Must(t, err)
-	if th.Identity.Role != trace.ChiefOfStaff {
-		t.Fatalf("chief of staff %+v", th)
+	if th.Identity.Role != trace.Manager {
+		t.Fatalf("manager %+v", th)
 	}
-	if _, err := r.EnsureChiefOfStaff(ctx, stream, time.Now(), owner); err != nil {
+	if _, err := r.EnsureManager(ctx, stream, time.Now(), owner); err != nil {
 		t.Fatal(err)
 	}
 }

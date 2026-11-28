@@ -59,14 +59,14 @@ func (a TestAccess) SessionTrace(raw string) (config.ProjectID, config.Workstrea
 	return a.s.sessionTrace(raw)
 }
 
-// ChiefEventsProfile returns the profile selector used by background turns.
-func (a TestAccess) ChiefEventsProfile(cfg *config.Config) func() (coreadapter.Profile, error) {
-	return a.s.chiefEventsProfile(cfg)
+// ManagerEventsProfile returns the profile selector used by background turns.
+func (a TestAccess) ManagerEventsProfile(cfg *config.Config) func() (coreadapter.Profile, error) {
+	return a.s.managerEventsProfile(cfg)
 }
 
-// ChiefOverride reads the owner's effective conversation profile.
-func (a TestAccess) ChiefOverride(cfg *config.Config) (string, coreadapter.Profile, error) {
-	return a.s.chiefOverride(cfg)
+// ManagerOverride reads the owner's effective conversation profile.
+func (a TestAccess) ManagerOverride(cfg *config.Config) (string, coreadapter.Profile, error) {
+	return a.s.managerOverride(cfg)
 }
 
 // DesignerOverride reads the profile design turns run on.

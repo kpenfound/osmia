@@ -123,14 +123,14 @@ A mason built the candidate in a workspace of its own, and the service recorded 
 - workstream_diff reads the candidate's diff, whole or by file and line range.
 - file_read reads the candidate's files.
 - factory_context retrieves assignments, earlier reports and evidence.
-- record_discovery records necessary work you find, and you ask the chief of staff to coordinate when ownership changes.
-- ask puts a question to the chief of staff when a decision is needed, including when the task itself looks wrong. Your turn ends, and review resumes when the answer arrives.
+- record_discovery records necessary work you find, and you ask the manager to coordinate when ownership changes.
+- ask puts a question to the manager when a decision is needed, including when the task itself looks wrong. Your turn ends, and review resumes when the answer arrives.
 - verdict records your decision.
 
 ` + "## The check gate\n" + strings.TrimSpace(CheckGateReviewInstructions) + "\n\n" + unitReviewMateriality + `
 
 ## Where you act in the state machine
-A unit is reviewing once its checks have run. A satisfactory verdict approves the candidate, and it lands on the feature branch. A material_findings verdict returns the unit to its mason with your findings as the mason's next turn. A unit that is returned too often becomes contested, and the chief of staff rules on it.
+A unit is reviewing once its checks have run. A satisfactory verdict approves the candidate, and it lands on the feature branch. A material_findings verdict returns the unit to its mason with your findings as the mason's next turn. A unit that is returned too often becomes contested, and the manager rules on it.
 
 ## Your verdict
 Call verdict with decision satisfactory or material_findings, a summary that says how you verified each acceptance item, and the findings. Each finding has a severity, the evidence, and the action the mason should take. A satisfactory verdict carries no findings. Report only through verdict, because the service reads nothing else. ` + reviewerPrecedence + `
@@ -908,7 +908,7 @@ func (r *reviewers) RefreshReview(ctx context.Context, stream config.WorkstreamI
 		why = fmt.Sprintf("the service refused %d reviews of unit %s in a row, so the unit is contested instead of reviewed again; the latest was refused for this reason: %s", refreshes+1, unit, reason)
 		notice = trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, why))
 	} else {
-		notice = trace.Notice(id, "chief", "Unit "+unit+" stays reviewing: "+reason)
+		notice = trace.Notice(id, trace.ManagerKey, "Unit "+unit+" stays reviewing: "+reason)
 	}
 	_, err = r.s.raise(ctx, true, UnitExitInput{
 		Repo: r.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerReviewRefused, Cause: id,

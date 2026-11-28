@@ -207,13 +207,13 @@ func TestOwnerMessageRunsOneOrdinaryTurnToCompletion(t *testing.T) {
 
 	var sent wire.ConversationEntry
 	must(t, json.Unmarshal([]byte(successful(t, p.root, "send", string(handed.Workstream), "Start with uploads.", "--json")), &sent))
-	diagnostics := func() { chiefDispatchDiagnostics(t, p.client, p.root, p.added.Project.ID, handed.Workstream) }
+	diagnostics := func() { managerDispatchDiagnostics(t, p.client, p.root, p.added.Project.ID, handed.Workstream) }
 	t.Cleanup(func() {
 		if t.Failed() {
 			diagnostics()
 		}
 	})
-	chief(t, launches.await(t, sent.Turn, diagnostics), p.root, string(p.added.Project.ID), string(handed.Workstream))
+	manager(t, launches.await(t, sent.Turn, diagnostics), p.root, string(p.added.Project.ID), string(handed.Workstream))
 	var conversation wire.ConversationResponse
 	var messages, responses []wire.ConversationEntry
 	eventually(t, time.Minute, func() (bool, string) {
@@ -239,13 +239,13 @@ func TestOwnerMessageRunsOneOrdinaryTurnToCompletion(t *testing.T) {
 	}
 }
 
-func chiefDispatchDiagnostics(t *testing.T, c *service.Client, root string, project config.ProjectID, stream config.WorkstreamID) {
+func managerDispatchDiagnostics(t *testing.T, c *service.Client, root string, project config.ProjectID, stream config.WorkstreamID) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	logView := func(name string, value any, err error) {
 		data, encodeErr := json.Marshal(value)
-		t.Logf("chief %s: %s; error: %v", name, data, errors.Join(err, encodeErr))
+		t.Logf("manager %s: %s; error: %v", name, data, errors.Join(err, encodeErr))
 	}
 	conversation, err := c.Conversation(ctx, stream)
 	logView("conversation", conversation, err)
@@ -254,12 +254,12 @@ func chiefDispatchDiagnostics(t *testing.T, c *service.Client, root string, proj
 	logView("feed", feed, err)
 	state, err := c.Status(ctx, stream)
 	logView("status", state, err)
-	for _, body := range traceBodies(t, workstreamDatabase(t, root, project, string(stream)), "workstreams/"+string(stream)+"/agents/"+trace.ChiefOfStaff+"/log.jsonl") {
-		t.Logf("durable chief log record: %s", body)
+	for _, body := range traceBodies(t, workstreamDatabase(t, root, project, string(stream)), "workstreams/"+string(stream)+"/agents/"+trace.Manager+"/log.jsonl") {
+		t.Logf("durable manager log record: %s", body)
 	}
 }
 
-func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream string) {
+func manager(t *testing.T, turn *enforcertest.Turn, root, project, workstream string) {
 	t.Helper()
 	resolved, err := filepath.EvalSymlinks(root)
 	must(t, err)
@@ -294,7 +294,7 @@ func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream stri
 	if work := turn.Request.Workspace.Directory(); filepath.Dir(work) != turn.Request.SessionDir {
 		t.Fatalf("working directory %s is not the session's own", work)
 	}
-	granted := append([]string{"file_read", "factory_context", "record_discovery", "read_remote_file", "read_cloud_trace", status.ToolName, "notify", "capacity", "inspect_code", "preview", "record_delivery_brief", "pull_request_checks", "ask_owner_about_checks", "prioritise", "pause", "resume", "request_change", "decide_change", "decide_amendment", "decide_charter", "resolve_contested", "resolve_objection", "decide", "flake_fix", "triage_finding", "move_unit", "move_workstream", "hand_back_drift", "drop_dependency", "retry_change", "follow_up"}, questions.ChiefTools...)
+	granted := append([]string{"file_read", "factory_context", "record_discovery", "read_remote_file", "read_cloud_trace", status.ToolName, "notify", "capacity", "inspect_code", "preview", "record_delivery_brief", "pull_request_checks", "ask_owner_about_checks", "prioritise", "pause", "resume", "request_change", "decide_change", "decide_amendment", "decide_charter", "resolve_contested", "resolve_objection", "decide", "flake_fix", "triage_finding", "move_unit", "move_workstream", "hand_back_drift", "drop_dependency", "retry_change", "follow_up"}, questions.ManagerTools...)
 	granted = append(granted, "project_context")
 	var tools []string
 	for _, allowed := range turn.Request.Profile.AllowedTools {
@@ -305,7 +305,7 @@ func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream stri
 		tools = append(tools, tool)
 	}
 	if !slices.Equal(tools, granted) || slices.Contains(tools, "file_write") {
-		t.Fatalf("chief tools %v, want %v", tools, granted)
+		t.Fatalf("manager tools %v, want %v", tools, granted)
 	}
 }
 

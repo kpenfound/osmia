@@ -25,10 +25,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const chiefPrompt = "You are the chief of staff for workstream %s. This turn answers a message from the owner, which is the prompt. The project context in the turn context was assembled when the message was accepted."
+const managerPrompt = "You are the manager for workstream %s. This turn answers a message from the owner, which is the prompt. The project context in the turn context was assembled when the message was accepted."
 
-func chiefGuidance() string {
-	return strings.Join([]string{intake.ChiefRolePrompt, intake.FollowUpGuidance, intake.ChiefDocumentsGuidance, priorityGuidance, pauseGuidance, lifecycle.ChangeGuidance, amendmentGuidance, intake.CharterGuidance, intake.ContestGuidance, intake.ObjectionGuidance, intake.DriftHandbackGuidance, intake.OwnerWritingGuidance}, "\n\n")
+func managerGuidance() string {
+	return strings.Join([]string{intake.ManagerRolePrompt, intake.FollowUpGuidance, intake.ManagerDocumentsGuidance, priorityGuidance, pauseGuidance, lifecycle.ChangeGuidance, amendmentGuidance, intake.CharterGuidance, intake.ContestGuidance, intake.ObjectionGuidance, intake.DriftHandbackGuidance, intake.OwnerWritingGuidance}, "\n\n")
 }
 
 func (s *Service) now() time.Time {
@@ -46,12 +46,12 @@ func (s *Service) conversationReadTrace(raw string) (config.ProjectID, config.Wo
 	return s.resolveConversationTrace(raw, true)
 }
 
-func (s *Service) resolveConversationTrace(raw string, readingChiefArchive bool) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {
+func (s *Service) resolveConversationTrace(raw string, readingManagerArchive bool) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {
 	id, err := config.ParseWorkstreamID(raw)
 	if err != nil {
 		return "", "", nil, &APIError{Code: Validation, Message: "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
 	}
-	if archive, ok := s.archivedWorkstream(raw); ok && !(readingChiefArchive && archive.Actor == runtime.ArchiveActorChief) {
+	if archive, ok := s.archivedWorkstream(raw); ok && !(readingManagerArchive && archive.Actor == runtime.ArchiveActorManager) {
 		return "", "", nil, &APIError{Code: Conflict, Message: "workstream is permanently archived; its history is unavailable"}
 	} else if ok {
 		cfg, projects := s.runtimes()
@@ -106,8 +106,8 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 			return ConversationEntry{}, &APIError{Code: Conflict, Message: "the design workgroup is starting; retry once conversation adoption completes"}
 		}
 	}
-	return s.sendChief(ctx, stream, req, func() (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error) {
-		target, host, bundle, close, err := s.chiefRepository(ctx, repository, stream)
+	return s.sendManager(ctx, stream, req, func() (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error) {
+		target, host, bundle, close, err := s.managerRepository(ctx, repository, stream)
 		if err != nil {
 			return nil, "", "", close, apiErrAsError{Api: &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}}
 		}
@@ -115,15 +115,15 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 	})
 }
 
-func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req SendRequest, resolve func() (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error)) (ConversationEntry, *APIError) {
+func (s *Service) sendManager(ctx context.Context, stream config.WorkstreamID, req SendRequest, resolve func() (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error)) (ConversationEntry, *APIError) {
 	wholeGroup := stream == ""
 	if strings.TrimSpace(req.Text) == "" {
 		return ConversationEntry{}, &APIError{Code: Validation, Message: "text must not be empty"}
 	}
 	cfg := s.current()
-	name, profile, err := s.chiefOverride(cfg)
+	name, profile, err := s.managerOverride(cfg)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("role %s has no usable profile %q; check osmia profiles", trace.ChiefOfStaff, name)}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("role %s has no usable profile %q; check osmia profiles", trace.ManagerDisplay, name)}
 	}
 	target, host, bundleStream, closeTarget, err := resolve()
 	if err != nil {
@@ -141,7 +141,7 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 	if bundleProject.Project() != target.Project() {
 		project = bundleProject.Project()
 	}
-	context, err := chiefContext(ctx, s.Context(), target, closeTarget, project, bundleStream)
+	context, err := managerContext(ctx, s.Context(), target, closeTarget, project, bundleStream)
 	if err != nil {
 		if wholeGroup {
 			return ConversationEntry{}, workgroupAuthorityError(err)
@@ -164,7 +164,7 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 		return ConversationEntry{}, workgroupAuthorityError(err)
 	}
 	defer closeTarget()
-	if _, err := target.EnsureChiefOfStaff(ctx, stream, at, serviceActor); err != nil {
+	if _, err := target.EnsureManager(ctx, stream, at, serviceActor); err != nil {
 		if wholeGroup {
 			return ConversationEntry{}, workgroupAuthorityError(err)
 		}
@@ -172,11 +172,11 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 	}
 	q, err := target.EnqueueTurn(ctx, trace.TurnRequest{
 		Header:       trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + id, Revision: 1, Project: target.Project(), Workstream: stream, At: at, Actor: ownerActor, Cause: "owner-message"},
-		AgentID:      trace.ChiefOfStaff,
-		ThreadID:     trace.ChiefOfStaff,
+		AgentID:      trace.Manager,
+		ThreadID:     trace.Manager,
 		TurnID:       "message_" + id,
 		Profile:      profile,
-		SystemPrompt: fmt.Sprintf(chiefPrompt, host) + "\n\n" + chiefGuidance(),
+		SystemPrompt: fmt.Sprintf(managerPrompt, host) + "\n\n" + managerGuidance(),
 		Context:      strings.TrimSpace(note) + "\n\n" + context,
 		Prompt:       req.Text,
 	})
@@ -216,7 +216,7 @@ func (s *Service) conversationList(raw string) (ConversationResponse, *APIError)
 		if err != nil {
 			return nil, err
 		}
-		archives, err := s.chiefArchiveActions(repository, stream)
+		archives, err := s.managerArchiveActions(repository, stream)
 		if err != nil {
 			return nil, err
 		}
@@ -243,24 +243,24 @@ func (s *Service) conversationTarget(ctx context.Context, repository *trace.Repo
 			if api != nil {
 				return nil, "", nil, apiErrAsError{Api: api}
 			}
-			return a.chief, a.host, a.close, nil
+			return a.manager, a.host, a.close, nil
 		}
 	}
-	target, _, _, closeTarget, err := s.chiefRepositoryForRead(ctx, repository, stream)
+	target, _, _, closeTarget, err := s.managerRepositoryForRead(ctx, repository, stream)
 	return target, stream, closeTarget, err
 }
 
-// ConversationEntries lists the owner's conversation of stream: the chief of
-// staff's thread and, when stream holds or held a design session, the design
+// ConversationEntries lists the owner's conversation of stream: the manager's
+// thread and, when stream holds or held a design session, the design
 // thread. A session opened before design sessions had a thread of their own
-// holds its first messages on the chief's thread, so both are read and the
+// holds its first messages on the manager's thread, so both are read and the
 // turns merged by when they were sent.
 //
 // earlier holds the turns of design sessions whose conversation a started
 // workgroup continues from another trace, merged in by when they were sent.
 func ConversationEntries(repository *trace.Repository, stream config.WorkstreamID, earlier ...[][]ConversationEntry) ([]ConversationEntry, error) {
 	threads := slices.Clone(earlier)
-	for _, read := range []func(config.WorkstreamID) (trace.Thread, error){repository.ChiefOfStaffThread, repository.DesignerThread} {
+	for _, read := range []func(config.WorkstreamID) (trace.Thread, error){repository.ManagerThread, repository.DesignerThread} {
 		t, err := read(stream)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -274,7 +274,7 @@ func ConversationEntries(repository *trace.Repository, stream config.WorkstreamI
 	if len(threads) == 0 {
 		return out, nil
 	}
-	actions, err := ChiefActions(repository, stream)
+	actions, err := ManagerActions(repository, stream)
 	if err != nil {
 		return nil, err
 	}
@@ -283,12 +283,12 @@ func ConversationEntries(repository *trace.Repository, stream config.WorkstreamI
 
 // designHistory is the design thread of the design session that a workgroup
 // started from, read from the trace the session lives in when that is not
-// the trace holding the workgroup's chief of staff. Every endpoint of the
-// workgroup shows it ahead of the chief's own thread, so the owner reads one
+// the trace holding the workgroup's manager. Every endpoint of the
+// workgroup shows it ahead of the manager's own thread, so the owner reads one
 // conversation from the design through the build. Nothing is returned for a
 // workgroup that holds its design session's thread itself.
-func (s *Service) designHistory(chief *trace.Repository, host config.WorkstreamID) ([][][]ConversationEntry, error) {
-	groups, _, err := trace.Workgroups(chief)
+func (s *Service) designHistory(manager *trace.Repository, host config.WorkstreamID) ([][][]ConversationEntry, error) {
+	groups, _, err := trace.Workgroups(manager)
 	if err != nil {
 		return nil, err
 	}
@@ -303,7 +303,7 @@ func (s *Service) designHistory(chief *trace.Repository, host config.WorkstreamI
 	if err != nil {
 		return nil, err
 	}
-	if origin == chief {
+	if origin == manager {
 		return nil, nil
 	}
 	design, err := origin.DesignerThread(group.Conversation.Workstream)
@@ -356,7 +356,7 @@ type archiveAction struct {
 	Workstream config.WorkstreamID
 }
 
-func (s *Service) chiefArchiveActions(repository *trace.Repository, stream config.WorkstreamID) ([]archiveAction, error) {
+func (s *Service) managerArchiveActions(repository *trace.Repository, stream config.WorkstreamID) ([]archiveAction, error) {
 	members, err := repository.WorkgroupMembers(stream)
 	if err != nil {
 		return nil, err
@@ -365,7 +365,7 @@ func (s *Service) chiefArchiveActions(repository *trace.Repository, stream confi
 	if err != nil {
 		return nil, err
 	}
-	return chiefArchiveActionsOf(s.memberArchives(), func(a runtime.Archive) bool {
+	return managerArchiveActionsOf(s.memberArchives(), func(a runtime.Archive) bool {
 		if a.Workstream == stream || group != "" && a.Workgroup == group {
 			return true
 		}
@@ -373,10 +373,10 @@ func (s *Service) chiefArchiveActions(repository *trace.Repository, stream confi
 	}), nil
 }
 
-func chiefArchiveActionsOf(archives []runtime.Archive, shared func(runtime.Archive) bool) []archiveAction {
+func managerArchiveActionsOf(archives []runtime.Archive, shared func(runtime.Archive) bool) []archiveAction {
 	var out []archiveAction
 	for _, a := range archives {
-		if a.Actor != runtime.ArchiveActorChief || !shared(a) {
+		if a.Actor != runtime.ArchiveActorManager || !shared(a) {
 			continue
 		}
 		title := a.Title
@@ -405,11 +405,11 @@ func WithActions(entries, actions []ConversationEntry) []ConversationEntry {
 	return append(merged, actions...)
 }
 
-func ChiefActions(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
-	return chiefActionsWithIdentity(repository, stream, nil)
+func ManagerActions(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
+	return managerActionsWithIdentity(repository, stream, nil)
 }
 
-func chiefActionsWithIdentity(repository *trace.Repository, stream config.WorkstreamID, identify func(ConversationEntry, config.WorkstreamID)) ([]ConversationEntry, error) {
+func managerActionsWithIdentity(repository *trace.Repository, stream config.WorkstreamID, identify func(ConversationEntry, config.WorkstreamID)) ([]ConversationEntry, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
 		return nil, err
@@ -470,10 +470,10 @@ func chiefActionsWithIdentity(repository *trace.Repository, stream config.Workst
 		}
 	}
 	for _, d := range docs {
-		if d.Unit == "" || !strings.HasPrefix(d.Path, "units/"+trace.UnitSubject(d.Unit)+"/chief-") {
+		if d.Unit == "" || !strings.HasPrefix(d.Path, trace.ContestDecisionPrefix(trace.UnitSubject(d.Unit))) {
 			continue
 		}
-		var decision ChiefContestDecision
+		var decision ManagerContestDecision
 		if err := json.Unmarshal([]byte(d.Content), &decision); err != nil {
 			return nil, fmt.Errorf("%s: %w", d.Path, err)
 		}
@@ -494,7 +494,7 @@ func chiefActionsWithIdentity(repository *trace.Repository, stream config.Workst
 		if err := json.Unmarshal([]byte(d.Content), &move); err != nil {
 			return nil, fmt.Errorf("%s: %w", d.Path, err)
 		}
-		if move.By != rulerName(chiefActor) {
+		if move.By != rulerName(managerActor) {
 			continue
 		}
 		text := fmt.Sprintf("Moved unit %s from %s to %s. %s", d.Unit, move.From, move.To, move.Note)
@@ -511,7 +511,7 @@ func chiefActionsWithIdentity(repository *trace.Repository, stream config.Workst
 		if err := json.Unmarshal([]byte(d.Content), &move); err != nil {
 			return nil, fmt.Errorf("%s: %w", d.Path, err)
 		}
-		if move.By != rulerName(chiefActor) {
+		if move.By != rulerName(managerActor) {
 			continue
 		}
 		text := fmt.Sprintf("Moved the workstream from %s to %s. %s", move.From, move.To, move.Note)
@@ -522,10 +522,10 @@ func chiefActionsWithIdentity(repository *trace.Repository, stream config.Workst
 	}
 	decided := map[string]bool{}
 	for _, d := range docs {
-		if !strings.HasPrefix(d.Path, "shed/") || !strings.HasSuffix(d.Path, "/chief.json") {
+		if !shed.IsManagerPath(d.Path) {
 			continue
 		}
-		decisions, err := shed.ParseChiefDecisions([]byte(d.Content))
+		decisions, err := shed.ParseManagerDecisions([]byte(d.Content))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", d.Path, err)
 		}
@@ -542,7 +542,7 @@ func chiefActionsWithIdentity(repository *trace.Repository, stream config.Workst
 		}
 	}
 
-	host, err := repository.ChiefOfStaffHost(stream)
+	host, err := repository.ManagerHost(stream)
 	if err != nil {
 		return nil, err
 	}

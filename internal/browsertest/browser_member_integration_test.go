@@ -26,7 +26,7 @@ import (
 func (f *workgroupPageFixture) awaitOwnerTurn(t *testing.T, text string, member config.WorkstreamID) {
 	t.Helper()
 	awaitCondition(t, "owner turn "+text+" completing", func() bool {
-		thread, err := f.repo.ChiefOfStaffThread(stream)
+		thread, err := f.repo.ManagerThread(stream)
 		must(t, err)
 		for _, q := range thread.Turns {
 			if q.Request.Prompt != text || q.CompletedAt.IsZero() {
@@ -45,15 +45,15 @@ func (f *workgroupPageFixture) awaitOwnerTurn(t *testing.T, text string, member 
 	})
 }
 
-func (f *workgroupPageFixture) runChief(t *testing.T) {
+func (f *workgroupPageFixture) runManager(t *testing.T) {
 	t.Helper()
-	mutation(t, f.c, "PUT", "pause", service.PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Keep worker activity stable during chief conversation", Source: runtime.PauseOwner})
+	mutation(t, f.c, "PUT", "pause", service.PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Keep worker activity stable during manager conversation", Source: runtime.PauseOwner})
 	f.c.Close()
 	must(t, f.s.Close())
 	path := filepath.Join(f.opts.Config.Root, "config.toml")
 	top, err := os.ReadFile(path)
 	must(t, err)
-	must(t, os.WriteFile(path, append(top, []byte("\n[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")...), 0600))
+	must(t, os.WriteFile(path, append(top, []byte("\n[roles.manager]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")...), 0600))
 	sessions := &fixturekit.DemoSessions{ByKey: map[string]*mcp.ClientSession{}}
 	engine := &fixturekit.DemoEngine{Sessions: sessions, Turns: map[string]fixturekit.DemoTurn{}}
 	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
@@ -65,17 +65,17 @@ func (f *workgroupPageFixture) runChief(t *testing.T) {
 		"A new shared update":          "A shared answer while the owner is away.",
 	}
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		reply := "Chief activity recorded."
+		reply := "Manager activity recorded."
 		for text, answer := range replies {
 			if strings.HasSuffix(strings.TrimSpace(req.Prompt), text) {
-				got, err := fixturekit.CallTool(ctx, tools, "set_status", map[string]any{"goal": "Ship shared uploads", "note": "Chief status after " + text, "attention": "Choose the shared interface and upload approach.", "agents": []string{}})
+				got, err := fixturekit.CallTool(ctx, tools, "set_status", map[string]any{"goal": "Ship shared uploads", "note": "Manager status after " + text, "attention": "Choose the shared interface and upload approach.", "agents": []string{}})
 				if err != nil || !strings.Contains(got, `"stored":true`) {
 					return nil, fmt.Errorf("set status: %s %v", got, err)
 				}
 				reply = answer
 			}
 		}
-		return &agent.Result{ClaudeID: "chief-" + req.Name, ResultText: reply}, nil
+		return &agent.Result{ClaudeID: "manager-" + req.Name, ResultText: reply}, nil
 	}
 	f.opts.Reconciliation.Now = time.Now
 	f.opts = service.EnforceThreadsForTest(f.opts, service.Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}}})
@@ -86,8 +86,8 @@ func (f *workgroupPageFixture) runChief(t *testing.T) {
 func TestBrowserMemberConversationRoutingAcrossRestart(t *testing.T) {
 	f := newWorkgroupPageFixture(t, false)
 	shared := f.question(t, 1)
-	fixturekit.AnswerChief(t, f.repo, stream, "group-status", "Status recorded.")
-	f.runChief(t)
+	fixturekit.AnswerManager(t, f.repo, stream, "group-status", "Status recorded.")
+	f.runManager(t)
 	p := openOutcomePage(t, f.s, `
   window.memberPosts = [];
   const postFetch = window.fetch.bind(window);
@@ -97,7 +97,7 @@ func TestBrowserMemberConversationRoutingAcrossRestart(t *testing.T) {
   };`)
 	p.SelectWorkstream(quiet)
 	p.AwaitGone("the member has no shared decision", "#workstreams "+decisionCard(shared))
-	p.Click("#workstream-head [data-ask-chief]")
+	p.Click("#workstream-head [data-ask-manager]")
 	p.Await("the repo chip and composer are focused", `location.hash === `+quote("#workgroup="+string(f.group.ID))+` && document.activeElement === document.querySelector('#workgroup-content .composer textarea')`)
 	p.AwaitText("#workgroup-content [data-field=about]", "About: Uploads repo")
 	p.TypeInto("#workgroup-content .composer textarea", "Question about this repo")
@@ -114,7 +114,7 @@ func TestBrowserMemberConversationRoutingAcrossRestart(t *testing.T) {
 	p.AwaitText("#workgroup-content .feed", "Both repos will coordinate their changes.")
 	p.Await("both production send paths were used once", `memberPosts.filter(x => x === `+quote("/v1/conversation/"+string(quiet))+`).length === 1 && memberPosts.filter(x => x === `+quote("/v1/workgroups/"+string(f.group.ID)+"/conversation")+`).length === 1`)
 	p.SelectWorkstream(quiet)
-	p.AwaitText("#workstream-head [data-field=chief-status]", "Chief status after Question for the whole group")
+	p.AwaitText("#workstream-head [data-field=manager-status]", "Manager status after Question for the whole group")
 	p.Click("#project-home")
 	_, err := f.c.Send(context.Background(), quiet, "A new shared update")
 	must(t, err)
@@ -125,7 +125,7 @@ func TestBrowserMemberConversationRoutingAcrossRestart(t *testing.T) {
 		err := f.c.Do(context.Background(), "GET", "/v1/feed/"+string(id), nil, &feed)
 		must(t, err)
 		for _, e := range feed.Entries {
-			if e.Kind == "message" || e.Kind == "response" || e.Kind == "action" || e.Kind == "status" || (e.Session != nil && e.Session.Role == trace.ChiefOfStaff) {
+			if e.Kind == "message" || e.Kind == "response" || e.Kind == "action" || e.Kind == "status" || (e.Session != nil && e.Session.Role == trace.Manager) {
 				t.Fatalf("shared entry leaked into %s: %+v", id, e)
 			}
 		}
@@ -168,7 +168,7 @@ func TestBrowserOpenSingleMemberGainsFollowup(t *testing.T) {
 	if added == "" {
 		t.Fatal("production controller did not allocate the follow-up")
 	}
-	p.Await("the same open member is trimmed after the join", `window.membershipDocument === 'same document' && document.querySelector('#workstream-head').dataset.workstream === `+quote(string(stream))+` && document.querySelector('#workstream-head [data-ask-chief]') && !document.querySelector('#workstreams .composer, #workstreams [data-kind=message], #workstreams [data-kind=response], #workstreams [data-kind=status], #workstreams [data-kind=action], #workstreams [data-kind=escalation]')`)
+	p.Await("the same open member is trimmed after the join", `window.membershipDocument === 'same document' && document.querySelector('#workstream-head').dataset.workstream === `+quote(string(stream))+` && document.querySelector('#workstream-head [data-ask-manager]') && !document.querySelector('#workstreams .composer, #workstreams [data-kind=message], #workstreams [data-kind=response], #workstreams [data-kind=status], #workstreams [data-kind=action], #workstreams [data-kind=escalation]')`)
 	p.Await("the group row appears through events", `document.querySelector('[data-select-workgroup="`+string(f.group.ID)+`"]') !== null`)
 	openWorkgroup(p, f.group.ID)
 	p.AwaitText("#workgroup-content .feed", "The conversation before another repo joins")

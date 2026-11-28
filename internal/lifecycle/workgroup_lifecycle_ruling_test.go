@@ -23,7 +23,7 @@ import (
 
 func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
 	t.Parallel()
-	for _, stage := range []string{"owner-ruling-member", "chief-relay-member"} {
+	for _, stage := range []string{"owner-ruling-member", "manager-relay-member"} {
 		t.Run(stage, func(t *testing.T) {
 			ctx := context.Background()
 			f, cleanupGate := newLifecycleDesignFixture(t)
@@ -72,7 +72,7 @@ func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
 					}
 				}
 				_, err = fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Keep the contract.", "note": "Original authority and eligible origins remain active.", "agents": []string{}})
-				return intakefixture.QuestionResult(req, "session-chief", "Original origins reconciled."), err
+				return intakefixture.QuestionResult(req, "session-manager", "Original origins reconciled."), err
 			}
 			f.Engine.Turns["lifecycle-batch"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				question := "Second original contract question."
@@ -80,7 +80,7 @@ func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
 					question = "First original contract question."
 				}
 				_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
-				return intakefixture.QuestionResult(req, "session-worker", "Asked the shared chief."), err
+				return intakefixture.QuestionResult(req, "session-worker", "Asked the shared manager."), err
 			}
 			f.Engine.Mu.Unlock()
 			lifecycleWorker(t, f, f.Project, f.Stream1, "worker_first", "lifecycle-batch", "First original contract question.")
@@ -100,7 +100,7 @@ func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
 			hook := &intakefixture.DesignInterruption{Step: stage, Nth: 1, Reached: make(chan struct{})}
 			f.Hook.Store(hook)
 			finished := make(chan error, 1)
-			if stage == "chief-relay-member" {
+			if stage == "manager-relay-member" {
 				_, err = f.C.Answer(ctx, original.Number, text, original.Project)
 				fixturekit.Must(t, err)
 				relay.Store(true)
@@ -145,7 +145,7 @@ func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
 				t.Helper()
 				repo, err := f.S.Repository(f.Project2)
 				fixturekit.Must(t, err)
-				target, host, _, release, err := f.S.Lifecycle().ChiefRepository(ctx, repo, f.Stream2)
+				target, host, _, release, err := f.S.Lifecycle().ManagerRepository(ctx, repo, f.Stream2)
 				fixturekit.Must(t, err)
 				defer release()
 				inbox, err := target.Inbox()
@@ -202,7 +202,7 @@ func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
 				} else if inbox[0].Hold != "" || inbox[0].State != trace.QuestionAnswered {
 					t.Fatal("completed saved relay did not permit eligible survivor recovery")
 				}
-				_, err = target.Thread(host, trace.ChiefOfStaff)
+				_, err = target.Thread(host, trace.Manager)
 				fixturekit.Must(t, err)
 			}
 			check("retained")

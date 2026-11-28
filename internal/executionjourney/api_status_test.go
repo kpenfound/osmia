@@ -34,27 +34,27 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func queueChiefTurn(t *testing.T, repo *trace.Repository, turn string, at time.Time) {
+func queueManagerTurn(t *testing.T, repo *trace.Repository, turn string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at, Actor: owner, Cause: "message_" + turn, Depth: 1},
-		AgentID: intakefixture.ChiefAgent, ThreadID: intakefixture.ChiefThread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
-		SystemPrompt: "You are the chief of staff.", Prompt: "Owner message: " + turn}
+		AgentID: intakefixture.ManagerAgent, ThreadID: intakefixture.ManagerThread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
+		SystemPrompt: "You are the manager.", Prompt: "Owner message: " + turn}
 	_, err := repo.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
 	event := trace.EventID("deliver_"+turn, "turn")
-	op, err := thread.TurnOperation(fixturekit.Project, event, thread.TurnInput{Workstream: fixturekit.Stream, Agent: intakefixture.ChiefAgent, Turn: turn})
+	op, err := thread.TurnOperation(fixturekit.Project, event, thread.TurnInput{Workstream: fixturekit.Stream, Agent: intakefixture.ManagerAgent, Turn: turn})
 	fixturekit.Must(t, err)
 	tx := trace.Transaction{Transition: trace.Transition{
 		Header:  trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "deliver_" + turn, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at, Actor: trace.Actor{Kind: "service", ID: "inbox"}, Cause: req.ID, Depth: 1},
-		Subject: "chief_inbox", To: "delivering", Reason: "Owner message accepted for the chief of staff"},
+		Subject: "manager_inbox", To: "delivering", Reason: "Owner message accepted for the manager"},
 		Events: []trace.Event{{ID: event, Kind: "turn", Body: "Deliver " + turn, Operation: &op}}}
 	_, err = repo.Transact(ctx, tx)
 	fixturekit.Must(t, err)
 }
 
-func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
+func TestManagerStatusAcrossRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "cs-")
@@ -72,9 +72,9 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, clock.Now(), owner))
 	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Quiet, clock.Now(), owner))
-	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: intakefixture.ChiefAgent, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "chief_of_staff", ThreadID: intakefixture.ChiefThread}
+	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: intakefixture.ManagerAgent, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: trace.Manager, ThreadID: intakefixture.ManagerThread}
 	fixturekit.Must(t, repo.CreateThread(ctx, identity))
-	queueChiefTurn(t, repo, "status", clock.Now())
+	queueManagerTurn(t, repo, "status", clock.Now())
 	fixturekit.Must(t, repo.Close())
 
 	sessions := &fixturekit.DemoSessions{ByKey: map[string]*mcp.ClientSession{}}
@@ -87,12 +87,12 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	fixturekit.Must(t, os.Mkdir(views, 0700))
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		turns := &isolation.Turns{Workspaces: &fixturekit.DemoWorkspaces{Directory: cfg.Project.Clone}, Views: isolation.Views{Directory: views}, Engine: engine,
-			Grants: map[string]coreadapter.Capabilities{"chief_of_staff": {Tools: []string{status.ToolName}}},
+			Grants: map[string]coreadapter.Capabilities{trace.Manager: {Tools: []string{status.ToolName}}},
 			Select: func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-				set, err := status.Tool(r, intakefixture.ChiefAgent, scope, clock.Now)
+				set, err := status.Tool(r, intakefixture.ManagerAgent, scope, clock.Now)
 				return []coreadapter.Tool{set}, err
 			},
 			Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}},
@@ -125,12 +125,12 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 			names = append(names, tool.Name)
 		}
 		if want := []string{"set_status"}; !slices.Equal(names, want) {
-			t.Errorf("chief of staff tools %v, want %v", names, want)
+			t.Errorf("manager tools %v, want %v", names, want)
 		}
 		mu.Lock()
 		defer mu.Unlock()
 		for _, args := range []map[string]any{
-			{"goal": "Finish the importer on " + intakefixture.ChiefThread + ".", "note": "Started.", "agents": []string{}},
+			{"goal": "Finish the importer on " + intakefixture.ManagerThread + ".", "note": "Started.", "agents": []string{}},
 			{"goal": "Ship resumable uploads.", "note": "The plan is drafted.", "agents": []string{"The architect is drafting the plan."}},
 			{"goal": "Ship resumable uploads.", "note": "The plan is ready for review. Work is starting.", "agents": []string{"The architect is idle."}},
 		} {
@@ -140,7 +140,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 			}
 			results = append(results, out)
 		}
-		return &agent.Result{ClaudeID: "session-chief", ResultText: "Status written", SessionDir: req.SessionDir, NumTurns: 1}, nil
+		return &agent.Result{ClaudeID: "session-manager", ResultText: "Status written", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
 
 	s, c := journey.StartT(t, opts)
@@ -157,18 +157,18 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 			TelemetryTraceID: telemetry.WorkstreamTrace(w).String(), TelemetryRootSpanID: telemetry.WorkstreamRoot(w).String()}
 	}
 	if want := []api.WorkstreamStatus{empty(fixturekit.Stream), empty(fixturekit.Quiet)}; !sameStatuses(list.Workstreams, want) || len(list.Diagnostics) != 0 {
-		t.Fatalf("before the chief of staff wrote: %+v", list)
+		t.Fatalf("before the manager wrote: %+v", list)
 	}
 	close(startTurn)
 	close(release)
 	select {
 	case <-finished:
 	case <-time.After(fixturekit.DemoTimeout):
-		t.Fatal("chief-of-staff turn did not run")
+		t.Fatal("manager turn did not run")
 	}
 	mu.Lock()
 	want := []string{
-		`{"stored":false,"reason":"goal contains an Osmia or backend identifier (\"thread_chief\"); refer to the work or the agent in words"}`,
+		`{"stored":false,"reason":"goal contains an Osmia or backend identifier (\"thread_manager\"); refer to the work or the agent in words"}`,
 		`{"stored":true,"revision":1}`,
 		`{"stored":true,"revision":2}`,
 	}

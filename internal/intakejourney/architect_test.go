@@ -163,7 +163,7 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 	fixturekit.Must(t, err)
 	var notices []trace.OutboxEntry
 	for _, e := range outbox {
-		if intakefixture.ChiefEvent(e.Event) && e.TransitionID == "sketched" {
+		if intakefixture.ManagerEvent(e.Event) && e.TransitionID == "sketched" {
 			notices = append(notices, e)
 		}
 	}
@@ -425,7 +425,7 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 			notices = append(notices, e)
 		}
 	}
-	if len(notices) != 1 || !intakefixture.ChiefEvent(notices[0].Event) || notices[0].Event.Operation != nil ||
+	if len(notices) != 1 || !intakefixture.ManagerEvent(notices[0].Event) || notices[0].Event.Operation != nil ||
 		!strings.HasPrefix(notices[0].Event.Body, "None of the architect's 3 drafts of the spec and plan was accepted and drafting has stopped; the workstream stays handed. Last draft: draft 3 of the spec and plan is invalid:\n- spec#2: no unit serves this criterion\n- unit \"dedupe\": dependency cycle") {
 		t.Fatalf("outbox: %+v", outbox)
 	}

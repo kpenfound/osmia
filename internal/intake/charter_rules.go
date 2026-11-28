@@ -130,7 +130,7 @@ func (s *Controller) DecideCharter(ctx context.Context, raw, question string, re
 // RecordCharterDecision records one decision on a proposed charter rule, as
 // the actor: the next revision of the proposal's charter.json with the
 // decision, and its move to ratified or declined, in one commit. A declined
-// proposal tells the chief of staff; a ratified one does when its rule is in
+// proposal tells the manager; a ratified one does when its rule is in
 // the charter. Deciding a decided proposal the same way again returns it and
 // records nothing; deciding it the other way is refused. Proposals of
 // abandoned workstreams take no decision.
@@ -212,17 +212,17 @@ func (s *Controller) RecordCharterDecisionBy(ctx context.Context, _ config.Proje
 }
 
 // DecideCharterTool records the owner's decision on a charter proposal that
-// the owner gave the chief of staff in a message.
+// the owner gave the manager in a message.
 const DecideCharterTool = "decide_charter"
 
-// CharterGuidance tells the chief of staff when and how to use
+// CharterGuidance tells the manager when and how to use
 // decide_charter. It belongs in the system prompt of every owner message
 // turn.
 const CharterGuidance = "## Charter proposals\nWhen the owner's message ratifies or declines a charter rule you proposed, call decide_charter with the question the proposal came from, the owner's decision and the owner's own words as the note. " +
 	"Decide a proposal only from the owner's decision in the message, because a charter rule binds every later turn and is the owner's to set; the owner can also decide it with osmia charter."
 
 // DecideCharter returns the decide_charter tool of one claimed
-// chief-of-staff turn. It records the same decision as POST
+// manager turn. It records the same decision as POST
 // /charter/<workstream>/<question> on the turn's workstream, with the owner
 // whose message the turn answers as its actor. A decision the service
 // refuses is an ordinary result, {"recorded":false,"reason":...}, and
@@ -250,14 +250,14 @@ func (c *Controls) DecideCharter(repository *trace.Repository, scope coreadapter
 		if s == nil {
 			return nil, errors.New("charter decisions are unavailable")
 		}
-		request, owner, err := repository.OwnerTurn(trace.ChiefOfStaff, scope)
+		request, owner, err := repository.OwnerTurn(trace.Manager, scope)
 		if err != nil {
 			return nil, err
 		}
 		if !owner {
 			return PriorityRefusal("only the owner decides a charter proposal; this turn does not answer a message from the owner")
 		}
-		member, question, err := repository.ChiefQuestionTarget(config.WorkstreamID(scope.Workstream), input.Question)
+		member, question, err := repository.ManagerQuestionTarget(config.WorkstreamID(scope.Workstream), input.Question)
 		if err != nil {
 			return PriorityRefusal(err.Error())
 		}
@@ -315,7 +315,7 @@ func (c Charterer) Pass(ctx context.Context) error {
 
 // Write appends a ratified proposal's rule to the charter as its next number,
 // then records the number and the charter revision in the proposal and moves
-// it to chartered, which tells the workstream's chief of staff. The charter
+// it to chartered, which tells the workstream's manager. The charter
 // revision's cause is the proposal's path, so a charter revision recorded
 // before a stop is found again rather than appended twice. The write is the
 // revision after the one read, so an owner edit recorded since the read

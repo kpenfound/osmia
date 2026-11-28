@@ -58,11 +58,11 @@ func newTriageKit(t *testing.T, key string, provider *jevtest.Provider) *triageK
 	} else {
 		inspect.SetJudge(jevfixture.Answering(now, provider))
 	}
-	scope := intakefixture.ClaimChiefTurn(t, repository, f.Project, stream, now, intakefixture.ChiefTurnInput{
+	scope := intakefixture.ClaimManagerTurn(t, repository, f.Project, stream, now, intakefixture.ManagerTurnInput{
 		Turn: "events_1", Prompt: "The final review is recorded.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-events", Directory: "events",
 	})
 	decide, triage := inspect.DecideTool(repository, scope), inspect.TriageTool(repository, scope)
-	list, err := questions.Tools(repository, trace.ChiefOfStaff, scope, f.S.Now)
+	list, err := questions.Tools(repository, trace.Manager, scope, f.S.Now)
 	fixturekit.Must(t, err)
 	i := slices.IndexFunc(list, func(tool coreadapter.Tool) bool { return tool.Name == questions.RouteAmendmentTool })
 	if i < 0 {
@@ -180,7 +180,7 @@ func TestFinalReviewTriageAsksJevOncePerBlockingFinding(t *testing.T) {
 	}
 }
 
-func TestFinalReviewTriageThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
+func TestFinalReviewTriageThatIsNotConfidentLeavesTheManagerFree(t *testing.T) {
 	t.Parallel()
 	for name, provider := range map[string]*jevtest.Provider{
 		"below the threshold": {Results: []jevtest.Result{jevfixture.Pick("code", 0.5, "owner"), jevfixture.Pick("code", 0.5, "owner")}},
@@ -194,7 +194,7 @@ func TestFinalReviewTriageThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
 				t.Fatalf("triage before decide: %s", out)
 			}
 			for _, finding := range []string{"finding-1", "finding-2"} {
-				if out := k.decide("1:" + finding); !strings.Contains(out, `"decision":"chief"`) || strings.Contains(out, `"pick"`) {
+				if out := k.decide("1:" + finding); !strings.Contains(out, `"decision":"manager"`) || strings.Contains(out, `"pick"`) {
 					t.Fatalf("decide %s: %s", finding, out)
 				}
 			}

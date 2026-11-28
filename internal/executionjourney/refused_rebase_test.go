@@ -98,14 +98,14 @@ func TestRefusedRebaseIsAskedForAgainAndContestsTheUnitOnceTheBoundIsUsedUp(t *t
 	}
 
 	failing = false
-	if _, apiErr := recordContestedRuling(b.f.S, ctx, b.repository, b.stream, "resume", api.ContestedRulingRequest{Decision: "revise", Note: "The clone is reachable again."}, intake.ChiefActor); apiErr != nil {
-		t.Fatalf("the chief's ruling: %+v", apiErr)
+	if _, apiErr := recordContestedRuling(b.f.S, ctx, b.repository, b.stream, "resume", api.ContestedRulingRequest{Decision: "revise", Note: "The clone is reachable again."}, intake.ManagerActor); apiErr != nil {
+		t.Fatalf("the manager's ruling: %+v", apiErr)
 	}
 	if state, err := b.repository.Workflow(b.stream, trace.UnitSubject("dedupe")); err != nil || state.Value != intake.UnitContested {
 		t.Fatalf("dedupe is %+v: %v", state, err)
 	}
-	if _, apiErr := b.f.S.Execution().MoveUnit(ctx, b.repository, b.stream, "dedupe", (api.UnitMoveRequest{To: intake.UnitImplementing, Note: "The clone is reachable again."}), intake.ChiefActor, ""); apiErr != nil {
-		t.Fatalf("the chief's move: %+v", apiErr)
+	if _, apiErr := b.f.S.Execution().MoveUnit(ctx, b.repository, b.stream, "dedupe", (api.UnitMoveRequest{To: intake.UnitImplementing, Note: "The clone is reachable again."}), intake.ManagerActor, ""); apiErr != nil {
+		t.Fatalf("the manager's move: %+v", apiErr)
 	}
 	fixturekit.Must(t, lands.Pass(ctx))
 	for _, unit := range []string{"resume", "dedupe"} {

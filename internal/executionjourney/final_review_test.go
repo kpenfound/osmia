@@ -434,19 +434,19 @@ func TestRepeatedBlockingFinalReviewsLeaveRevisionsToTheOwner(t *testing.T) {
 		fixturekit.Must(t, err)
 		fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalReportDocument, Revision: review, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: delivery.FinalReviewActor, Cause: "final-review"}, Path: delivery.FinalReportPath, Content: string(content)}}))
 	}
-	chief := func() *api.APIError {
+	manager := func() *api.APIError {
 		return f.S.Intake().EngineeringRevision(repository, stream, intake.AmendmentCase{}, seal.Seal{}, nil, "Groups the findings into one unit.")
 	}
 	const owners = "final reviews have found blocking problems 3 times; further revisions of the assembled plan require an owner decision"
 	record(1, delivery.FindingBlocking)
 	record(2, delivery.FindingAdvisory)
 	record(3, delivery.FindingBlocking)
-	if apiErr := chief(); apiErr != nil && apiErr.Message == owners {
+	if apiErr := manager(); apiErr != nil && apiErr.Message == owners {
 		t.Fatalf("two blocking reviews left the revision to the owner: %v", apiErr)
 	}
 	record(4, delivery.FindingBlocking)
-	if apiErr := chief(); apiErr == nil || apiErr.Message != owners {
-		t.Fatalf("three blocking reviews left the revision to the chief of staff: %v", apiErr)
+	if apiErr := manager(); apiErr == nil || apiErr.Message != owners {
+		t.Fatalf("three blocking reviews left the revision to the manager: %v", apiErr)
 	}
 	if body := delivery.FinalReviewNotice(api.FinalReport{}, []string{"x"}, intake.MaxFinalRounds, false); !strings.Contains(body, "Further revisions of the assembled plan are the owner's decision") {
 		t.Fatalf("the notice %q", body)

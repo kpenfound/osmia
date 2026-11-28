@@ -24,12 +24,12 @@ import (
 )
 
 type workgroupPageFixture struct {
-	opts  service.Options
-	s     *service.Service
-	c     *service.Client
-	repo  *trace.Repository
-	group trace.Workgroup
-	chief coreadapter.Scope
+	opts    service.Options
+	s       *service.Service
+	c       *service.Client
+	repo    *trace.Repository
+	group   trace.Workgroup
+	manager coreadapter.Scope
 }
 
 func newWorkgroupPageFixture(t *testing.T, edges bool) *workgroupPageFixture {
@@ -60,10 +60,10 @@ func newMemberPageFixture(t *testing.T, edges, multi bool) *workgroupPageFixture
 	opts.Reconciliation.Ticks = make(chan time.Time)
 	s, c := start(t, opts)
 	live := service.InspectForTest(s).SoleRepository()
-	_, err = live.EnsureChiefOfStaff(ctx, stream, demoStart, ownerActor)
+	_, err = live.EnsureManager(ctx, stream, demoStart, ownerActor)
 	must(t, err)
-	chief := claimTurn(t, live, t.TempDir(), stream, trace.ChiefOfStaff, trace.ChiefOfStaff, "group-status", demoStart)
-	_, err = live.SetStatus(ctx, trace.ChiefOfStaff, chief, trace.StatusContent{Goal: "Ship shared uploads", Note: "The chief coordinates both repos.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	manager := claimTurn(t, live, t.TempDir(), stream, trace.Manager, trace.Manager, "group-status", demoStart)
+	_, err = live.SetStatus(ctx, trace.Manager, manager, trace.StatusContent{Goal: "Ship shared uploads", Note: "The manager coordinates both repos.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	must(t, err)
 	fixturekit.QueueRoleTurn(t, live, stream, intake.MasonAgent("upload"), "mason", "upload", demoStart)
 	_, err = live.ClaimTurn(ctx, stream, intake.MasonAgent("upload"), "group-worker-token", t.TempDir(), demoStart)
@@ -72,7 +72,7 @@ func newMemberPageFixture(t *testing.T, edges, multi bool) *workgroupPageFixture
 	fixturekit.FeedDocument(t, live, stream, "final-report", "final/report.json", 1, demoStart, api.FinalReport{Review: 1, Outcome: "reviewed", Reader: "reader", Turn: "review"})
 	_, err = c.MoveUnit(ctx, stream, "upload", "contested", "Choose the upload approach.")
 	must(t, err)
-	return &workgroupPageFixture{opts: opts, s: s, c: c, repo: live, group: g, chief: chief}
+	return &workgroupPageFixture{opts: opts, s: s, c: c, repo: live, group: g, manager: manager}
 }
 
 func (f *workgroupPageFixture) question(t *testing.T, n int) api.InboxEntry {
@@ -83,7 +83,7 @@ func (f *workgroupPageFixture) question(t *testing.T, n int) api.InboxEntry {
 	must(t, f.repo.CreateThread(ctx, trace.Agent{Header: h, Role: "mason", ThreadID: id}))
 	q, err := f.repo.Ask(ctx, id, claimTurn(t, f.repo, t.TempDir(), stream, id, id, id+"-turn", demoStart), fmt.Sprintf("Shared decision %d?", n), time.Now().UTC())
 	must(t, err)
-	_, err = f.repo.EscalateQuestions(ctx, trace.ChiefOfStaff, f.chief, trace.EscalationRequest{Questions: []string{q.ID}, Rephrasing: fmt.Sprintf("Shared decision %d?", n), Blocked: "Both members", Recommendation: "Keep the shared interface."}, time.Now().UTC())
+	_, err = f.repo.EscalateQuestions(ctx, trace.Manager, f.manager, trace.EscalationRequest{Questions: []string{q.ID}, Rephrasing: fmt.Sprintf("Shared decision %d?", n), Blocked: "Both members", Recommendation: "Keep the shared interface."}, time.Now().UTC())
 	must(t, err)
 	entries := entriesOf(t, f.c, service.InboxEscalation)
 	for _, e := range entries {
@@ -99,7 +99,7 @@ func openWorkgroup(p *page, id config.WorkgroupID) {
 	p.T.Helper()
 	p.Click(`[data-select-workgroup="` + string(id) + `"]`)
 	p.Await("the selected workgroup", `location.hash === `+quote("#workgroup="+string(id))+` && !document.querySelector('[data-view=workgroup]').hidden`)
-	p.AwaitText("#workgroup-content .feed", "The chief coordinates both repos.")
+	p.AwaitText("#workgroup-content .feed", "The manager coordinates both repos.")
 }
 
 func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
@@ -133,11 +133,11 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 	p.Await("the member card opens its member", `!document.querySelector('[data-view=workstream]').hidden && location.hash === `+quote("#workstream="+string(stream)))
 	p.OpenActivity()
 	p.Await("the member actually has detail events", `document.querySelector('#workstream-activity [data-kind=session]') !== null && document.querySelector('#workstream-activity [data-kind=transition]') !== null && document.querySelector('#workstream-activity [data-kind=unit_checks]') !== null && document.querySelector('#workstream-activity [data-kind=final_review]') !== null`)
-	p.Await("no shared conversation in the member's Activity", `!document.querySelector('#workstream-activity [data-kind=message], #workstream-activity [data-kind=response], #workstream-activity [data-kind=action], #workstream-activity [data-kind=status], #workstream-activity [data-kind=session][data-role=chief_of_staff]')`)
+	p.Await("no shared conversation in the member's Activity", `!document.querySelector('#workstream-activity [data-kind=message], #workstream-activity [data-kind=response], #workstream-activity [data-kind=action], #workstream-activity [data-kind=status], #workstream-activity [data-kind=session][data-role=manager]')`)
 	p.OpenConversation()
 	p.Await("no session or check in the member's Conversation", `!document.querySelector('#workstreams [data-kind=session], #workstreams [data-kind=transition], #workstreams [data-kind=unit_checks]')`)
-	p.AwaitText("#workstream-head [data-field=chief-status]", "The chief coordinates both repos.")
-	p.AwaitText("#workstream-head [data-ask-chief]", "Ask the chief about this repo")
+	p.AwaitText("#workstream-head [data-field=manager-status]", "The manager coordinates both repos.")
+	p.AwaitText("#workstream-head [data-ask-manager]", "Ask the manager about this repo")
 	p.Await("the member has only its own decisions and no chat", `!document.querySelector('#workstreams .composer, #workstreams [data-kind=message], #workstreams [data-kind=response], #workstreams [data-kind=action], #workstreams [data-kind=status], #workstreams [data-kind=escalation]') && document.querySelector('#workstreams [data-kind=contested]') !== null`)
 	for _, tab := range []string{"documents", "trace", "activity", "conversation"} {
 		p.Click(`[data-tab="` + tab + `"]`)
@@ -149,7 +149,7 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 
 	openWorkgroup(p, f.group.ID)
 	p.Eval(`window.groupEventKind = "workstream"`, nil)
-	_, statusErr := f.repo.SetStatus(context.Background(), trace.ChiefOfStaff, f.chief, trace.StatusContent{Goal: "Ship shared uploads", Note: "Both members now have a shared plan.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	_, statusErr := f.repo.SetStatus(context.Background(), trace.Manager, f.manager, trace.StatusContent{Goal: "Ship shared uploads", Note: "Both members now have a shared plan.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	must(t, statusErr)
 	p.AwaitText("#workgroup-content [data-kind=status][data-latest=true]", "Both members now have a shared plan.")
 	p.Eval(`window.groupEventKind = null`, nil)
@@ -157,21 +157,21 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 	p.Click("#workgroup-content .composer [type=submit]")
 	p.AwaitText("#workgroup-content .composer .result", "Sent")
 	p.AwaitText("#workgroup-content .feed", "Coordinate the whole group")
-	fixturekit.AnswerChief(t, f.repo, stream, "group-status", "Status recorded.")
+	fixturekit.AnswerManager(t, f.repo, stream, "group-status", "Status recorded.")
 	var q trace.QueuedTurn
 	for i := 0; i < 20; i++ {
 		var err error
-		q, err = f.repo.ClaimTurn(context.Background(), stream, trace.ChiefOfStaff, fmt.Sprintf("group-reply-token-%d", i), t.TempDir(), time.Now().UTC())
+		q, err = f.repo.ClaimTurn(context.Background(), stream, trace.Manager, fmt.Sprintf("group-reply-token-%d", i), t.TempDir(), time.Now().UTC())
 		must(t, err)
 		if q.Request.Prompt == "Coordinate the whole group" {
 			break
 		}
-		fixturekit.AnswerChief(t, f.repo, stream, q.Request.TurnID, "Chief activity recorded.")
+		fixturekit.AnswerManager(t, f.repo, stream, q.Request.TurnID, "Manager activity recorded.")
 	}
 	if q.Request.Prompt != "Coordinate the whole group" {
-		t.Fatal("owner message did not follow the queued chief activity")
+		t.Fatal("owner message did not follow the queued manager activity")
 	}
-	fixturekit.AnswerChief(t, f.repo, stream, q.Request.TurnID, "The group will coordinate.")
+	fixturekit.AnswerManager(t, f.repo, stream, q.Request.TurnID, "The group will coordinate.")
 	p.AwaitText("#workgroup-content .feed", "The group will coordinate.")
 	p.Eval(`window.groupEventKind = "conversation"`, nil)
 	_, err := f.c.Send(context.Background(), quiet, "A message addressed to the other member")
@@ -251,7 +251,7 @@ func TestBrowserWorkgroupDecisionIdentityAndLateOutcomes(t *testing.T) {
 	}
 	p.Await("one dispatch per recorded shared answer", `outcomeRequests[`+quote(first.Answer.Path)+`] === 1 && outcomeRequests[`+quote(second.Answer.Path)+`] === 1`)
 	p.Await("no graph without edges", `!document.querySelector('#workgroup-content .workgroup-graph')`)
-	_, err := f.repo.ProposeCharter(context.Background(), trace.ChiefOfStaff, f.chief, second.Asked[0].ID, "Keep upload interfaces compatible.", func(string) int { return 2 }, time.Now().UTC())
+	_, err := f.repo.ProposeCharter(context.Background(), trace.Manager, f.manager, second.Asked[0].ID, "Keep upload interfaces compatible.", func(string) int { return 2 }, time.Now().UTC())
 	must(t, err)
 	p.AwaitText("#workgroup-content [data-proposal]", "Keep upload interfaces compatible.")
 	p.AwaitText("#workgroup-content [data-proposal] [data-group-decision-repo]", "Uploads repo")
@@ -266,7 +266,7 @@ func TestBrowserWorkgroupPhoneLayout(t *testing.T) {
 	t.Parallel()
 	f := newWorkgroupPageFixture(t, false)
 	longGoal := strings.Repeat("UnbrokenGoal", 20)
-	_, err := f.repo.SetStatus(context.Background(), trace.ChiefOfStaff, f.chief, trace.StatusContent{Goal: longGoal, Note: "The chief coordinates both repos.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	_, err := f.repo.SetStatus(context.Background(), trace.Manager, f.manager, trace.StatusContent{Goal: longGoal, Note: "The manager coordinates both repos.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	must(t, err)
 	p := openOutcomePage(t, f.s)
 	openWorkgroup(p, f.group.ID)
@@ -346,17 +346,17 @@ func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
 		must(t, err)
 		members = append(members, trace.CrossRepoMember{Project: repo, Workstream: f.streams[id]})
 	}
-	chief, g, err := trace.CreateWorkgroupTrace(ctx, f.cfg.Root, members, demoStart, ownerActor, "fixture")
+	manager, g, err := trace.CreateWorkgroupTrace(ctx, f.cfg.Root, members, demoStart, ownerActor, "fixture")
 	must(t, err)
 	for _, m := range members {
 		must(t, m.Project.JoinCrossRepoWorkgroup(ctx, m.Workstream, g.ID, demoStart, ownerActor, "fixture"))
 	}
 	host := g.Members[0]
-	_, err = chief.EnsureChiefOfStaff(ctx, host, demoStart, ownerActor)
+	_, err = manager.EnsureManager(ctx, host, demoStart, ownerActor)
 	must(t, err)
 	claim := func(repo *trace.Repository, ws config.WorkstreamID, agent, role, turn string) coreadapter.Scope {
 		t.Helper()
-		if agent != trace.ChiefOfStaff {
+		if agent != trace.Manager {
 			must(t, repo.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: agent, Revision: 1, Project: repo.Project(), Workstream: ws, At: demoStart, Actor: ownerActor, Cause: "fixture"}, Role: role, ThreadID: agent}))
 		}
 		h := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request-" + turn, Revision: 1, Project: repo.Project(), Workstream: ws, At: demoStart, Actor: ownerActor, Cause: "fixture"}
@@ -366,8 +366,8 @@ func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
 		must(t, err)
 		return coreadapter.Scope{Project: string(repo.Project()), Workstream: string(ws), Role: role, Thread: agent, Turn: turn}
 	}
-	cs := claim(chief, host, trace.ChiefOfStaff, trace.ChiefOfStaff, "shared-question-chief")
-	_, err = chief.SetStatus(ctx, trace.ChiefOfStaff, cs, trace.StatusContent{Goal: "Coordinate two repositories", Note: "One chief owns the shared question.", Agents: []string{}}, demoStart, func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	cs := claim(manager, host, trace.Manager, trace.Manager, "shared-question-manager")
+	_, err = manager.SetStatus(ctx, trace.Manager, cs, trace.StatusContent{Goal: "Coordinate two repositories", Note: "One manager owns the shared question.", Agents: []string{}}, demoStart, func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	must(t, err)
 	qs := []string{}
 	for i, m := range members {
@@ -377,10 +377,10 @@ func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
 		must(t, err)
 		qs = append(qs, string(m.Workstream)+":"+q.ID)
 	}
-	_, err = chief.EscalateQuestions(ctx, trace.ChiefOfStaff, cs, trace.EscalationRequest{Questions: qs, Rephrasing: "May the shared interface change?", Blocked: "Both repositories", Recommendation: "Keep the interface stable."}, demoStart)
+	_, err = manager.EscalateQuestions(ctx, trace.Manager, cs, trace.EscalationRequest{Questions: qs, Rephrasing: "May the shared interface change?", Blocked: "Both repositories", Recommendation: "Keep the interface stable."}, demoStart)
 	must(t, err)
-	synthetic := chief.Project()
-	must(t, chief.Close())
+	synthetic := manager.Project()
+	must(t, manager.Close())
 	for _, m := range members {
 		must(t, m.Project.Close())
 	}
@@ -442,14 +442,14 @@ func TestBrowserCrossProjectWorkgroupAppearsOnBothCardsWithProjectLabels(t *test
 		must(t, err)
 		members = append(members, trace.CrossRepoMember{Project: r, Workstream: f.streams[id]})
 	}
-	chief, g, err := trace.CreateWorkgroupTrace(ctx, f.cfg.Root, members, demoStart, ownerActor, "fixture")
+	manager, g, err := trace.CreateWorkgroupTrace(ctx, f.cfg.Root, members, demoStart, ownerActor, "fixture")
 	must(t, err)
 	for _, m := range members {
 		must(t, m.Project.JoinCrossRepoWorkgroup(ctx, m.Workstream, g.ID, demoStart, ownerActor, "fixture"))
 	}
-	_, err = chief.EnsureChiefOfStaff(ctx, g.Members[0], demoStart, ownerActor)
+	_, err = manager.EnsureManager(ctx, g.Members[0], demoStart, ownerActor)
 	must(t, err)
-	must(t, chief.Close())
+	must(t, manager.Close())
 	for _, m := range members {
 		must(t, m.Project.Close())
 	}

@@ -57,20 +57,20 @@ func sessionWorktreePath(root string, p config.ProjectID, s config.WorkstreamID)
 
 type pageFixture struct {
 	*servicetest.PageFixture
-	s     *service.Service
-	c     *service.Client
-	chief coreadapter.Scope
+	s       *service.Service
+	c       *service.Client
+	manager coreadapter.Scope
 }
 
 func newPageFixture(t *testing.T) *pageFixture {
 	t.Helper()
 	f := servicetest.NewPageFixture(t)
-	return &pageFixture{PageFixture: f, s: f.S, c: f.C, chief: f.Chief}
+	return &pageFixture{PageFixture: f, s: f.S, c: f.C, manager: f.Manager}
 }
 func (f *pageFixture) status(t *testing.T, c trace.StatusContent) { t.Helper(); f.Status(t, c) }
-func (f *pageFixture) answerChief(t *testing.T, w config.WorkstreamID, turn, final string) {
+func (f *pageFixture) answerManager(t *testing.T, w config.WorkstreamID, turn, final string) {
 	t.Helper()
-	fixturekit.AnswerChief(t, service.InspectForTest(f.s).SoleRepository(), w, turn, final)
+	fixturekit.AnswerManager(t, service.InspectForTest(f.s).SoleRepository(), w, turn, final)
 }
 
 type twoProjectFixture struct {

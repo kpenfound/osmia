@@ -16,7 +16,7 @@ func TestTraceRulingsNameTheirDecider(t *testing.T) {
 		decider string
 	}{
 		{"the owner's ruling", trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Files."}, trace.DecidedByOwner},
-		{"the chief of staff's answer", trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "Files."}, trace.DecidedByChief},
+		{"the manager's answer", trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "Files."}, trace.ManagerDisplay},
 		{"Jev's ruling", trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Files.", DecidedBy: trace.DecidedByJev, Judgment: "judgment_ab12"}, trace.DecidedByJev},
 	} {
 		got := w.questionRuling(c.ruling)
@@ -24,7 +24,7 @@ func TestTraceRulingsNameTheirDecider(t *testing.T) {
 			t.Errorf("%s: decided by %q with judgment %q, want %q and %q", c.name, got.DecidedBy, got.Judgment, c.decider, c.ruling.Judgment)
 		}
 	}
-	for by, want := range map[string]string{"": trace.DecidedByOwner, "owner": trace.DecidedByOwner, "chief of staff": trace.DecidedByChief, "jev": trace.DecidedByJev} {
+	for by, want := range map[string]string{"": trace.DecidedByOwner, "owner": trace.DecidedByOwner, trace.ManagerRulerName: trace.ManagerDisplay, "jev": trace.DecidedByJev} {
 		if got := contestDecider(by); got != want {
 			t.Errorf("contestDecider(%q) = %q, want %q", by, got, want)
 		}

@@ -695,7 +695,7 @@ func (c *Client) TraceCommit(ctx context.Context, id config.WorkstreamID, commit
 	return v, err
 }
 
-// Send sends an owner message to a workstream's chief of staff. It returns
+// Send sends an owner message to a workstream's manager. It returns
 // once the message is durable.
 func (c *Client) Send(ctx context.Context, id config.WorkstreamID, text string) (api.ConversationEntry, error) {
 	var v api.ConversationEntry
@@ -703,7 +703,7 @@ func (c *Client) Send(ctx context.Context, id config.WorkstreamID, text string) 
 	return v, err
 }
 
-// Conversation lists a workstream's conversation with its chief of staff.
+// Conversation lists a workstream's conversation with its manager.
 func (c *Client) Conversation(ctx context.Context, id config.WorkstreamID) (api.ConversationResponse, error) {
 	var v api.ConversationResponse
 	err := c.Do(ctx, "GET", api.Prefix+"/conversation/"+url.PathEscape(string(id)), nil, &v)

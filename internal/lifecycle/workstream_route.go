@@ -20,7 +20,7 @@ func (s *Controller) workstreamMoveRecords(ctx context.Context, repo *trace.Repo
 	} else if action != "" {
 		return workstreamMoveRecord{}, &APIError{Code: Conflict, Message: "the workstream's publication is in flight; it moves once the publication has an outcome"}
 	}
-	by := "the " + rulerName(actor)
+	by := "the " + trace.DisplayRuler(rulerName(actor))
 	var reason string
 	switch to {
 	case BuildingState:
@@ -131,7 +131,7 @@ var workstreamMoveTargets = map[string]router.Target{
 
 // NoMoveTarget is the target of a proposal the router leaves unmoved: the
 // workstream stays where it is. It is the default of a proposal that a policy
-// of the chief of staff sets to stay: reopening a workstream whose final reviews
+// of the manager sets to stay: reopening a workstream whose final reviews
 // have found blocking problems maxFinalRounds times, and a return to delivered.
 const NoMoveTarget = "no_move"
 
@@ -174,7 +174,7 @@ func (s *Controller) workstreamMoveExit(repo *trace.Repository, stream config.Wo
 		trigger, authority = intake.TriggerMoveOwner, &router.Authority{Kind: router.AuthorityOwner, Target: to}
 		names = []string{to}
 	case !policy.Stay:
-		authority = &router.Authority{Kind: router.AuthorityChief, Target: to}
+		authority = &router.Authority{Kind: router.AuthorityManager, Target: to}
 		names = []string{to}
 	}
 	targets := make([]router.Target, 0, len(names)+1)
@@ -227,8 +227,8 @@ func (s *Controller) workstreamMoveExit(repo *trace.Repository, stream config.Wo
 	return x, nil
 }
 
-// RebuildWorkstreamExit returns how the router rebuilds the exit of a chief of
-// staff's proposal to move a workstream from its route record, to finish a pick
+// RebuildWorkstreamExit returns how the router rebuilds the exit of a manager's
+// proposal to move a workstream from its route record, to finish a pick
 // that was recorded but not applied when the service stopped. An exit raised by
 // a pass, or that carried an authority, is raised again by its own pass. load
 // returns the lifecycle controller.
@@ -268,7 +268,7 @@ type StalledInput struct {
 	// another occurrence.
 	Cause string
 	Actor trace.Actor
-	// Notice is the notice to the chief of staff the default commits.
+	// Notice is the notice to the manager the default commits.
 	Notice string
 	// Reason is the transition's reason when the exit is followed.
 	Reason   string
@@ -278,7 +278,7 @@ type StalledInput struct {
 
 // StalledExit returns the exit of a workstream that has not progressed for the
 // stall window with nothing to explain it. The default leaves the workstream
-// where it is and tells the chief of staff; an assembled workstream can instead
+// where it is and tells the manager; an assembled workstream can instead
 // be sent to a fresh final review of its branch at the modest bar, and so can a
 // building workstream with nothing left to build: every unit merged and no
 // discovery or revision pending.
@@ -302,7 +302,7 @@ func (s *Controller) StalledExit(repo *trace.Repository, stream config.Workstrea
 			return WorkstreamMoveDocument(s.nextMove(repo, stream)) + "-" + t.Name
 		},
 		Enter: func(context.Context, router.Plan) (router.Effect, error) {
-			return router.Effect{Events: []trace.Event{trace.Notice(id+"-"+in.Cause, "chief", in.Notice)}, Reason: in.Reason}, nil
+			return router.Effect{Events: []trace.Event{trace.Notice(id+"-"+in.Cause, trace.ManagerKey, in.Notice)}, Reason: in.Reason}, nil
 		},
 		Prereq: router.Prerequisites{
 			Other: func(ctx context.Context, t router.Target) (string, error) {
@@ -378,7 +378,7 @@ func (s *Controller) proposeToOwner(ctx context.Context, repo *trace.Repository,
 // RegisterWorkstreamEffects defines, in the router's registry, the effect of
 // entering each feature state a move reaches, and of the departures of a final
 // review's round: the move with its note, its document and its notice. They are
-// what the owner's command and the chief of staff's tool record, and every
+// what the owner's command and the manager's tool record, and every
 // other way a workstream is moved to a state its trigger does not enter as a
 // default. load returns the lifecycle controller.
 func RegisterWorkstreamEffects(reg *router.Effects, load func() *Controller) {

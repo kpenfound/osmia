@@ -202,21 +202,21 @@ func TestClaimsHoldSlotsUntilARestartInterruptsThem(t *testing.T) {
 	}
 }
 
-func TestChiefOfStaffTakesNoSlot(t *testing.T) {
+func TestManagerTakesNoSlot(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t, "mason1", "mason2")
 	defer repo.Close()
 	limits := &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 1}
-	f.queueOn(t, repo, stream, trace.ChiefOfStaff, "one")
+	f.queueOn(t, repo, stream, trace.Manager, "one")
 	f.queue(t, repo, "mason1", "one")
 	s, err := New(repo, Options{Now: f.clock.Now, Capacity: limits})
 	must(t, err)
 	must(t, s.Pass(ctx))
-	if got := dispatched(t, repo); !slices.Equal(got, []string{"chief_of_staff/one", "mason1/one"}) {
+	if got := dispatched(t, repo); !slices.Equal(got, []string{trace.Manager+"/one", "mason1/one"}) {
 		t.Fatalf("dispatched %v", got)
 	}
 	f.queue(t, repo, "mason2", "one")
-	f.queueOn(t, repo, stream, trace.ChiefOfStaff, "two")
+	f.queueOn(t, repo, stream, trace.Manager, "two")
 	_, err = repo.ClaimTurn(ctx, stream, "mason1", "token", t.TempDir(), f.clock.Now())
 	must(t, err)
 	var ran []string
@@ -226,10 +226,10 @@ func TestChiefOfStaffTakesNoSlot(t *testing.T) {
 	}), Options{Capacity: limits})
 	must(t, c.Pass(ctx))
 	must(t, c.Pass(ctx))
-	if !slices.Equal(ran, []string{"chief_of_staff/one", "chief_of_staff/two"}) {
+	if !slices.Equal(ran, []string{trace.Manager+"/one", trace.Manager+"/two"}) {
 		t.Fatalf("ran %v", ran)
 	}
-	if got := dispatched(t, repo); !slices.Equal(got, []string{"chief_of_staff/one", "chief_of_staff/two", "mason1/one"}) {
+	if got := dispatched(t, repo); !slices.Equal(got, []string{trace.Manager+"/one", trace.Manager+"/two", "mason1/one"}) {
 		t.Fatalf("dispatched %v", got)
 	}
 }
@@ -319,21 +319,21 @@ func TestPassPublishesTheTurnsItLeftWithoutASlot(t *testing.T) {
 	}
 }
 
-func TestWorkstreamOfAnUnregisteredKindRunsOnlyItsChiefOfStaff(t *testing.T) {
+func TestWorkstreamOfAnUnregisteredKindRunsOnlyItsManager(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t, "mason1")
 	defer repo.Close()
 	waiting := config.WorkstreamID("w_00000000000000000000000000000009")
 	must(t, repo.CreateWorkstreamKind(ctx, waiting, "", "mystery", f.clock.Now(), owner))
 	f.thread(t, repo, waiting, "mason9", "mason")
-	f.queueOn(t, repo, waiting, trace.ChiefOfStaff, "notice")
+	f.queueOn(t, repo, waiting, trace.Manager, "notice")
 	f.queueOn(t, repo, waiting, "mason9", "one")
 	f.queue(t, repo, "mason1", "one")
 	limits := &config.Capacity{Masons: 2, Reviewers: 1, Committee: 1, PerWorkstream: 2}
 	s, err := New(repo, Options{Now: f.clock.Now, Capacity: limits})
 	must(t, err)
 	must(t, s.Pass(ctx))
-	if got := dispatched(t, repo, waiting); !slices.Equal(got, []string{"chief_of_staff/notice"}) {
+	if got := dispatched(t, repo, waiting); !slices.Equal(got, []string{trace.Manager+"/notice"}) {
 		t.Fatalf("turns dispatched on the workstream of an unregistered kind: %v", got)
 	}
 	if got := dispatched(t, repo); !slices.Equal(got, []string{"mason1/one"}) {

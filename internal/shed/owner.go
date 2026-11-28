@@ -32,7 +32,7 @@ const Owner Kind = "owner"
 
 func reserved(name string) bool {
 	switch name {
-	case replyName, redraftedName, rulingsName, chiefName, moreName, redraftName, packetName, ratificationName:
+	case replyName, redraftedName, rulingsName, trace.ManagerKey, moreName, redraftName, packetName, ratificationName:
 		return true
 	}
 	return false
@@ -121,7 +121,7 @@ func (r Rulings) check() error {
 			return errors.New("a ruling requires the objection it rules on")
 		case !slices.Contains(Dispositions, one.Disposition):
 			return fmt.Errorf("unsupported disposition %q", one.Disposition)
-		case !trace.ValidDecider(one.DecidedBy, one.Judgment) || one.DecidedBy == trace.DecidedByChief:
+		case !trace.ValidDecider(one.DecidedBy, one.Judgment) || one.DecidedBy == trace.DecidedByManager:
 			return fmt.Errorf("the ruling on objection %s names the owner or Jev with its judgment as its decider", one.Objection)
 		case seen[one.Objection]:
 			return fmt.Errorf("objection %s is ruled on twice", one.Objection)

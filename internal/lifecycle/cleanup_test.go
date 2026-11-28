@@ -211,7 +211,7 @@ func TestCleanupRemovesTheTurnDirectoriesOfAFinishedWorkstream(t *testing.T) {
 		filepath.Join("architect", project, string(stream), "draft-1", "session", "transcript.jsonl"),
 		filepath.Join("shed", project, string(stream), "round-1-member-1", "session", "prompt.md"),
 		filepath.Join("final", project, string(stream), "final-1", "session", "report.json"),
-		filepath.Join("chief_of_staff", project, string(stream), "status.json"),
+		filepath.Join(trace.Manager, project, string(stream), "status.json"),
 		filepath.Join("workspaces", project, string(stream), "notes.md"),
 		filepath.Join("views", project, string(stream), "mason", "turn-1", "output.txt"),
 		filepath.Join("checks", project, string(stream), "final-123", "output.txt"),
@@ -231,11 +231,11 @@ func TestCleanupRemovesTheTurnDirectoriesOfAFinishedWorkstream(t *testing.T) {
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: intake.AbandonTransition, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.S.Now(), Actor: intake.OwnerActor, Cause: intake.AbandonTransition}
 	_, err := repository.SetFeatureStateUnless(ctx, h, intake.AbandonedState, "superseded", intake.AbandonedState, intake.DeliveredState)
 	fixturekit.Must(t, err)
-	_, err = repository.EnsureChiefOfStaff(ctx, stream, f.S.Now(), intake.ServiceActor)
+	_, err = repository.EnsureManager(ctx, stream, f.S.Now(), intake.ServiceActor)
 	fixturekit.Must(t, err)
 	request := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_owner-message", Revision: 1, Project: repository.Project(), Workstream: stream, At: f.S.Now(), Actor: intake.OwnerActor, Cause: "fixture"}
-	_, err = repository.EnqueueTurn(ctx, trace.TurnRequest{Header: request, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "owner-message",
-		Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are the chief of staff.", Prompt: "Anything left?"})
+	_, err = repository.EnqueueTurn(ctx, trace.TurnRequest{Header: request, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "owner-message",
+		Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are the manager.", Prompt: "Anything left?"})
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, c.Pass(ctx))
 	assertUnitWorkspace(t, f, repository, stream, "upload", false)

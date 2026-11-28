@@ -197,11 +197,11 @@ func Notice(t *testing.T, repository *trace.Repository, stream config.Workstream
 	outbox, err := repository.Outbox(stream)
 	fixturekit.Must(t, err)
 	for _, entry := range outbox {
-		if entry.TransitionID == transition && ChiefEvent(entry.Event) {
+		if entry.TransitionID == transition && ManagerEvent(entry.Event) {
 			return entry.Event.Body
 		}
 	}
-	t.Fatalf("transition %s of workstream %s told the chief of staff nothing", transition, stream)
+	t.Fatalf("transition %s of workstream %s told the manager nothing", transition, stream)
 	return ""
 }
 

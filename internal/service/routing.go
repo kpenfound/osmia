@@ -42,7 +42,7 @@ func (s *Service) Router() *router.Router { return s.router }
 
 // RouteExit decides an exit and commits the result, waiting in place for Jev up
 // to its timeout. It is for callers that already wait on a request, such as an
-// owner command or a chief-of-staff tool, and never for a scheduling pass.
+// owner command or a manager tool, and never for a scheduling pass.
 func (s *Service) RouteExit(ctx context.Context, x router.Exit) (router.Result, error) {
 	return s.router.Route(ctx, x)
 }

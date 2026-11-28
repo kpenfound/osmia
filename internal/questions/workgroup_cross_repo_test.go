@@ -74,13 +74,13 @@ func claimCrossRepoTurn(t *testing.T, r *trace.Repository, p config.ProjectID, s
 	t.Helper()
 	ctx := context.Background()
 	threadID := agent + "_thread"
-	if agent == trace.ChiefOfStaff {
-		threadID = trace.ChiefOfStaff
+	if agent == trace.Manager {
+		threadID = trace.Manager
 	}
 	header := func(kind, id string) trace.Header {
 		return trace.Header{Schema: "osmia.trace." + kind, Version: trace.Version, ID: id, Revision: 1, Project: p, Workstream: stream, Unit: unit, At: start, Actor: trace.Actor{Kind: "service", ID: "controller"}, Cause: "test", Depth: 1}
 	}
-	if agent != trace.ChiefOfStaff {
+	if agent != trace.Manager {
 		if err := r.CreateThread(ctx, trace.Agent{Header: header("agent", agent), Role: role, ThreadID: threadID}); err != nil {
 			t.Fatal(err)
 		}
@@ -143,14 +143,14 @@ func TestCrossRepoRouteAmendmentToolLandsOnAskingMemberAndResumes(t *testing.T) 
 		t.Fatalf("ask result: %s", askResult)
 	}
 
-	chiefScope := claimCrossRepoTurn(t, wg, wg.Project(), host, trace.ChiefOfStaff, trace.ChiefOfStaff, "", "chief1")
-	chiefTools, err := questions.Tools(wg, trace.ChiefOfStaff, chiefScope, func() time.Time { return start })
+	managerScope := claimCrossRepoTurn(t, wg, wg.Project(), host, trace.Manager, trace.Manager, "", "manager1")
+	managerTools, err := questions.Tools(wg, trace.Manager, managerScope, func() time.Time { return start })
 	if err != nil {
 		t.Fatal(err)
 	}
-	chiefTools = decided(t, wg, host, chiefTools)
+	managerTools = decided(t, wg, host, managerTools)
 	var routeTool coreadapter.Tool
-	for _, tool := range chiefTools {
+	for _, tool := range managerTools {
 		if tool.Name == questions.RouteAmendmentTool {
 			routeTool = tool
 		}

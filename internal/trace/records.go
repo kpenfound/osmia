@@ -75,7 +75,7 @@ func (Transition) traceRecord() {}
 
 // Question is one question a role asked. Revision 1 holds it as asked, with
 // the asking agent's thread and turn. An escalation appends a revision whose
-// SentToOwner is the chief of staff's rephrasing and whose Escalation holds
+// SentToOwner is the manager's rephrasing and whose Escalation holds
 // the rest of what the owner is sent.
 type Question struct {
 	Header
@@ -109,7 +109,7 @@ type Amendment struct {
 
 func (Amendment) traceRecord() {}
 
-// Escalation is the chief of staff's choice to send questions to the owner.
+// Escalation is the manager's choice to send questions to the owner.
 // Batch identifies the escalation and Questions lists every question it
 // covers, so the revisions of one batch carry the same value. Inbox numbers
 // the escalation among all of the project's, from 1. Workstreams, when
@@ -141,10 +141,10 @@ func (e Escalation) workstreamOf(i int, home config.WorkstreamID) config.Workstr
 
 func (Question) traceRecord() {}
 
-// Ruling is the answer to one question. The chief of staff's own answer is a
+// Ruling is the answer to one question. The manager's own answer is a
 // single revision with Decision DecisionAnswer. The owner's ruling on an
 // escalated question is revision 1, Decision DecisionRuling with OwnerResponse
-// as the owner gave it; the chief of staff's relay is revision 2, which adds
+// as the owner gave it; the manager's relay is revision 2, which adds
 // ReturnedAnswer, what the asker receives, and Scope.
 type Ruling struct {
 	Header
@@ -230,7 +230,7 @@ type TurnStop struct {
 	Reason string `json:"reason"`
 }
 
-// Status is the chief of staff's status for one workstream. Each revision
+// Status is the manager's status for one workstream. Each revision
 // replaces the previous one as a whole; the record ID is always StatusID.
 type Status struct {
 	Header
@@ -325,7 +325,7 @@ func validate(r Record) error {
 	case Question:
 		valid = validActor(v.AskedBy) && present(v.Question) && (v.Thread == "" || key(v.Thread)) && (v.Turn == "" || key(v.Turn)) && (v.Escalation == nil || present(v.SentToOwner) && v.Escalation.valid(h.ID))
 	case Amendment:
-		valid = validActor(v.Requester) && (v.Role == "mason" || v.Role == "reviewer" || v.Role == ChiefOfStaff || v.Role == "service" && v.Actor.Kind == "service" && v.Cause == "budget-per-unit") && key(v.Thread) && key(v.Turn) && (v.QuestionID == "" || key(v.QuestionID)) && len(v.Citations) > 0 && present(v.Change) && present(v.Reason) && v.Seal > 0 && v.SealRevision > 0 && present(v.SpecHash) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
+		valid = validActor(v.Requester) && (v.Role == "mason" || v.Role == "reviewer" || v.Role == Manager || v.Role == "service" && v.Actor.Kind == "service" && v.Cause == "budget-per-unit") && key(v.Thread) && key(v.Turn) && (v.QuestionID == "" || key(v.QuestionID)) && len(v.Citations) > 0 && present(v.Change) && present(v.Reason) && v.Seal > 0 && v.SealRevision > 0 && present(v.SpecHash) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
 	case Ruling:
 		valid = key(v.QuestionID) && v.QuestionRevision > 0 && present(v.Decision) && (present(v.ReturnedAnswer) || present(v.OwnerResponse)) && validRulingScope(v) && ValidDecider(v.DecidedBy, v.Judgment) && validRulingActor(v) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
 	case Agent:
@@ -426,7 +426,7 @@ func unitPath(parts []string) bool {
 	if checkOutputName(parts[2]) || checkSelectionName(parts[2]) {
 		return true
 	}
-	if contest, ok := strings.CutPrefix(parts[2], "chief-"); ok && strings.HasSuffix(contest, ".json") && key(strings.TrimSuffix(contest, ".json")) {
+	if contest, ok := strings.CutPrefix(parts[2], ManagerKey+"-"); ok && strings.HasSuffix(contest, ".json") && key(strings.TrimSuffix(contest, ".json")) {
 		return true
 	}
 	if parts[2] == "report.json" || parts[2] == "review.json" || parts[2] == "landing.json" || parts[2] == "rebase.json" || parts[2] == "change.json" || parts[2] == "dispatch.json" || parts[2] == "verification.json" || parts[2] == "features.json" || parts[2] == "verification-measure.json" {

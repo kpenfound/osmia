@@ -183,7 +183,7 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 	defer cancel()
 	running := runningTurn{project: a.repository.Project(), cancel: cancel}
 	th, err := a.repository.Thread(in.Workstream, in.Agent)
-	if err == nil && !trace.ChiefLike(th.Identity.Role) {
+	if err == nil && !trace.ManagerLike(th.Identity.Role) {
 		ctx, running.stop = thread.Stoppable(ctx)
 	}
 	defer a.s.turns.track(in.Workstream, running)()
@@ -210,7 +210,7 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 		}
 		defer release()
 	}
-	attrs := []any{"project", string(a.repository.Project()), "workstream", string(in.Workstream), "role", role, "profile", profile}
+	attrs := []any{"project", string(a.repository.Project()), "workstream", string(in.Workstream), "role", trace.DisplayRole(role), "profile", profile}
 	if unit != "" {
 		attrs = append(attrs, "unit", unit)
 	}

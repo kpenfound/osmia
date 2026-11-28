@@ -2823,7 +2823,7 @@ details.footnote > :not(summary) {
   .workgroup-members { grid-template-columns: minmax(0, 1fr); }
 }
 
-.member-chief-line {
+.member-manager-line {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem 1rem;
@@ -2831,7 +2831,7 @@ details.footnote > :not(summary) {
   color: var(--text-muted);
   font-size: var(--fs-ui);
 }
-.member-chief-line span { overflow-wrap: anywhere; }
+.member-manager-line span { overflow-wrap: anywhere; }
 .composer-about:empty { display: none; }
 .composer-about { margin-bottom: 0.4rem; }
 .composer-about button { padding: 0 0.35rem; }
@@ -2851,7 +2851,7 @@ details.footnote > :not(summary) {
 
 /* Conversation and Activity. Conversation notes the work's milestones in a
    quiet line each; Activity holds every event, folded into runs, with older
-   chief statuses receding behind the current one. */
+   manager statuses receding behind the current one. */
 
 .feed .entry.milestone {
   margin: 0;

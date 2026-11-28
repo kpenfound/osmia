@@ -125,11 +125,11 @@ func TestFeatureHooksWrapTheUnitsLoop(t *testing.T) {
 	if got := k.Progress(Reading{}); got.Panel != "units" || got.Summary != "" {
 		t.Fatalf("progress of no units: %+v", got)
 	}
-	if !slices.Equal(k.ChiefTools, []string{"move_unit"}) {
-		t.Fatalf("chief tools: %v", k.ChiefTools)
+	if !slices.Equal(k.ManagerTools, []string{"move_unit"}) {
+		t.Fatalf("manager tools: %v", k.ManagerTools)
 	}
-	if !slices.Equal(ChiefToolNames(), []string{"move_unit", "climb_steer", "climb_conclude"}) {
-		t.Fatalf("chief tools of every kind: %v", ChiefToolNames())
+	if !slices.Equal(ManagerToolNames(), []string{"move_unit", "climb_steer", "climb_conclude"}) {
+		t.Fatalf("manager tools of every kind: %v", ManagerToolNames())
 	}
 	if k.Loop.Name != "units" || !slices.Contains(k.Loop.States, "implementing") {
 		t.Fatalf("loop: %+v", k.Loop)

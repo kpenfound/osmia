@@ -19,7 +19,7 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func TestDesignProductionSharedChiefAssumptionsReachMemberDraftsAcrossRestart(t *testing.T) {
+func TestDesignProductionSharedManagerAssumptionsReachMemberDraftsAcrossRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := journey.NewConfiguredProductionDesignFixture(t, journey.ProductionDesignConfiguration{Wait: journey.LifecycleAwait})
@@ -51,7 +51,7 @@ func TestDesignProductionSharedChiefAssumptionsReachMemberDraftsAcrossRestart(t 
 				return nil, fmt.Errorf("assumption refused: %s", result)
 			}
 		}
-		return intakefixture.QuestionResult(req, "session-chief", "Retry judgments recorded."), nil
+		return intakefixture.QuestionResult(req, "session-manager", "Retry judgments recorded."), nil
 	}
 	f.Engine.Mu.Unlock()
 	sent, err := f.C.Send(ctx, f.Stream2, marker)
@@ -100,7 +100,7 @@ func TestDesignProductionSharedChiefAssumptionsReachMemberDraftsAcrossRestart(t 
 	before := check()
 	repo, err := f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	authority, host, _, closeAuthority, err := f.S.Lifecycle().ChiefRepository(ctx, repo, f.Stream1)
+	authority, host, _, closeAuthority, err := f.S.Lifecycle().ManagerRepository(ctx, repo, f.Stream1)
 	fixturekit.Must(t, err)
 	doc, err := trace.Get[trace.Document](authority, host, trace.AssumptionsDocument, 2)
 	closeAuthority()

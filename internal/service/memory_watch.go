@@ -49,7 +49,7 @@ func (s *Service) watchMemory(ctx context.Context, repo *trace.Repository) error
 		if cursor != "" {
 			args["after"] = cursor
 		}
-		raw, err := (hearsay.Client{Config: cfg.Hearsay}).Call(ctx, trace.ChiefOfStaff, "watch", args)
+		raw, err := (hearsay.Client{Config: cfg.Hearsay}).Call(ctx, trace.Manager, "watch", args)
 		if ctx.Err() != nil {
 			return nil
 		}

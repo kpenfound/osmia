@@ -51,7 +51,7 @@ func (c *runtimeControls) pauseControl(repository *trace.Repository, scope corea
 		if err := d.Decode(new(any)); err != io.EOF {
 			return nil, errors.New("tool input must be one object")
 		}
-		_, owner, err := repository.OwnerTurn(trace.ChiefOfStaff, scope)
+		_, owner, err := repository.OwnerTurn(trace.Manager, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -198,7 +198,7 @@ func (s *Service) holdingCause(repository *trace.Repository) func(config.Workstr
 		} else if held && op.Boundary == coreadapter.RunnerBoundary {
 			if input, err := thread.DecodeTurn(op); err == nil {
 				t, err := repository.Thread(stream, input.Agent)
-				if err == nil && trace.ChiefLike(t.Identity.Role) {
+				if err == nil && trace.ManagerLike(t.Identity.Role) {
 					return scheduler.NotHeld
 				}
 			}
@@ -210,7 +210,7 @@ func (s *Service) holdingCause(repository *trace.Repository) func(config.Workstr
 		if waiting, err := baseWaiting(repository, stream); op.Action != baseRefreshAction && (err != nil || waiting) {
 			if input, err := thread.DecodeTurn(op); err == nil {
 				t, err := repository.Thread(stream, input.Agent)
-				if err == nil && trace.ChiefLike(t.Identity.Role) {
+				if err == nil && trace.ManagerLike(t.Identity.Role) {
 					return scheduler.NotHeld
 				}
 			}

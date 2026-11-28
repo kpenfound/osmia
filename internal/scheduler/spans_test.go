@@ -101,10 +101,10 @@ func TestScheduledTurnHoldsOneSlotSpanFromDispatchToWhereThePoolStopsCounting(t 
 	f, repo := setup(t, "mason1")
 	defer repo.Close()
 	f.thread(t, repo, stream, "reviewer1", "reviewer")
-	f.thread(t, repo, stream, "chief", trace.ChiefOfStaff)
+	f.thread(t, repo, stream, "manager", trace.Manager)
 	f.queue(t, repo, "mason1", "one")
 	f.queue(t, repo, "reviewer1", "one")
-	f.queue(t, repo, "chief", "one")
+	f.queue(t, repo, "manager", "one")
 	rec := r.recorder()
 	defer rec.Close()
 	limits := &config.Capacity{Masons: 1, Reviewers: 2, Committee: 1, PerWorkstream: 5}
@@ -113,7 +113,7 @@ func TestScheduledTurnHoldsOneSlotSpanFromDispatchToWhereThePoolStopsCounting(t 
 	t0 := r.clock.Now()
 	must(t, s.Pass(ctx))
 	if got := len(dispatched(t, repo)); got != 3 {
-		t.Fatalf("dispatched %d turns, want mason, reviewer and chief of staff", got)
+		t.Fatalf("dispatched %d turns, want mason, reviewer and manager", got)
 	}
 	if got := r.spans("osmia.slot.held"); len(got) != 0 {
 		t.Fatalf("held spans while the slots are held: %d", len(got))
@@ -121,7 +121,7 @@ func TestScheduledTurnHoldsOneSlotSpanFromDispatchToWhereThePoolStopsCounting(t 
 	r.clock.Advance(10 * time.Second)
 	finish(t, repo, stream, "mason1", "one", r.clock.Now())
 	finish(t, repo, stream, "reviewer1", "one", r.clock.Now())
-	finish(t, repo, stream, "chief", "one", r.clock.Now())
+	finish(t, repo, stream, "manager", "one", r.clock.Now())
 	if got := r.spans("osmia.slot.held"); len(got) != 0 {
 		t.Fatalf("held spans ended at turn completion: %d", len(got))
 	}

@@ -15,7 +15,7 @@ import (
 // recorded once however often the same attempt is replayed.
 const OperationNoticeSubject = "operation-notice"
 
-// OperationNotice is one notice to the chief of staff about an operation.
+// OperationNotice is one notice to the manager about an operation.
 type OperationNotice struct {
 	// ID names the notice: a retried write of the same ID records nothing more.
 	ID string
@@ -30,7 +30,7 @@ type OperationNotice struct {
 }
 
 // RecordOperationNotice records the notice as a transition of the workstream's
-// OperationNoticeSubject with one outbox event for the chief of staff. The same
+// OperationNoticeSubject with one outbox event for the manager. The same
 // ID recorded again is not an error and records nothing more.
 func (r *Repository) RecordOperationNotice(ctx context.Context, stream config.WorkstreamID, n OperationNotice) error {
 	id := "operation-notice-" + n.ID

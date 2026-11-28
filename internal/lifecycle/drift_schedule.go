@@ -25,7 +25,7 @@ type DriftHistory struct {
 	// for; each is 0 before there is one.
 	Drift, Requested int
 	// RequestedAt is when the latest request was recorded, and RequestedBy
-	// who made it: the owner, or the chief of staff handing a held drift
+	// who made it: the owner, or the manager handing a held drift
 	// rebase back.
 	RequestedAt time.Time
 	RequestedBy string
@@ -55,7 +55,7 @@ func (f *Foreman) History(stream config.WorkstreamID) (DriftHistory, error) {
 				}
 			case DriftRequestSubject:
 				if !r.At.Before(request) {
-					request, h.RequestedBy = r.At, rulerName(r.Actor)
+					request, h.RequestedBy = r.At, trace.DisplayRuler(rulerName(r.Actor))
 				}
 			}
 		case trace.Document:
@@ -95,7 +95,7 @@ func (f *Foreman) History(stream config.WorkstreamID) (DriftHistory, error) {
 }
 
 // DriftDue returns why the sealed workstream takes a drift rebase at now, or
-// "" when it takes none: the owner, or the chief of staff handing a held one
+// "" when it takes none: the owner, or the manager handing a held one
 // back, asked for one it has not had, or, unless
 // its latest drift rebase is held for the owner, its base workstream's
 // branch moved or the project's upstream_rebase interval has elapsed since
@@ -270,7 +270,7 @@ func (s *Controller) RebaseWorkstream(ctx context.Context, raw string) (Workstre
 }
 
 // LatestDrift returns the workstream's latest drift rebase as status reports
-// it, with what its upstream moved events told the chief of staff, or nil
+// it, with what its upstream moved events told the manager, or nil
 // before its first.
 func LatestDrift(repository *trace.Repository, stream config.WorkstreamID, states map[string]trace.WorkflowState) (*DriftStatus, error) {
 	value := states[DriftSubject].Value

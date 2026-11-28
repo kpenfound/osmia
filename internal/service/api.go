@@ -32,7 +32,7 @@ type ActivityTurn = api.ActivityTurn
 
 type ActivityRefusal = api.ActivityRefusal
 
-type ChiefContestDecision = api.ChiefContestDecision
+type ManagerContestDecision = api.ManagerContestDecision
 
 type DeliveryPresentation = api.DeliveryPresentation
 

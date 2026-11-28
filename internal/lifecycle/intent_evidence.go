@@ -547,7 +547,7 @@ func workstreamSummary(repo *trace.Repository, stream config.WorkstreamID, toler
 	}
 	used := 0
 	for _, m := range shown {
-		text, _ := oneLine(fmt.Sprintf("%s moved the workstream from %s to %s: %s", m.By, m.From, m.To, m.Note), evidenceLineBytes)
+		text, _ := oneLine(fmt.Sprintf("%s moved the workstream from %s to %s: %s", trace.DisplayRuler(m.By), m.From, m.To, m.Note), evidenceLineBytes)
 		if used += len(text); used > evidenceMoveBytes {
 			entries = append(entries, router.Entry{Kind: "earlier moves", ID: string(stream), Text: "[cut: the remaining earlier moves are omitted]"})
 			break

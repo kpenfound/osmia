@@ -22,9 +22,13 @@ func runConfigValidate(root, file string, stdout, stderr io.Writer) int {
 		}
 		options.File = file
 	}
-	if _, err := config.LoadTopLevel(options); err != nil {
+	cfg, err := config.LoadTopLevel(options)
+	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
+	}
+	for _, w := range cfg.Warnings {
+		fmt.Fprintln(stderr, "warning: "+w.String())
 	}
 	path := options.File
 	if path == "" {

@@ -86,7 +86,7 @@ func TestDriftRebaseMovesTheFeatureBranchAndTheSeal(t *testing.T) {
 		t.Fatalf("a recorded drift rebase applied again: %+v %v", again, err)
 	}
 	if moved := upstreamMovedEvents(t, repository, stream); len(moved) != 0 {
-		t.Fatalf("a clean drift rebase with nothing visible told the chief of staff %+v", moved)
+		t.Fatalf("a clean drift rebase with nothing visible told the manager %+v", moved)
 	}
 
 	op = journey.RequestDrift(t, d, stream)

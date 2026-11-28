@@ -78,7 +78,7 @@ func (f *traceFetch) fetch(t *testing.T, input string) traceResult {
 	return callTrace(t, f.tool(), input)
 }
 
-func TestChiefFetchesTheWholeOfATraceAndRecordsIt(t *testing.T) {
+func TestManagerFetchesTheWholeOfATraceAndRecordsIt(t *testing.T) {
 	t.Parallel()
 	f := newTraceFetch(t)
 	whole := f.fetch(t, `{"trace_id":"t1"}`)
@@ -87,7 +87,7 @@ func TestChiefFetchesTheWholeOfATraceAndRecordsIt(t *testing.T) {
 	}
 }
 
-func TestChiefTraceOutputHidesTheCloudToken(t *testing.T) {
+func TestManagerTraceOutputHidesTheCloudToken(t *testing.T) {
 	t.Parallel()
 	whole := newTraceFetch(t).fetch(t, `{"trace_id":"t1"}`)
 	if !strings.Contains(whole.Output, "output of cloud traces view t1\n") || strings.Contains(whole.Output, cloudTraceToken) || !strings.Contains(whole.Output, "[redacted]") || whole.Size != len("output of cloud traces view t1\nauth "+cloudTraceToken+"\n") {
@@ -95,7 +95,7 @@ func TestChiefTraceOutputHidesTheCloudToken(t *testing.T) {
 	}
 }
 
-func TestChiefRefetchingARecordedTraceReadsTheRecordWithoutRunningTheCLI(t *testing.T) {
+func TestManagerRefetchingARecordedTraceReadsTheRecordWithoutRunningTheCLI(t *testing.T) {
 	t.Parallel()
 	f := newTraceFetch(t)
 	whole := f.fetch(t, `{"trace_id":"t1"}`)
@@ -107,7 +107,7 @@ func TestChiefRefetchingARecordedTraceReadsTheRecordWithoutRunningTheCLI(t *test
 	}
 }
 
-func TestChiefFetchesEachCheckOfATraceAndItsWholeSeparately(t *testing.T) {
+func TestManagerFetchesEachCheckOfATraceAndItsWholeSeparately(t *testing.T) {
 	t.Parallel()
 	f := newTraceFetch(t)
 	a := f.fetch(t, `{"trace_id":"t2","check":"test:a"}`)
@@ -127,7 +127,7 @@ func TestChiefFetchesEachCheckOfATraceAndItsWholeSeparately(t *testing.T) {
 	}
 }
 
-func TestChiefPassesACheckNamedLikeAFlagAsTheValueOfTheCheckOption(t *testing.T) {
+func TestManagerPassesACheckNamedLikeAFlagAsTheValueOfTheCheckOption(t *testing.T) {
 	t.Parallel()
 	dash := newTraceFetch(t).fetch(t, `{"trace_id":"t3","check":"--help"}`)
 	if !dash.Fetched || !strings.Contains(dash.Output, "output of cloud traces view --check=--help t3\n") {
@@ -224,22 +224,22 @@ func TestFetchCloudTraceIsGrantedOnlyToItsRoles(t *testing.T) {
 	c := newContestFixture(t, "cloud-trace-roles")
 	program, calls := fakeTraceProgram(t, "printf 'trace\\n'\n")
 	fetcher := checks.TraceFetcher{Repository: c.repo, Runner: DaggerChecks{CloudToken: cloudTraceToken, Program: program}}
-	refused := checks.TraceTool(fetcher, c.scope, chiefActor, "committee")
+	refused := checks.TraceTool(fetcher, c.scope, managerActor, "committee")
 	if out, err := refused.Handle(context.Background(), json.RawMessage(`{"trace_id":"t1"}`)); err == nil {
 		t.Fatalf("a turn of another role fetched: %s", out)
 	}
 	if calls() != 0 {
 		t.Fatal("a refused role ran the CLI")
 	}
-	granted := checks.TraceTool(fetcher, c.scope, chiefActor, trace.ChiefOfStaff)
+	granted := checks.TraceTool(fetcher, c.scope, managerActor, trace.Manager)
 	if !callTrace(t, granted, `{"trace_id":"t1"}`).Fetched || calls() != 1 {
-		t.Fatalf("the chief of staff's fetch ran %d times", calls())
+		t.Fatalf("the manager's fetch ran %d times", calls())
 	}
-	if !slices.Contains(ChiefOrdinaryTools, checks.TraceToolName) || !slices.Contains(chiefGrant.Tools, checks.TraceToolName) {
-		t.Fatalf("the chief of staff's grant lacks %s: %v", checks.TraceToolName, chiefGrant.Tools)
+	if !slices.Contains(ManagerOrdinaryTools, checks.TraceToolName) || !slices.Contains(managerGrant.Tools, checks.TraceToolName) {
+		t.Fatalf("the manager's grant lacks %s: %v", checks.TraceToolName, managerGrant.Tools)
 	}
 	if slices.Contains(designOnlyTools, checks.TraceToolName) || slices.Contains(masonGrant.Tools, checks.TraceToolName) || slices.Contains(reviewerGrant.Tools, checks.TraceToolName) {
-		t.Fatal("a role other than the chief of staff and the final reviewer holds the trace fetch")
+		t.Fatal("a role other than the manager and the final reviewer holds the trace fetch")
 	}
 }
 

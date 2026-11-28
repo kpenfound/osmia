@@ -32,7 +32,7 @@ func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, re
 		moveID = x.TransitionID(target)
 	}
 	routing := trace.Routing{DecidedBy: d.decidedBy, DefaultTo: x.defaultState()}
-	if d.decidedBy != trace.DecidedByFallback && d.decidedBy != trace.DecidedByOwner && d.decidedBy != trace.DecidedByChief {
+	if d.decidedBy != trace.DecidedByFallback && d.decidedBy != trace.DecidedByOwner && d.decidedBy != trace.DecidedByManager {
 		routing.Judgment = d.judgment
 	}
 	reason := target.Reason
@@ -68,7 +68,7 @@ func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, re
 	h.Actor = x.Actor
 	entered := target.entered()
 	if !trace.ValidRouting(entered, routing) {
-		return r.refuse(ctx, x, name, rec, rev, journal, fmt.Sprintf("routing %s cannot be recorded for %s", routing.DecidedBy, entered))
+		return r.refuse(ctx, x, name, rec, rev, journal, fmt.Sprintf("routing %s cannot be recorded for %s", trace.DisplayRole(routing.DecidedBy), entered))
 	}
 	rec.State, rec.Target, rec.Outcome, rec.DecidedBy, rec.Judgment, rec.Rule, rec.Confidence, rec.Decided = StateCommitted, target.Name, d.outcome, d.decidedBy, d.judgment, d.rule, d.band, at
 	rec.Entered, rec.Transition = x.From, ""
@@ -148,7 +148,7 @@ func (r *Router) hold(ctx context.Context, x Exit, name string, rec *Record, rev
 func (r *Router) finishHeld(ctx context.Context, x Exit, name string, rec *Record, rev int, journal trace.WorkflowState, body string) (Result, error) {
 	id := journalSubject(name) + "-" + rec.State
 	w := journalWrite{rec: *rec, rev: rev, from: journal, to: rec.State, reason: fmt.Sprintf("Route of %s %s: %s", rec.Occurrence, rec.State, rec.Hold),
-		events: []trace.Event{trace.Notice(id, "chief", body)}}
+		events: []trace.Event{trace.Notice(id, trace.ManagerKey, body)}}
 	if err := r.writeJournal(ctx, x, name, w); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			if again, _, _, rerr := readRecord(x.Repo, x.Workstream, name); rerr == nil && again != nil && again.final() {

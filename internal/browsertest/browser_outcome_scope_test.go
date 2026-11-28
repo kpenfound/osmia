@@ -253,7 +253,7 @@ func TestBrowserWorkstreamOutcomesBelongToTheirWorkstream(t *testing.T) {
 	must(t, live.CreateThread(context.Background(), trace.Agent{Header: h, Role: demoRole, ThreadID: "outcome-thread"}))
 	q, err := live.Ask(context.Background(), h.ID, claimTurn(t, live, t.TempDir(), stream, h.ID, "outcome-thread", "outcome-turn", at), "Which outcome belongs here?", at)
 	must(t, err)
-	_, err = live.EscalateQuestions(context.Background(), trace.ChiefOfStaff, f.chief, trace.EscalationRequest{Questions: []string{q.ID}, Rephrasing: "Which outcome belongs here?", Blocked: "The unit", Recommendation: "Keep it local."}, at)
+	_, err = live.EscalateQuestions(context.Background(), trace.Manager, f.manager, trace.EscalationRequest{Questions: []string{q.ID}, Rephrasing: "Which outcome belongs here?", Blocked: "The unit", Recommendation: "Keep it local."}, at)
 	must(t, err)
 	entries := entriesOf(t, f.c, service.InboxEscalation)
 	if len(entries) != 1 {

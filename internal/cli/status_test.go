@@ -40,7 +40,7 @@ func TestStatusShowsLiveAgentFactsBelowNarrative(t *testing.T) {
 	st.Status = nil
 	out.Reset()
 	showStatus(&out, st)
-	if !strings.Contains(out.String(), "Status: none yet; the chief of staff has not written one\nLive agents:\n  mason") {
+	if !strings.Contains(out.String(), "Status: none yet; the manager has not written one\nLive agents:\n  mason") {
 		t.Fatalf("live turn without narrative:\n%s", out.String())
 	}
 }
@@ -66,18 +66,18 @@ func withStatus(t *testing.T) service.Options {
 	defer repo.Close()
 	must(t, repo.CreateWorkstream(ctx, stream, written, owner))
 	must(t, repo.CreateWorkstream(ctx, quiet, written, owner))
-	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, ID: "chief", Revision: 1, Project: project, Workstream: stream, At: written, Actor: owner, Cause: "workstream-create"}
-	must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: "chief_of_staff", ThreadID: "chief_thread"}))
+	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, ID: "manager", Revision: 1, Project: project, Workstream: stream, At: written, Actor: owner, Cause: "workstream-create"}
+	must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: trace.Manager, ThreadID: "manager_thread"}))
 	h.Schema, h.ID, h.Cause = "osmia.trace.turn-request", "request_one", "message_one"
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: "chief", ThreadID: "chief_thread", TurnID: "one", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, Prompt: "Owner message"})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: "manager", ThreadID: "manager_thread", TurnID: "one", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, Prompt: "Owner message"})
 	must(t, err)
-	_, err = repo.ClaimTurn(ctx, stream, "chief", "token", "/owned", written)
+	_, err = repo.ClaimTurn(ctx, stream, "manager", "token", "/owned", written)
 	must(t, err)
 	h.Schema, h.ID, h.Cause = "osmia.trace.transition", "handed", "handin"
 	_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, To: "handed", Reason: "Owner handed in a design"}})
 	must(t, err)
-	scope := coreadapter.Scope{Project: project, Workstream: stream, Thread: "chief_thread", Turn: "one", Role: "chief_of_staff"}
-	tool, err := status.Tool(repo, "chief", scope, func() time.Time { return written })
+	scope := coreadapter.Scope{Project: project, Workstream: stream, Thread: "manager_thread", Turn: "one", Role: trace.Manager}
+	tool, err := status.Tool(repo, "manager", scope, func() time.Time { return written })
 	must(t, err)
 	out, err := tool.Handle(ctx, json.RawMessage(`{"goal":"Ship resumable uploads.","note":"The plan is drafted. Review is underway.","agents":["The architect is preparing the packet.","A reviewer is idle."]}`))
 	if err != nil || string(out) != `{"stored":true,"revision":1}` {
@@ -129,7 +129,7 @@ func TestStatusOverviewShowsProfilesCapacityAndWorkstreams(t *testing.T) {
 		"  mason: 0 of 4 slot(s) in use\n  reviewer: 0 of 2 slot(s) in use\n  committee: 0 of 3 slot(s) in use\n" +
 			"  architect: 0 in use, unbounded (no factory-wide limit; at most one turn per workstream)\n" +
 			"  checks: 0 of 2 slot(s) in use\n" +
-			"  chief: 0 of 3 slot(s) in use\n",
+			"  manager: 0 of 3 slot(s) in use\n",
 		"Workspaces: setting=auto new_workstreams=",
 		"Workstreams:\n" +
 			"  " + stream + " state=handed open_questions=0 context_mode=file workspaces=git\n" +
@@ -169,7 +169,7 @@ func TestStatusJSONHoldsEveryWorkstreamProfilesCapacityAndWorkspaces(t *testing.
 		Status        wire.StatusResponse
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
-	capacity := &wire.CapacityStatus{PerWorkstream: 2, Roles: []wire.RoleCapacity{{Role: "mason", Limit: fixturekit.Limit(4), Waiting: []wire.SlotWait{}}, {Role: "reviewer", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "committee", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}, fixturekit.Unbounded("architect", 0, []wire.SlotWait{}), {Role: "checks", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "chief", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}}}
+	capacity := &wire.CapacityStatus{PerWorkstream: 2, Roles: []wire.RoleCapacity{{Role: "mason", Limit: fixturekit.Limit(4), Waiting: []wire.SlotWait{}}, {Role: "reviewer", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "committee", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}, fixturekit.Unbounded("architect", 0, []wire.SlotWait{}), {Role: "checks", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "manager", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}}}
 	if got := all.Status.Capacity; got == nil || len(got.Clients) != 1 || !got.Clients[0].Local || got.Clients[0].ID != "local" {
 		t.Fatalf("status --json capacity clients: %+v", got)
 	}
@@ -212,7 +212,7 @@ func TestStatusJSONOfOneWorkstream(t *testing.T) {
 
 func TestStatusOfAWorkstreamWithoutAStatusSaysSo(t *testing.T) {
 	_, root := startStatusFixture(t)
-	if out := successful(t, root, "status", quiet); out != "Workstream: "+quiet+" state=not recorded open_questions=0 context_mode=file workspaces=git\nStatus: none yet; the chief of staff has not written one\n" {
+	if out := successful(t, root, "status", quiet); out != "Workstream: "+quiet+" state=not recorded open_questions=0 context_mode=file workspaces=git\nStatus: none yet; the manager has not written one\n" {
 		t.Fatalf("no status:\n%s", out)
 	}
 }
@@ -602,8 +602,8 @@ func TestStatusPrintsCapacity(t *testing.T) {
 			{Workstream: stream, Review: 3, Reason: "capacity"},
 			{Workstream: quiet, Session: true, Reason: "capacity"},
 		}},
-		{Role: "chief", Used: 3, Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{
-			{Project: "p_a", Workstream: stream, Agent: "chief", Turn: "turn-1", Reason: "capacity"},
+		{Role: "manager", Used: 3, Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{
+			{Project: "p_a", Workstream: stream, Agent: "manager", Turn: "turn-1", Reason: "capacity"},
 		}},
 	}})
 	if want := "Capacity (per workstream 2):\n" +
@@ -616,8 +616,8 @@ func TestStatusPrintsCapacity(t *testing.T) {
 		"    Waiting: " + stream + " unit parser (capacity)\n" +
 		"    Waiting: " + stream + " final review 3 (capacity)\n" +
 		"    Waiting: " + quiet + " session (capacity)\n" +
-		"  chief: 3 of 3 slot(s) in use, 1 waiting\n" +
-		"    Waiting: " + stream + " turn turn-1 of chief (capacity)\n"; out.String() != want {
+		"  manager: 3 of 3 slot(s) in use, 1 waiting\n" +
+		"    Waiting: " + stream + " turn turn-1 of manager (capacity)\n"; out.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", out.String(), want)
 	}
 }

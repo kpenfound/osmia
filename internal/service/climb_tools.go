@@ -15,7 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The chief-of-staff tools of a Hill Climb workstream: steering the next
+// The manager tools of a Hill Climb workstream: steering the next
 // attempt with a note, and concluding the climb.
 const (
 	climbSteerTool    = "climb_steer"
@@ -49,7 +49,7 @@ func (c *runtimeControls) climbSteer(r *trace.Repository, scope coreadapter.Scop
 				return nil, err
 			}
 			stream := config.WorkstreamID(scope.Workstream)
-			note, err := climb.Steer(ctx, r, stream, in.Note, "chief", now())
+			note, err := climb.Steer(ctx, r, stream, in.Note, trace.ManagerKey, now())
 			if err != nil {
 				return priorityRefusal(err.Error())
 			}

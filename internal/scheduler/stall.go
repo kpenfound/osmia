@@ -95,15 +95,15 @@ func (o Operation) Explains(now time.Time, after time.Duration, limit int) (Expl
 // Quiet is what the stall watchdog read about one unit or workstream that has
 // made no progress since Since.
 type Quiet struct {
-	// Since is when the subject last progressed. A turn of the chief of staff
+	// Since is when the subject last progressed. A turn of the manager
 	// is not progress.
 	Since time.Time
 	// Card says an owner card is open for the subject.
 	Card bool
 	// Paused says a pause covers the subject.
 	Paused bool
-	// Turn is the latest time a turn of the subject, other than the chief of
-	// staff's, that is running or queued was queued, claimed or attempted; zero
+	// Turn is the latest time a turn of the subject, other than the manager's,
+	// that is running or queued was queued, claimed or attempted; zero
 	// when none is. A turn explains the quiet only while that time is younger
 	// than the window, so a turn stuck in its queue is a stall.
 	Turn time.Time

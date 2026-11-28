@@ -70,7 +70,7 @@ type Architect struct {
 // DraftInput numbers the draft an operation runs. Resume numbers the
 // operation that runs the draft again after it parked on the architect's
 // question, from 1; the draft's own operation has none. Note is what the
-// owner or the chief of staff asked of a run of drafts started after drafting
+// owner or the manager asked of a run of drafts started after drafting
 // stopped; every draft of that run carries it.
 type DraftInput struct {
 	Draft  int    `json:"draft"`
@@ -79,7 +79,7 @@ type DraftInput struct {
 }
 
 // DraftAgainCause is the cause of the first draft of a run that the owner or
-// the chief of staff asked for after drafting stopped.
+// the manager asked for after drafting stopped.
 const DraftAgainCause = "draft-again"
 
 // DraftExhausted is the draft-subject state of a workstream whose drafting
@@ -167,8 +167,8 @@ func (d *Drafter) Pass(ctx context.Context) error {
 }
 
 // Reconcile requests the first draft of a handed workstream, the next draft
-// after an invalid or failed one while drafts remain, and tells the chief of
-// staff once they are exhausted. A draft parked on the architect's question
+// after an invalid or failed one while drafts remain, and tells the manager
+// once they are exhausted. A draft parked on the architect's question
 // resumes once the answer is queued on the architect's thread. A draft in
 // progress, a parked draft whose answer is not queued and a workstream in any
 // other feature state need nothing.
@@ -250,8 +250,8 @@ func (d *Drafter) EnsureThread(ctx context.Context, stream config.WorkstreamID) 
 }
 
 // Run returns the first draft of the workstream's current run of drafts and
-// the note it carries: draft 1 with no note until the owner or the chief of
-// staff asks for another run after drafting stopped.
+// the note it carries: draft 1 with no note until the owner or the manager
+// asks for another run after drafting stopped.
 func (d *Drafter) Run(stream config.WorkstreamID) (int, string, error) {
 	transitions, err := trace.Read[trace.Transition](d.Repository, stream)
 	if err != nil {
@@ -341,7 +341,7 @@ func (d *Drafter) Stopped(stream config.WorkstreamID) (int, trace.Transition, er
 }
 
 // RequestAgain starts a new run of MaxDrafts drafts of a handed workstream
-// whose drafting stopped, asked by the owner or the chief of staff with note.
+// whose drafting stopped, asked by the owner or the manager with note.
 // Every draft of the run carries the note, and its first draft's prompt says
 // why the last draft was refused. It returns what happens next, or refused:
 // why nothing was asked.
@@ -378,8 +378,8 @@ func (d *Drafter) RequestAgain(ctx context.Context, stream config.WorkstreamID, 
 	switch {
 	case by.Kind == OwnerActor.Kind:
 		asker = "the owner"
-	case by.ID == trace.ChiefOfStaff:
-		asker = "the chief of staff"
+	case by.ID == trace.Manager:
+		asker = "the manager"
 	}
 	reason := fmt.Sprintf("drafting had stopped; %s asked for another run of %d drafts: %s", asker, MaxDrafts, note)
 	if err := d.request(ctx, stream, state, DraftInput{Draft: n + 1, Note: note}, DraftAgainCause, reason, by); err != nil {
@@ -1304,7 +1304,7 @@ You turn what the owner handed in into this workstream's feature spec and plan. 
 - inspect_code reads the repository, read_remote_file retrieves GitHub files the handed input references, and factory_context retrieves workstream records.
 - %[3]s delivers spec.md and plan.json. The service records and validates what you deliver. You hold no version control tool, because only the service records work; your view is read-only.
 - When your view does not settle something you must know, call %[4]s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.
-- The owner fixed the selected projects. Never add or drop a member of the workgroup this workstream belongs to, because the member list is the owner's decision. If you judge that a selected project needs no change, ask the chief of staff to escalate that judgment to the owner and keep the member while you wait.
+- The owner fixed the selected projects. Never add or drop a member of the workgroup this workstream belongs to, because the member list is the owner's decision. If you judge that a selected project needs no change, ask the manager to escalate that judgment to the owner and keep the member while you wait.
 
 ## Your part of the state machine
 You act in four kinds of turn: the first draft, a corrected draft after the service refused one, a reply to the committee's objections once a round of debate ends, and the draft of an amendment to the sealed spec and plan. Each turn's prompt says which one it is. After a draft the committee debates it, and the owner ratifies it before anything is built.

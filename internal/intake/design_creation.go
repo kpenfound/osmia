@@ -106,8 +106,8 @@ func DesignCreationRefusal(r *trace.Repository, stream config.WorkstreamID) (tra
 }
 
 // RecordDesignCreationRefusal records why the design start's new project
-// could not be created, once per distinct reason, and tells the chief of
-// staff of the design's conversation with a turn of its own. The start keeps
+// could not be created, once per distinct reason, and tells the manager
+// of the design's conversation with a turn of its own. The start keeps
 // trying the creation on every pass, since the cause, a missing token or a
 // repo name or clone path taken since the start, may be put right.
 func (s *Controller) RecordDesignCreationRefusal(ctx context.Context, r *trace.Repository, stream config.WorkstreamID, intent DesignStartIntent, reason string) error {
@@ -134,24 +134,24 @@ func (s *Controller) RecordDesignCreationRefusal(ctx context.Context, r *trace.R
 	return s.NotifyDesignCreationRefusal(ctx, r, stream, intent, latest)
 }
 
-// NotifyDesignCreationRefusal enqueues the chief of staff's turn that tells
+// NotifyDesignCreationRefusal enqueues the manager's turn that tells
 // it of the recorded refusal, once.
 func (s *Controller) NotifyDesignCreationRefusal(ctx context.Context, r *trace.Repository, stream config.WorkstreamID, intent DesignStartIntent, refusal trace.Transition) error {
-	th, err := r.EnsureChiefOfStaff(ctx, stream, s.Now(), ServiceActor)
+	th, err := r.EnsureManager(ctx, stream, s.Now(), ServiceActor)
 	if err != nil {
 		return err
 	}
 	if QueuedTurn(th, refusal.ID) {
 		return nil
 	}
-	profile, _, err := s.RoleExecution(s.Current(), trace.ChiefOfStaff)
+	profile, _, err := s.RoleExecution(s.Current(), trace.Manager)
 	if err != nil {
 		return err
 	}
 	body := fmt.Sprintf("The new project %s that this design's start creates could not be created: %s. The workgroup does not start until it is. The service tries the creation again on every pass, so it goes on once the cause is put right (for example GITHUB_TOKEN set in the service's environment, or the repo name or clone path freed); the owner's inbox shows the refusal. Tell the owner in plain words what happened and what to fix.", intent.NewProject.Repo, refusal.Reason)
 	host := th.Identity.Workstream
 	_, err = r.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + refusal.ID, Revision: 1, Project: r.Project(), Workstream: host, At: s.Now(), Actor: ServiceActor, Cause: refusal.ID},
-		AgentID: trace.ChiefOfStaff, ThreadID: th.Identity.ThreadID, TurnID: refusal.ID, Profile: profile, SystemPrompt: "The service reports a refused project creation below. Tell the owner briefly what it means and what to fix.", Prompt: body})
+		AgentID: trace.Manager, ThreadID: th.Identity.ThreadID, TurnID: refusal.ID, Profile: profile, SystemPrompt: "The service reports a refused project creation below. Tell the owner briefly what it means and what to fix.", Prompt: body})
 	return err
 }
 

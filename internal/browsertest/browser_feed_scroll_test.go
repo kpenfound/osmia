@@ -153,7 +153,7 @@ func TestBrowserWorkgroupFeedScroll(t *testing.T) {
 	feedScrollUnchanged(p)
 
 	p.Click(`[data-open-member="` + string(quiet) + `"]`)
-	p.Click("#workstream-head [data-ask-chief]")
+	p.Click("#workstream-head [data-ask-manager]")
 	feedAtBottom(p, "#workgroup-content .feed")
 	p.Click("#project-home")
 	p.Click(`[data-open-workgroup="` + string(f.group.ID) + `"]`)

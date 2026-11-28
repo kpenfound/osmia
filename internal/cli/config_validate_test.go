@@ -314,3 +314,45 @@ func TestUsageListsConfigValidate(t *testing.T) {
 		t.Fatalf("usage does not list config validate: %q", out)
 	}
 }
+
+func TestConfigValidateAcceptsTheManagerKeysWithoutAWarning(t *testing.T) {
+	file := filepath.Join(shortDir(t), "staged.toml")
+	writeFile(t, file, validTopLevel+"[capacity]\nmanager = 4\n[roles.manager]\nprofile = \"default\"\n")
+	code, out, diag := validateRun(t, "config", "validate", "--config", file)
+	if code != 0 || diag != "" || !strings.Contains(out, file+": valid") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, diag)
+	}
+}
+
+func TestConfigValidateWarnsOncePerDeprecatedManagerKeyAndStaysValid(t *testing.T) {
+	file := filepath.Join(shortDir(t), "staged.toml")
+	writeFile(t, file, validTopLevel+"[capacity]\nchief = 4\n[roles.chief_of_staff]\nprofile = \"default\"\n")
+	code, out, diag := validateRun(t, "config", "validate", "--config", file)
+	if code != 0 || !strings.Contains(out, file+": valid") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, diag)
+	}
+	for _, want := range []string{"warning: " + file + ": capacity.chief: deprecated, use capacity.manager\n", "warning: " + file + ": roles.chief_of_staff: deprecated, use roles.manager\n"} {
+		if strings.Count(diag, want) != 1 {
+			t.Fatalf("stderr lacks one %q: %q", want, diag)
+		}
+	}
+	if strings.Count(diag, "warning:") != 2 {
+		t.Fatalf("stderr: %q", diag)
+	}
+}
+
+func TestConfigValidateRefusesBothFormsOfAManagerKey(t *testing.T) {
+	for name, c := range map[string]struct{ text, first, second string }{
+		"capacity": {"[capacity]\nchief = 4\nmanager = 4\n", "capacity.manager", "capacity.chief"},
+		"roles":    {"[roles.chief_of_staff]\nprofile = \"default\"\n[roles.manager]\nprofile = \"default\"\n", "roles.manager", "roles.chief_of_staff"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			file := filepath.Join(shortDir(t), "staged.toml")
+			writeFile(t, file, validTopLevel+c.text)
+			code, out, diag := validateRun(t, "config", "validate", "--config", file)
+			if code == 0 || out != "" || !strings.HasPrefix(diag, file+": "+c.first+": ") || !strings.Contains(diag, c.second) {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, diag)
+			}
+		})
+	}
+}

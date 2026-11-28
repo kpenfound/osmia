@@ -1,6 +1,6 @@
 // Package verifytool is the service side of the verify tool: it runs a
-// project's verification lever for a reviewer, the final reviewer or the chief
-// of staff, records the run in the trace, retains its report and evidence
+// project's verification lever for a reviewer, the final reviewer or the
+// manager, records the run in the trace, retains its report and evidence
 // outside the target repository and places the retained files into agent
 // views.
 //

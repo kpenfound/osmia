@@ -151,11 +151,11 @@ func (c *ArchiveCleanup) Prepare(ctx context.Context, a runtime.Archive) (eligib
 	if err := c.S.Store().UpdateArchive(a); err != nil {
 		return false, "", err
 	}
-	busy, chief, err := c.Workspaces.Busy(a.Workstream)
+	busy, manager, err := c.Workspaces.Busy(a.Workstream)
 	if err != nil {
 		return false, "", err
 	}
-	if len(busy) != 0 || chief {
+	if len(busy) != 0 || manager {
 		return false, "the workstream has an unfinished turn", nil
 	}
 	if pending, err := c.Workspaces.Pending(a.Workstream); err != nil {

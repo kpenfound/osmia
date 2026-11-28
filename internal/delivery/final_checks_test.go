@@ -230,7 +230,7 @@ func (f *watchFixture) notices() int {
 	fixturekit.Must(f.t, err)
 	n := 0
 	for _, e := range entries {
-		if e.Event.ID == trace.EventID("final-checks-1-push-1-load-missing", "chief") {
+		if e.Event.ID == trace.EventID("final-checks-1-push-1-load-missing", trace.ManagerKey) {
 			n++
 		}
 	}

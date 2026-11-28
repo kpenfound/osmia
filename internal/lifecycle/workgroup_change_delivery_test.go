@@ -27,7 +27,7 @@ func presentDeliveryDelta(t *testing.T, p *journey.PublicationFixture) lifecycle
 	ctx := context.Background()
 	_, err := trace.EnsureWorkgroups(ctx, p.Repository, []config.WorkstreamID{p.Stream}, p.S.Now(), intake.ServiceActor, "fixture")
 	fixturekit.Must(t, err)
-	_, err = p.Repository.EnsureChiefOfStaff(ctx, p.Stream, p.S.Now(), intake.ServiceActor)
+	_, err = p.Repository.EnsureManager(ctx, p.Stream, p.S.Now(), intake.ServiceActor)
 	fixturekit.Must(t, err)
 	c, apiFault := p.S.Lifecycle().RequestChange(ctx, string(p.Stream), lifecycle.ChangeRequest{Key: "checkpoint", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
 	if apiFault != nil {

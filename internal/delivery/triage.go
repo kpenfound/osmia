@@ -17,7 +17,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// TriageToolName is the chief-only service tool that records the triage of a
+// TriageToolName is the manager-only service tool that records the triage of a
 // blocking finding of a final review.
 const TriageToolName = "triage_finding"
 
@@ -33,18 +33,18 @@ type TriageSubject struct {
 	// Key is the finding's occurrence key.
 	Key string
 	// Stands says the finding is blocking in the current review and not yet
-	// triaged. A finding that stands but is not the chief of staff's to
+	// triaged. A finding that stands but is not the manager's to
 	// triage has a reason, and is left to the owner.
 	Stands bool
 }
 
-// Label names the finding for the chief of staff.
+// Label names the finding for the manager.
 func (s TriageSubject) Label() string {
 	return fmt.Sprintf("finding %s of final review %d", s.Finding.ID, s.Report.Review)
 }
 
-// TriageSubject resolves the finding of the final review the chief of staff
-// names, or says why the chief of staff may not triage it with Jev today: the
+// TriageSubject resolves the finding of the final review the manager
+// names, or says why the manager may not triage it with Jev today: the
 // review is not the workstream's current reviewed one, awaiting the owner's
 // delivery approval, the finding is not blocking in it, it is already triaged,
 // or final reviews found blocking problems often enough that further
@@ -100,10 +100,10 @@ func (s *Controller) TriageSubject(ctx context.Context, repository *trace.Reposi
 	return sub, "", nil
 }
 
-// TriageToolOf returns the triage_finding tool of one claimed chief-of-staff turn,
+// TriageToolOf returns the triage_finding tool of one claimed manager turn,
 // over the controller load returns when the tool is called. It
-// records the chief of staff's triage of one blocking finding of the current
-// final review: the finding needs code, so the plan revision the chief of staff
+// records the manager's triage of one blocking finding of the current
+// final review: the finding needs code, so the plan revision the manager
 // files takes it, or it is left to the owner, who sees it at delivery approval.
 // The decision is recorded only after decide was called for the same finding,
 // and a confident Jev pick allows only the picked outcome. A call the service
@@ -140,10 +140,10 @@ func TriageToolOf(load func() *Controller, repository *trace.Repository, scope c
 		if err := repository.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
-		if scope.Role != trace.ChiefOfStaff {
-			return intake.PriorityRefusal(TriageToolName + " is only available to the chief of staff")
+		if scope.Role != trace.Manager {
+			return intake.PriorityRefusal(TriageToolName + " is only available to the manager")
 		}
-		target, stream, refusal, err := repository.ChiefMember(config.WorkstreamID(scope.Workstream), input.Workstream)
+		target, stream, refusal, err := repository.ManagerMember(config.WorkstreamID(scope.Workstream), input.Workstream)
 		if err != nil {
 			return nil, err
 		}
@@ -188,7 +188,7 @@ func TriageToolOf(load func() *Controller, repository *trace.Repository, scope c
 				return intake.PriorityRefusal(why)
 			}
 			t.Outcome, t.Refused = followup.TriageOwner, why
-			t.Note = fmt.Sprintf("Jev decided code with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The chief of staff's note: %s", bound.Confidence, bound.Judgment, why, note)
+			t.Note = fmt.Sprintf("Jev decided code with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The manager's note: %s", bound.Confidence, bound.Judgment, why, note)
 			detail = "the service could not carry out Jev's decision (" + why + "); the finding is left to the owner with Jev's judgment"
 		}
 		if err := followup.RecordTriage(ctx, target, stream, t, s.Now()); err != nil {
@@ -208,7 +208,7 @@ func TriageToolOf(load func() *Controller, repository *trace.Repository, scope c
 	return tool
 }
 
-// TriageNotes states what the chief of staff decided of the final review's
+// TriageNotes states what the manager decided of the final review's
 // blocking findings, for the owner's delivery approval: each finding left to
 // the owner with the reason, and each finding a plan revision takes. A finding
 // Jev decided says so.

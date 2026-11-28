@@ -140,7 +140,7 @@ func TestAClimbRunsAttemptsOnOneMasonThreadAndLandsTheKeptOneAsASquashedCommit(t
 		t.Fatal("no approval card")
 	}
 	evaluator := card.Answer.Body["commit"].(string)
-	if _, err := climb.Steer(context.Background(), c.repository(), stream, "prefer caching over parallelism", "chief", time.Now()); err != nil {
+	if _, err := climb.Steer(context.Background(), c.repository(), stream, "prefer caching over parallelism", trace.ManagerKey, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.c.ApproveClimb(context.Background(), stream, api.ClimbApprovalRequest{Decision: "approve", Commit: evaluator, SpecRevision: 1}); err != nil {
@@ -218,14 +218,14 @@ func TestAClimbRunsAttemptsOnOneMasonThreadAndLandsTheKeptOneAsASquashedCommit(t
 	if len(records) != 3 || records[trace.ClimbAttemptPath(1)] != 1 {
 		t.Fatalf("terminal records %v", records)
 	}
-	if kept := c.chiefNotices(t, stream, trace.ProgressKind); !slices.ContainsFunc(kept, func(b string) bool { return strings.Contains(b, "Attempt 1 was kept") }) {
-		t.Fatalf("the chief was not told of the kept attempt: %v", kept)
+	if kept := c.managerNotices(t, stream, trace.ProgressKind); !slices.ContainsFunc(kept, func(b string) bool { return strings.Contains(b, "Attempt 1 was kept") }) {
+		t.Fatalf("the manager was not told of the kept attempt: %v", kept)
 	}
-	stops := c.chiefNotices(t, stream, trace.NoticeKind)
+	stops := c.managerNotices(t, stream, trace.NoticeKind)
 	if !slices.ContainsFunc(stops, func(b string) bool {
 		return strings.Contains(b, "The climb concludes after attempt 3") && strings.Contains(b, "max_attempts")
 	}) {
-		t.Fatalf("the chief was not told of the stop: %v", stops)
+		t.Fatalf("the manager was not told of the stop: %v", stops)
 	}
 	running, found, err := climb.ReadRunning(c.repository(), stream)
 	fixturekit.Must(t, err)
@@ -288,7 +288,7 @@ func TestARestartDuringAClimbKeepsOneRecordPerAttemptAndTheSameThread(t *testing
 	}
 }
 
-func TestTheOwnerConcludesAndExtendsAClimbAndTheChiefSteersAndConcludesIt(t *testing.T) {
+func TestTheOwnerConcludesAndExtendsAClimbAndTheManagerSteersAndConcludesIt(t *testing.T) {
 	t.Parallel()
 	engine := newEvaluatorEngine(100, 103, 101)
 	c := newClimbFixtureWith(t, engine, false, nil, climbLoopSpec)
@@ -327,8 +327,8 @@ func TestTheOwnerConcludesAndExtendsAClimbAndTheChiefSteersAndConcludesIt(t *tes
 	if got := read.Progress.Budgets; got.Attempts.Max != 5 || got.CostUSD.Max != 0 || got.WallClockSeconds.Max != 0 {
 		t.Fatalf("the progress read shows %+v after the owner added two attempts to a limit of three", got)
 	}
-	if notices := c.chiefNotices(t, stream, trace.ProgressKind); !slices.ContainsFunc(notices, func(b string) bool { return strings.Contains(b, "extended the climb's budget") }) {
-		t.Fatalf("the chief was not told of the extension: %v", notices)
+	if notices := c.managerNotices(t, stream, trace.ProgressKind); !slices.ContainsFunc(notices, func(b string) bool { return strings.Contains(b, "extended the climb's budget") }) {
+		t.Fatalf("the manager was not told of the extension: %v", notices)
 	}
 	if _, err := c.c.ConcludeClimb(ctx, stream, api.ClimbConcludeRequest{Note: "enough"}); err != nil {
 		t.Fatal(err)
@@ -453,7 +453,7 @@ func TestARecordedClimbAttemptCountsAsLoopGuardProgress(t *testing.T) {
 	}
 }
 
-func TestTheChiefConcludesAClimbAndItsProgressIsInTheChiefsStatus(t *testing.T) {
+func TestTheManagerConcludesAClimbAndItsProgressIsInTheManagersStatus(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s, repo, _, state := climbStopFixture(t, nil)
@@ -466,15 +466,15 @@ func TestTheChiefConcludesAClimbAndItsProgressIsInTheChiefsStatus(t *testing.T) 
 			t.Errorf("the climb's progress lacks %q:\n%s", want, text)
 		}
 	}
-	chief := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
-	res, err := s.RouteExit(ctx, s.concludeExit(repo, fixturekit.Stream, state, chief, "the log shows no more ideas"))
+	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
+	res, err := s.RouteExit(ctx, s.concludeExit(repo, fixturekit.Stream, state, manager, "the log shows no more ideas"))
 	fixturekit.Must(t, err)
 	if inner, _ := climb.ReadInner(repo, fixturekit.Stream); !res.Committed || inner.Value != climb.InnerConcluding {
 		t.Fatalf("result %+v, inner %q", res, inner.Value)
 	}
 	notices := outboxBodies(t, repo, trace.NoticeKind)
 	if !slices.ContainsFunc(notices, func(b string) bool {
-		return strings.Contains(b, "concluded now by the chief of staff") && strings.Contains(b, "the log shows no more ideas")
+		return strings.Contains(b, "concluded now by the manager") && strings.Contains(b, "the log shows no more ideas")
 	}) {
 		t.Fatalf("notices %v", notices)
 	}

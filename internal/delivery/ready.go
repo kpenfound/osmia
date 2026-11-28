@@ -80,7 +80,7 @@ func deliveredTransitionID(repository *trace.Repository, stream config.Workstrea
 // marking its draft pull request ready for review on the pull request host
 // directly: pr, as the host reported it, is open and no longer a draft. One
 // commit records final/ready.json and the move to delivered with a notice for
-// the chief of staff; nothing is written to the host. It records nothing when
+// the manager; nothing is written to the host. It records nothing when
 // the workstream is no longer assembled, when its pull request is still a
 // draft, or when pr is not the pull request of a recorded push at its head.
 func MarkedReadyOnHost(ctx context.Context, rt router.Port, repository *trace.Repository, stream config.WorkstreamID, pr pulls.PullRequest, at time.Time) (bool, error) {

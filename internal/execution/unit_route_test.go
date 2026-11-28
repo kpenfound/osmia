@@ -47,7 +47,7 @@ func TestAMasonContestWithNoCandidateReachesItsReviseTarget(t *testing.T) {
 		decidedBy string
 	}{
 		{"the owner rules", TriggerOwnerRuling, &router.Authority{Kind: router.AuthorityOwner, Target: UnitImplementing}, trace.DecidedByOwner},
-		{"the chief of staff rules", TriggerChiefRuling, nil, trace.DecidedByCode},
+		{"the manager rules", TriggerManagerRuling, nil, trace.DecidedByCode},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newBuildFixture(t, "mason-contest")
@@ -150,13 +150,13 @@ func contestUnit(t *testing.T, f *buildFixture, repo *trace.Repository, id strin
 	return state
 }
 
-func TestAChiefRulingIsJudgedAndAScriptedDepartureIsRecorded(t *testing.T) {
+func TestAManagerRulingIsJudgedAndAScriptedDepartureIsRecorded(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	exit := func(f *buildFixture, repo *trace.Repository, state trace.WorkflowState) router.Exit {
-		x, err := f.s.UnitExit(UnitExitInput{Repo: repo, Stream: stream, Unit: "resume", State: state, Trigger: TriggerChiefRuling, Cause: "ruling-1",
-			Default: UnitReviewing, Targets: []string{UnitReviewing, UnitImplementing}, Actor: chiefActor, Note: "Review the candidate again.",
-			ID: "unit-resume-reviewing-ruling-1", HeaderCause: "ruling-1", Reason: "the chief of staff ruled review"})
+		x, err := f.s.UnitExit(UnitExitInput{Repo: repo, Stream: stream, Unit: "resume", State: state, Trigger: TriggerManagerRuling, Cause: "ruling-1",
+			Default: UnitReviewing, Targets: []string{UnitReviewing, UnitImplementing}, Actor: managerActor, Note: "Review the candidate again.",
+			ID: "unit-resume-reviewing-ruling-1", HeaderCause: "ruling-1", Reason: "the manager ruled review"})
 		must(t, err)
 		return x
 	}
