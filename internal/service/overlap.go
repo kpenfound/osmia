@@ -15,7 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// OverlapKind is the kind of the outbox event that warns a workstream's chief
+// OverlapKind is the kind of the outbox event that warns a workstream's manager
 // of staff that another workstream of the project builds in the same code.
 const OverlapKind = "overlap-advisory"
 

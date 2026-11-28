@@ -164,7 +164,7 @@ func (p *overlapPlanted) status(stream config.WorkstreamID) []OverlapAdvisory {
 	return st.Advisories
 }
 
-func TestOverlapAdvisoriesWarnEachChiefOncePerSeal(t *testing.T) {
+func TestOverlapAdvisoriesWarnEachManagerOncePerSeal(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "ov-")

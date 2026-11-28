@@ -95,8 +95,8 @@ func TestRoutedAmendmentParksAndSurvivesRestart(t *testing.T) {
 	if got := call(t, tools(t, f, "mason1", scope, start)[questions.AskTool], `{"question":"Restart behavior is not in the spec. Should it be?"}`); !strings.Contains(got, `"question":"1"`) {
 		t.Fatal(got)
 	}
-	chief := f.turn(t, "chief", trace.Manager, "chief1")
-	tool := tools(t, f, "chief", chief, start)[questions.RouteAmendmentTool]
+	manager := f.turn(t, "chief", trace.Manager, "chief1")
+	tool := tools(t, f, "chief", manager, start)[questions.RouteAmendmentTool]
 	input := `{"question":"1","citations":["spec#1","plan#resume"],"change":"Clarify restart behavior","reason":"The task needs another state"}`
 	if got := call(t, tool, input); !strings.Contains(got, `"amendment":"1"`) {
 		t.Fatal(got)
@@ -166,8 +166,8 @@ func TestRoutedAmendmentsCheckLifecycleAndCitations(t *testing.T) {
 	if got := call(t, reviewerTools[questions.AskTool], `{"question":"The plan names no check for resume. Should it?"}`); !strings.Contains(got, `"question":"1"`) {
 		t.Fatal(got)
 	}
-	chief := f.turn(t, "chief", trace.Manager, "chief1")
-	route := tools(t, f, "chief", chief, start)[questions.RouteAmendmentTool]
+	manager := f.turn(t, "chief", trace.Manager, "chief1")
+	route := tools(t, f, "chief", manager, start)[questions.RouteAmendmentTool]
 	valid := `{"question":"1","citations":["plan#resume"],"change":"Add a check","reason":"Review found a gap"}`
 	before := f.head(t)
 	if got := call(t, route, valid); !strings.Contains(got, "building or assembled") {
@@ -305,12 +305,12 @@ func states(t *testing.T, f fixture) map[string]trace.QuestionState {
 func TestResolveCitations(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	chief := f.turn(t, "chief", trace.Manager, "chief1")
+	manager := f.turn(t, "chief", trace.Manager, "chief1")
 	mason := f.turn(t, "mason1", "mason", "build1")
 	if _, err := f.repo.Ask(ctx, "mason1", mason, "Where does state live?", start); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.repo.AnswerQuestion(ctx, "chief", chief, "1", "In files.", []string{"charter#2"}, start); err != nil {
+	if _, err := f.repo.AnswerQuestion(ctx, "chief", manager, "1", "In files.", []string{"charter#2"}, start); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []string{"charter#1", "charter#2", "ruling#1", "spec#1", "spec#2", "plan#resume"} {
@@ -360,7 +360,7 @@ func TestToolsFollowTheRole(t *testing.T) {
 		}
 		return out
 	}
-	if got := names(f.turn(t, "chief", trace.Manager, "chief1"), "chief"); !reflect.DeepEqual(got, questions.ChiefTools) || strings.Contains(strings.Join(got, " "), "ask") {
+	if got := names(f.turn(t, "chief", trace.Manager, "chief1"), "chief"); !reflect.DeepEqual(got, questions.ManagerTools) || strings.Contains(strings.Join(got, " "), "ask") {
 		t.Fatalf("chief of staff tools: %v", got)
 	}
 	for _, role := range []string{"mason", "reviewer", "architect", "committee", "foreman"} {
@@ -376,22 +376,22 @@ func TestToolsFollowTheRole(t *testing.T) {
 
 type askedFixture struct {
 	fixture
-	mason, reviewer, chiefScope coreadapter.Scope
-	chief                       map[string]coreadapter.Tool
+	mason, reviewer, managerScope coreadapter.Scope
+	manager                       map[string]coreadapter.Tool
 }
 
 func askedQuestions(t *testing.T) askedFixture {
 	t.Helper()
 	f := setup(t)
 	a := askedFixture{
-		fixture:    f,
-		chiefScope: f.turn(t, "chief", trace.Manager, "chief1"),
-		mason:      f.turn(t, "mason1", "mason", "build1"),
-		reviewer:   f.turn(t, "reviewer1", "reviewer", "review1"),
+		fixture:      f,
+		managerScope: f.turn(t, "chief", trace.Manager, "chief1"),
+		mason:        f.turn(t, "mason1", "mason", "build1"),
+		reviewer:     f.turn(t, "reviewer1", "reviewer", "review1"),
 	}
 	call(t, tools(t, f, "mason1", a.mason, start.Add(time.Minute))["ask"], `{"question":"Where does state live?"}`)
 	call(t, tools(t, f, "reviewer1", a.reviewer, start.Add(2*time.Minute))["ask"], `{"question":"Is the log format fixed?"}`)
-	a.chief = tools(t, f, "chief", a.chiefScope, start.Add(time.Hour))
+	a.manager = tools(t, f, "chief", a.managerScope, start.Add(time.Hour))
 	return a
 }
 
@@ -426,7 +426,7 @@ func TestAskRejectsAnUnknownField(t *testing.T) {
 	}
 }
 
-func TestRefusedChiefCallsCommitNothingAndLeaveQuestionsOpen(t *testing.T) {
+func TestRefusedManagerCallsCommitNothingAndLeaveQuestionsOpen(t *testing.T) {
 	a := askedQuestions(t)
 	before := a.head(t)
 	for _, c := range [][3]string{
@@ -441,7 +441,7 @@ func TestRefusedChiefCallsCommitNothingAndLeaveQuestionsOpen(t *testing.T) {
 		{"route_amendment", `{"question":"1","citations":["spec#9"],"change":"Amend","reason":"Needed"}`, `{"recorded":false,"reason":"citation \"spec#9\" does not resolve: the spec has no acceptance criterion numbered 9 exactly once"}`},
 		{"propose_charter", `{"question":"1","rule":"Every upload resumes."}`, `{"recorded":false,"reason":"question 1 has no ruling from the owner; only a ruling the owner gave can become a charter rule"}`},
 	} {
-		if got := call(t, a.chief[c[0]], c[1]); got != c[2] {
+		if got := call(t, a.manager[c[0]], c[1]); got != c[2] {
 			t.Fatalf("%s %s:\n%s\nwant\n%s", c[0], c[1], got, c[2])
 		}
 	}
@@ -463,20 +463,20 @@ func TestDelivererLeavesOpenQuestionsUndelivered(t *testing.T) {
 
 func TestAnswerIsRecordedOnceAndAnsweredQuestionsRefuseASecond(t *testing.T) {
 	a := askedQuestions(t)
-	if got := call(t, a.chief["answer"], `{"question":"1","text":"In files under the root.","citations":["charter#2","spec#1"]}`); got != `{"recorded":true,"question":"1","next":"The answer is delivered to the asker as its next turn."}` {
+	if got := call(t, a.manager["answer"], `{"question":"1","text":"In files under the root.","citations":["charter#2","spec#1"]}`); got != `{"recorded":true,"question":"1","next":"The answer is delivered to the asker as its next turn."}` {
 		t.Fatalf("answer: %s", got)
 	}
-	if got := call(t, a.chief["answer"], `{"question":"1","text":"In a database.","citations":["charter#1"]}`); got != `{"recorded":false,"reason":"question 1 is already answered"}` {
+	if got := call(t, a.manager["answer"], `{"question":"1","text":"In a database.","citations":["charter#1"]}`); got != `{"recorded":false,"reason":"question 1 is already answered"}` {
 		t.Fatalf("second answer: %s", got)
 	}
 }
 
 func TestEscalatedQuestionOnlyTheOwnersRulingAnswers(t *testing.T) {
 	a := askedQuestions(t)
-	if got := call(t, a.chief["escalate"], `{"questions":["2"],"rephrasing":"Is the log format part of the contract?","blocked":"The review of the upload unit.","options":["Fixed","Free"],"recommendation":"Fixed."}`); got != `{"recorded":true,"batch":"escalation_2","questions":["2"]}` {
+	if got := call(t, a.manager["escalate"], `{"questions":["2"],"rephrasing":"Is the log format part of the contract?","blocked":"The review of the upload unit.","options":["Fixed","Free"],"recommendation":"Fixed."}`); got != `{"recorded":true,"batch":"escalation_2","questions":["2"]}` {
 		t.Fatalf("escalate: %s", got)
 	}
-	if got := call(t, a.chief["answer"], `{"question":"2","text":"Fixed.","citations":["charter#1"]}`); got != `{"recorded":false,"reason":"question 2 is escalated to the owner; only the owner's ruling answers it"}` {
+	if got := call(t, a.manager["answer"], `{"question":"2","text":"Fixed.","citations":["charter#1"]}`); got != `{"recorded":false,"reason":"question 2 is escalated to the owner; only the owner's ruling answers it"}` {
 		t.Fatalf("answer after escalation: %s", got)
 	}
 }
@@ -493,10 +493,10 @@ func TestQuestionsNotAskedThroughAskCannotBeAnsweredOrEscalated(t *testing.T) {
 		t.Fatal(err)
 	}
 	refused := `{"recorded":false,"reason":"question unasked was not asked through ask and cannot be chosen for"}`
-	if got := call(t, a.chief["answer"], `{"question":"unasked","text":"x","citations":["charter#1"]}`); got != refused {
+	if got := call(t, a.manager["answer"], `{"question":"unasked","text":"x","citations":["charter#1"]}`); got != refused {
 		t.Fatalf("answer to an unasked question: %s", got)
 	}
-	if got := call(t, a.chief["escalate"], `{"questions":["unasked"],"rephrasing":"r","blocked":"b","options":[],"recommendation":"c"}`); got != refused {
+	if got := call(t, a.manager["escalate"], `{"questions":["unasked"],"rephrasing":"r","blocked":"b","options":[],"recommendation":"c"}`); got != refused {
 		t.Fatalf("escalation of an unasked question: %s", got)
 	}
 }
@@ -504,7 +504,7 @@ func TestQuestionsNotAskedThroughAskCannotBeAnsweredOrEscalated(t *testing.T) {
 func TestDelivererQueuesTheAnswerAsTheAskersNextTurn(t *testing.T) {
 	a := askedQuestions(t)
 	ctx := context.Background()
-	call(t, a.chief["answer"], `{"question":"1","text":"In files under the root.","citations":["charter#2","spec#1"]}`)
+	call(t, a.manager["answer"], `{"question":"1","text":"In files under the root.","citations":["charter#2","spec#1"]}`)
 	profiles := map[string]int{}
 	d := a.deliverer(profiles)
 	for range 3 {
@@ -531,8 +531,8 @@ func TestDelivererQueuesTheAnswerAsTheAskersNextTurn(t *testing.T) {
 func TestDelivererSkipsSkippedWorkstreamsAndEscalatedQuestions(t *testing.T) {
 	a := askedQuestions(t)
 	ctx := context.Background()
-	call(t, a.chief["answer"], `{"question":"1","text":"In files.","citations":["charter#2"]}`)
-	call(t, a.chief["escalate"], `{"questions":["2"],"rephrasing":"Is the log format part of the contract?","blocked":"The review.","options":["Fixed","Free"],"recommendation":"Fixed."}`)
+	call(t, a.manager["answer"], `{"question":"1","text":"In files.","citations":["charter#2"]}`)
+	call(t, a.manager["escalate"], `{"questions":["2"],"rephrasing":"Is the log format part of the contract?","blocked":"The review.","options":["Fixed","Free"],"recommendation":"Fixed."}`)
 	d := a.deliverer(map[string]int{})
 	d.Skip = func(config.WorkstreamID) (bool, error) { return true, nil }
 	if err := d.Pass(ctx); err != nil {
@@ -553,7 +553,7 @@ func TestDelivererSkipsSkippedWorkstreamsAndEscalatedQuestions(t *testing.T) {
 func TestDeliverQueuesNothingForAnUndeliverableQuestion(t *testing.T) {
 	a := askedQuestions(t)
 	ctx := context.Background()
-	call(t, a.chief["answer"], `{"question":"1","text":"In files.","citations":["charter#2"]}`)
+	call(t, a.manager["answer"], `{"question":"1","text":"In files.","citations":["charter#2"]}`)
 	if err := a.deliverer(map[string]int{}).Pass(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -574,11 +574,11 @@ func TestDeliverQueuesNothingForAnUndeliverableQuestion(t *testing.T) {
 func TestDelivererFailsWithoutAProfileAndQueuesNothing(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	chief := f.turn(t, "chief", trace.Manager, "chief1")
+	manager := f.turn(t, "chief", trace.Manager, "chief1")
 	if _, err := f.repo.Ask(ctx, "mason1", f.turn(t, "mason1", "mason", "build1"), "Where?", start); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.repo.AnswerQuestion(ctx, "chief", chief, "1", "In files.", []string{"charter#2"}, start); err != nil {
+	if _, err := f.repo.AnswerQuestion(ctx, "chief", manager, "1", "In files.", []string{"charter#2"}, start); err != nil {
 		t.Fatal(err)
 	}
 	broken := &questions.Deliverer{Repository: f.repo, Now: time.Now, Profile: func(string, string) (coreadapter.Profile, error) {
@@ -669,7 +669,7 @@ func TestTurnThatAskedEndsWaiting(t *testing.T) {
 func TestRelayRulingDeliversToEachAsker(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	chief := tools(t, f, "chief", f.turn(t, "chief", trace.Manager, "chief1"), start.Add(time.Hour))
+	manager := tools(t, f, "chief", f.turn(t, "chief", trace.Manager, "chief1"), start.Add(time.Hour))
 	for agent, question := range map[string]string{"mason1": "Where does state live?", "reviewer1": "Is the log format fixed?"} {
 		role := strings.TrimSuffix(agent, "1")
 		if _, err := f.repo.Ask(ctx, agent, f.turn(t, agent, role, "turn_"+agent), question, start); err != nil {
@@ -684,7 +684,7 @@ func TestRelayRulingDeliversToEachAsker(t *testing.T) {
 	for _, q := range list {
 		ids[q.Asked.AskedBy.ID] = q.Asked.ID
 	}
-	call(t, chief["escalate"], `{"questions":["1","2"],"rephrasing":"Are state and logs part of the contract?","blocked":"Both units.","options":[],"recommendation":"Yes."}`)
+	call(t, manager["escalate"], `{"questions":["1","2"],"rephrasing":"Are state and logs part of the contract?","blocked":"Both units.","options":[],"recommendation":"Yes."}`)
 	d := &questions.Deliverer{Repository: f.repo, Now: func() time.Time { return start.Add(3 * time.Hour) },
 		Profile: func(string, string) (coreadapter.Profile, error) {
 			return coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, nil
@@ -698,7 +698,7 @@ func TestRelayRulingDeliversToEachAsker(t *testing.T) {
 		return th.Turns
 	}
 
-	if got := call(t, chief["relay_ruling"], `{"question":"1","text":"Both are fixed.","scope":"local"}`); got != `{"recorded":false,"reason":"question 1 has no ruling from the owner to relay"}` {
+	if got := call(t, manager["relay_ruling"], `{"question":"1","text":"Both are fixed.","scope":"local"}`); got != `{"recorded":false,"reason":"question 1 has no ruling from the owner to relay"}` {
 		t.Fatalf("relay before the ruling: %s", got)
 	}
 	if _, err := f.repo.Rule(ctx, 1, "Both are part of the contract.", owner, start.Add(2*time.Hour)); err != nil {
@@ -715,20 +715,20 @@ func TestRelayRulingDeliversToEachAsker(t *testing.T) {
 		`{"question":"1","text":"Both are fixed.","scope":"project"}`: `{"recorded":false,"reason":"scope must be local, for the askers only, or notify, for a notice to the whole project"}`,
 		`{"question":"1","text":"","scope":"local"}`:                  `{"recorded":false,"reason":"text is required: the owner's ruling as the askers should read it"}`,
 	} {
-		if got := call(t, chief["relay_ruling"], input); got != want {
+		if got := call(t, manager["relay_ruling"], input); got != want {
 			t.Fatalf("relay %s:\n%s\nwant\n%s", input, got, want)
 		}
 	}
-	if _, err := chief["relay_ruling"].Handle(ctx, json.RawMessage(`{"question":"1","text":"x","scope":"local","to":"mason1"}`)); err == nil {
+	if _, err := manager["relay_ruling"].Handle(ctx, json.RawMessage(`{"question":"1","text":"x","scope":"local","to":"mason1"}`)); err == nil {
 		t.Fatal("relay_ruling accepted an unknown field")
 	}
 	if got := f.head(t); got != before {
 		t.Fatalf("a refused relay committed: %s, was %s", got, before)
 	}
-	if got := call(t, chief["relay_ruling"], `{"question":"2","text":"State and the log format are both fixed.","scope":"notify"}`); got != `{"recorded":true,"questions":["1","2"],"scope":"notify","next":"The ruling is delivered to each asker as its next turn."}` {
+	if got := call(t, manager["relay_ruling"], `{"question":"2","text":"State and the log format are both fixed.","scope":"notify"}`); got != `{"recorded":true,"questions":["1","2"],"scope":"notify","next":"The ruling is delivered to each asker as its next turn."}` {
 		t.Fatalf("relay: %s", got)
 	}
-	if got := call(t, chief["relay_ruling"], `{"question":"1","text":"Again.","scope":"local"}`); got != `{"recorded":false,"reason":"question 1 is already answered"}` {
+	if got := call(t, manager["relay_ruling"], `{"question":"1","text":"Again.","scope":"local"}`); got != `{"recorded":false,"reason":"question 1 is already answered"}` {
 		t.Fatalf("second relay: %s", got)
 	}
 	for range 2 {
@@ -757,11 +757,11 @@ func TestProposeCharterFromAnOwnerRuling(t *testing.T) {
 	if _, err := f.repo.Ask(ctx, "reviewer1", reviewer, "Is every change tested?", start); err != nil {
 		t.Fatal(err)
 	}
-	chief := tools(t, f, "chief", f.turn(t, "chief", trace.Manager, "chief1"), start)
-	if got := call(t, chief["answer"], `{"question":"2","text":"Yes.","citations":["charter#1"]}`); !strings.Contains(got, `"recorded":true`) {
+	manager := tools(t, f, "chief", f.turn(t, "chief", trace.Manager, "chief1"), start)
+	if got := call(t, manager["answer"], `{"question":"2","text":"Yes.","citations":["charter#1"]}`); !strings.Contains(got, `"recorded":true`) {
 		t.Fatal(got)
 	}
-	if got := call(t, chief["escalate"], `{"questions":["1"],"rephrasing":"Must uploads resume?","blocked":"The resume unit.","options":[],"recommendation":"Yes."}`); !strings.Contains(got, `"recorded":true`) {
+	if got := call(t, manager["escalate"], `{"questions":["1"],"rephrasing":"Must uploads resume?","blocked":"The resume unit.","options":[],"recommendation":"Yes."}`); !strings.Contains(got, `"recorded":true`) {
 		t.Fatal(got)
 	}
 	if _, err := f.repo.Rule(ctx, 1, "Uploads must always resume.", owner, start); err != nil {
@@ -775,18 +775,18 @@ func TestProposeCharterFromAnOwnerRuling(t *testing.T) {
 		{`{"question":"1","rule":"Uploads\nresume."}`, "rule must be one line: a charter rule is one numbered item"},
 		{`{"question":"1","rule":"Uploads resume. <!-- always"}`, "rule must not contain an HTML comment marker"},
 	} {
-		if got, want := call(t, chief["propose_charter"], c[0]), `{"recorded":false,"reason":"`+c[1]+`"}`; got != want {
+		if got, want := call(t, manager["propose_charter"], c[0]), `{"recorded":false,"reason":"`+c[1]+`"}`; got != want {
 			t.Fatalf("propose_charter %s:\n%s\nwant\n%s", c[0], got, want)
 		}
 	}
 	if got := f.head(t); got != before {
 		t.Fatalf("a refused proposal committed: %s, was %s", got, before)
 	}
-	if got := call(t, chief["propose_charter"], `{"question":"1","rule":" Uploads resume. "}`); got != `{"recorded":true,"question":"1","number":4,"next":"The owner ratifies or declines the proposal; make it the attention of your status until they do."}` {
+	if got := call(t, manager["propose_charter"], `{"question":"1","rule":" Uploads resume. "}`); got != `{"recorded":true,"question":"1","number":4,"next":"The owner ratifies or declines the proposal; make it the attention of your status until they do."}` {
 		t.Fatalf("propose_charter: %s", got)
 	}
 	recorded := f.head(t)
-	if got := call(t, chief["propose_charter"], `{"question":"1","rule":"Uploads always resume."}`); got != `{"recorded":false,"reason":"the owner's ruling on question 1 already has a charter proposal, which is proposed"}` {
+	if got := call(t, manager["propose_charter"], `{"question":"1","rule":"Uploads always resume."}`); got != `{"recorded":false,"reason":"the owner's ruling on question 1 already has a charter proposal, which is proposed"}` {
 		t.Fatalf("second proposal: %s", got)
 	}
 	if got := f.head(t); got != recorded {
@@ -940,7 +940,7 @@ func TestDriftMasonsAmendmentRecordsTheUpstreamMoveWithoutMovingTheUnit(t *testi
 	}
 }
 
-func TestDriftAmendmentTellsTheChiefOnce(t *testing.T) {
+func TestDriftAmendmentTellsTheManagerOnce(t *testing.T) {
 	d := newDriftFixture(t)
 	d.amend(t)
 	moved := upstreamMoved(t, d.fixture)

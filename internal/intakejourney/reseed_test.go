@@ -64,7 +64,7 @@ func recordRatification(t *testing.T, f *journey.ShedFixture, repo *trace.Reposi
 	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.RatificationDocumentID(1), Revision: 1, Project: f.Project, Workstream: stream, At: f.Clock.Now(), Actor: intake.OwnerActor, Cause: "owner-shed"}, Path: shed.RatificationPath(1), Content: string(content)}}))
 }
 
-func fileChiefAmendment(t *testing.T, f *journey.ArchitectFixture, repo *trace.Repository, stream config.WorkstreamID, id string, sealed seal.Seal) {
+func fileManagerAmendment(t *testing.T, f *journey.ArchitectFixture, repo *trace.Repository, stream config.WorkstreamID, id string, sealed seal.Seal) {
 	t.Helper()
 	ctx := context.Background()
 	_, doc, found, err := seal.Latest(repo, stream)
@@ -72,9 +72,9 @@ func fileChiefAmendment(t *testing.T, f *journey.ArchitectFixture, repo *trace.R
 	if !found {
 		t.Fatal("the workstream has no seal")
 	}
-	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
-	header := trace.Header{Schema: "osmia.trace.amendment", Version: trace.Version, ID: id, Revision: 1, Project: f.Project, Workstream: stream, At: f.Clock.Now(), Actor: chief, Cause: "fixture"}
-	fixturekit.Must(t, repo.Append(ctx, trace.Amendment{Header: header, Requester: chief, Role: trace.Manager, Thread: trace.Manager, Turn: "events_1",
+	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
+	header := trace.Header{Schema: "osmia.trace.amendment", Version: trace.Version, ID: id, Revision: 1, Project: f.Project, Workstream: stream, At: f.Clock.Now(), Actor: manager, Cause: "fixture"}
+	fixturekit.Must(t, repo.Append(ctx, trace.Amendment{Header: header, Requester: manager, Role: trace.Manager, Thread: trace.Manager, Turn: "events_1",
 		Citations: []string{"spec#1"}, Change: "Move a footprint to the new directory", Reason: "The directory landed upstream", Seal: sealed.Seal, SealRevision: doc.Revision, SpecHash: sealed.SpecHash}))
 	header.Schema, header.ID = "osmia.trace.transition", "amendment_"+id+"_filed"
 	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: 0, Transition: trace.Transition{Header: header, Subject: intake.AmendmentSubject(id), To: "filed", Reason: "filed"}})
@@ -500,7 +500,7 @@ func TestDirectoryLandedAfterDraftingIsReseededByTheEditTheSealAndAnAmendment(t 
 	f.Script("amend-1-1", map[string]string{plan.PlanPath: amended}, nil)
 	f.Script("amend-1-round-1-"+intake.CommitteeAgent(1)+"-1", nil, nil)
 	f.Script("amend-1-reply-1", nil, nil)
-	fileChiefAmendment(t, f.ArchitectFixture, repo, stream, "1", record)
+	fileManagerAmendment(t, f.ArchitectFixture, repo, stream, "1", record)
 	f.AwaitAmendment(t, stream, intake.AmendmentPresented)
 	view, err := f.C.Amendment(ctx, stream, "1")
 	fixturekit.Must(t, err)

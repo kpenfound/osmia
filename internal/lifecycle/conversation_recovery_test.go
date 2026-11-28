@@ -14,7 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestConversationPathSharedChiefRestartReconcilesHostOperation(t *testing.T) {
+func TestConversationPathSharedManagerRestartReconcilesHostOperation(t *testing.T) {
 	t.Parallel()
 	for _, completed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "captured", true: "completed"}[completed], func(t *testing.T) {
@@ -34,7 +34,7 @@ func TestConversationPathSharedChiefRestartReconcilesHostOperation(t *testing.T)
 			fixturekit.Must(t, err)
 			repo, err := s.Repository(f.project1)
 			fixturekit.Must(t, err)
-			wt, host, _, closeTarget, err := s.Lifecycle().ChiefRepository(ctx, repo, f.stream1)
+			wt, host, _, closeTarget, err := s.Lifecycle().ManagerRepository(ctx, repo, f.stream1)
 			fixturekit.Must(t, err)
 			th, err := wt.Thread(host, trace.Manager)
 			fixturekit.Must(t, err)
@@ -73,7 +73,7 @@ func TestConversationPathSharedChiefRestartReconcilesHostOperation(t *testing.T)
 			fixturekit.Must(t, err)
 			repo, err = s.Repository(f.project1)
 			fixturekit.Must(t, err)
-			wt, host, _, closeTarget, err = s.Lifecycle().ChiefRepository(ctx, repo, f.stream1)
+			wt, host, _, closeTarget, err = s.Lifecycle().ManagerRepository(ctx, repo, f.stream1)
 			fixturekit.Must(t, err)
 			t.Cleanup(closeTarget)
 			fixturekit.ConversationAwait(t, func() bool { records, _ := wt.Operations(host); return len(records) == 1 && records[0].Acknowledged })

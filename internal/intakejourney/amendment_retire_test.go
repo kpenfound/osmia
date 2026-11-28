@@ -665,7 +665,7 @@ func TestRetirementLeavesDraftQuestionsOnTheirNormalPath(t *testing.T) {
 				t.Fatalf("draft %+v", result)
 			}
 			if answerTime == "before retirement" {
-				journey.ChiefAnswers(t, f, repo, stream, "1", intakefixture.AskedAnswer, "charter#1")
+				journey.ManagerAnswers(t, f, repo, stream, "1", intakefixture.AskedAnswer, "charter#1")
 			}
 			before, err := repo.Questions(stream)
 			fixturekit.Must(t, err)
@@ -678,7 +678,7 @@ func TestRetirementLeavesDraftQuestionsOnTheirNormalPath(t *testing.T) {
 				t.Fatalf("retirement changed the question: before %+v after %+v", before, after)
 			}
 			if answerTime == "after retirement" {
-				journey.ChiefAnswers(t, f, repo, stream, "1", intakefixture.AskedAnswer, "charter#1")
+				journey.ManagerAnswers(t, f, repo, stream, "1", intakefixture.AskedAnswer, "charter#1")
 			}
 			fixturekit.Must(t, debate.Pass(ctx))
 			th, err := repo.Thread(stream, intake.ArchitectAgent)

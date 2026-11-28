@@ -119,7 +119,7 @@ func (r Resolutions) Acquire(ctx context.Context, req coreadapter.WorkspaceReque
 // Selection selects the whole of the resolution workspace, but its VCS
 // metadata, as the drift mason turn's view, run with execution. The turn
 // gets exactly masonGrant's tools over this view: it may read and write
-// files, execute, ask the chief of staff, read factory context, record a
+// files, execute, ask the manager, read factory context, record a
 // discovery, file an amendment and call done.
 func (r Resolutions) Selection(ctx context.Context, scope coreadapter.Scope, execution coreadapter.ExecutionSettings) (isolation.Selection, error) {
 	w, err := r.Find(ctx, config.WorkstreamID(scope.Workstream))
@@ -135,7 +135,7 @@ func (r Resolutions) Selection(ctx context.Context, scope coreadapter.Scope, exe
 // DriftReviewOrigin from durable drift/rebase.json records rather than
 // from the live resolution workspace, so it is the same across an answer
 // continuation and after a restart. The turn gets exactly reviewerGrant's
-// tools over this view: it may read files, ask the chief of staff, read
+// tools over this view: it may read files, ask the manager, read
 // factory context, record a discovery, read the diff and record its
 // verdict; reviewerGrant holds neither WriteFiles nor Execute, so it
 // writes nothing and executes nothing.

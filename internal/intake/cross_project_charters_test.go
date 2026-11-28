@@ -158,13 +158,13 @@ func TestCrossProjectCharterConflictAndAmendment(t *testing.T) {
 	host := f.workgroup.Members[0]
 	_, err = f.group.EnsureManager(ctx, host, fixturekit.DemoStart, OwnerActor)
 	fixturekit.Must(t, err)
-	chief := claimCharterChief(t, f.group, host)
-	if _, err := f.group.AnswerQuestion(ctx, trace.Manager, chief, string(fixturekit.Stream)+":"+q, "Dismiss it.", []string{"charter#1"}, fixturekit.DemoStart); err == nil || !strings.Contains(err.Error(), "only the owner's ruling") {
+	manager := claimCharterManager(t, f.group, host)
+	if _, err := f.group.AnswerQuestion(ctx, trace.Manager, manager, string(fixturekit.Stream)+":"+q, "Dismiss it.", []string{"charter#1"}, fixturekit.DemoStart); err == nil || !strings.Contains(err.Error(), "only the owner's ruling") {
 		t.Fatalf("chief answered conflict: %v", err)
 	}
 	_, err = f.group.Rule(ctx, inbox[0].Number, "B may persist the coordination journal.", OwnerActor, fixturekit.DemoStart)
 	fixturekit.Must(t, err)
-	tools, err := questions.Tools(f.group, trace.Manager, chief, func() time.Time { return fixturekit.DemoStart })
+	tools, err := questions.Tools(f.group, trace.Manager, manager, func() time.Time { return fixturekit.DemoStart })
 	fixturekit.Must(t, err)
 	for _, tool := range tools {
 		if tool.Name == questions.AnswerTool {
@@ -256,7 +256,7 @@ func TestCrossProjectCharterConflictCannotBeDismissed(t *testing.T) {
 	host := f.workgroup.Members[0]
 	_, err = f.group.EnsureManager(ctx, host, fixturekit.DemoStart, OwnerActor)
 	fixturekit.Must(t, err)
-	scope := claimCharterChief(t, f.group, host)
+	scope := claimCharterManager(t, f.group, host)
 	controls := Controls{Load: func() *Controller { return New(Dependencies{}) }}
 	tool := controls.ResolveObjection(f.group, scope)
 	out, err := tool.Handle(ctx, json.RawMessage(`{"workstream":"`+string(fixturekit.Stream)+`","objection":"`+id+`","decision":"dismiss","note":"Ignore it."}`))
@@ -274,7 +274,7 @@ func TestCrossProjectCharterConflictCannotBeDismissed(t *testing.T) {
 	}
 }
 
-func claimCharterChief(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) coreadapter.Scope {
+func claimCharterManager(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
 	h := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_events", Revision: 1, Project: repo.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: OwnerActor, Cause: "test"}

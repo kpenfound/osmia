@@ -12,7 +12,7 @@ type UnitMoveRequest struct {
 }
 
 // UnitMove is the document units/<unit>/move-<version>.json: one move of a
-// unit, by the owner or by the chief of staff on the owner's behalf, out of
+// unit, by the owner or by the manager on the owner's behalf, out of
 // the state at version. ResetTurn is the mason turn a move to implementing
 // resumes after, and Candidate the recorded candidate a move to checking,
 // reviewing or approved takes forward.

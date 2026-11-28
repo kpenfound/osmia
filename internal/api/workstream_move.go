@@ -13,7 +13,7 @@ type WorkstreamMoveRequest struct {
 
 // WorkstreamMove is the document moves/move-<n>.json: one move of a
 // workstream to building, assembled or back to delivered, by the owner or by
-// the chief of staff. From is the feature state it left; a move into the
+// the manager. From is the feature state it left; a move into the
 // state the workstream is in restarts that stage.
 type WorkstreamMove struct {
 	Move int    `json:"move"`

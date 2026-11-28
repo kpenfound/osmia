@@ -224,9 +224,9 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 			return nil, nil, &APIError{Code: Internal, Message: err.Error()}
 		}
 		if group != "" {
-			chief, host, _, close, err := s.chiefRepository(context.Background(), active.repository, w.Workstream)
+			manager, host, _, close, err := s.managerRepository(context.Background(), active.repository, w.Workstream)
 			if err == nil {
-				statuses, readErr := trace.Read[trace.Status](chief, host)
+				statuses, readErr := trace.Read[trace.Status](manager, host)
 				close()
 				if readErr != nil {
 					return nil, nil, &APIError{Code: Internal, Message: readErr.Error()}

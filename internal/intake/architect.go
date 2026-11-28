@@ -70,7 +70,7 @@ type Architect struct {
 // DraftInput numbers the draft an operation runs. Resume numbers the
 // operation that runs the draft again after it parked on the architect's
 // question, from 1; the draft's own operation has none. Note is what the
-// owner or the chief of staff asked of a run of drafts started after drafting
+// owner or the manager asked of a run of drafts started after drafting
 // stopped; every draft of that run carries it.
 type DraftInput struct {
 	Draft  int    `json:"draft"`
@@ -79,7 +79,7 @@ type DraftInput struct {
 }
 
 // DraftAgainCause is the cause of the first draft of a run that the owner or
-// the chief of staff asked for after drafting stopped.
+// the manager asked for after drafting stopped.
 const DraftAgainCause = "draft-again"
 
 // DraftExhausted is the draft-subject state of a workstream whose drafting
@@ -167,7 +167,7 @@ func (d *Drafter) Pass(ctx context.Context) error {
 }
 
 // Reconcile requests the first draft of a handed workstream, the next draft
-// after an invalid or failed one while drafts remain, and tells the chief of
+// after an invalid or failed one while drafts remain, and tells the manager of
 // staff once they are exhausted. A draft parked on the architect's question
 // resumes once the answer is queued on the architect's thread. A draft in
 // progress, a parked draft whose answer is not queued and a workstream in any
@@ -250,7 +250,7 @@ func (d *Drafter) EnsureThread(ctx context.Context, stream config.WorkstreamID) 
 }
 
 // Run returns the first draft of the workstream's current run of drafts and
-// the note it carries: draft 1 with no note until the owner or the chief of
+// the note it carries: draft 1 with no note until the owner or the manager of
 // staff asks for another run after drafting stopped.
 func (d *Drafter) Run(stream config.WorkstreamID) (int, string, error) {
 	transitions, err := trace.Read[trace.Transition](d.Repository, stream)
@@ -341,7 +341,7 @@ func (d *Drafter) Stopped(stream config.WorkstreamID) (int, trace.Transition, er
 }
 
 // RequestAgain starts a new run of MaxDrafts drafts of a handed workstream
-// whose drafting stopped, asked by the owner or the chief of staff with note.
+// whose drafting stopped, asked by the owner or the manager with note.
 // Every draft of the run carries the note, and its first draft's prompt says
 // why the last draft was refused. It returns what happens next, or refused:
 // why nothing was asked.

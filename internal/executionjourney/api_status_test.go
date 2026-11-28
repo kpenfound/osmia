@@ -34,17 +34,17 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func queueChiefTurn(t *testing.T, repo *trace.Repository, turn string, at time.Time) {
+func queueManagerTurn(t *testing.T, repo *trace.Repository, turn string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at, Actor: owner, Cause: "message_" + turn, Depth: 1},
-		AgentID: intakefixture.ChiefAgent, ThreadID: intakefixture.ChiefThread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
+		AgentID: intakefixture.ManagerAgent, ThreadID: intakefixture.ManagerThread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
 		SystemPrompt: "You are the chief of staff.", Prompt: "Owner message: " + turn}
 	_, err := repo.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
 	event := trace.EventID("deliver_"+turn, "turn")
-	op, err := thread.TurnOperation(fixturekit.Project, event, thread.TurnInput{Workstream: fixturekit.Stream, Agent: intakefixture.ChiefAgent, Turn: turn})
+	op, err := thread.TurnOperation(fixturekit.Project, event, thread.TurnInput{Workstream: fixturekit.Stream, Agent: intakefixture.ManagerAgent, Turn: turn})
 	fixturekit.Must(t, err)
 	tx := trace.Transaction{Transition: trace.Transition{
 		Header:  trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "deliver_" + turn, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at, Actor: trace.Actor{Kind: "service", ID: "inbox"}, Cause: req.ID, Depth: 1},
@@ -54,7 +54,7 @@ func queueChiefTurn(t *testing.T, repo *trace.Repository, turn string, at time.T
 	fixturekit.Must(t, err)
 }
 
-func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
+func TestManagerStatusAcrossRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "cs-")
@@ -72,9 +72,9 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, clock.Now(), owner))
 	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Quiet, clock.Now(), owner))
-	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: intakefixture.ChiefAgent, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "chief_of_staff", ThreadID: intakefixture.ChiefThread}
+	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: intakefixture.ManagerAgent, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "chief_of_staff", ThreadID: intakefixture.ManagerThread}
 	fixturekit.Must(t, repo.CreateThread(ctx, identity))
-	queueChiefTurn(t, repo, "status", clock.Now())
+	queueManagerTurn(t, repo, "status", clock.Now())
 	fixturekit.Must(t, repo.Close())
 
 	sessions := &fixturekit.DemoSessions{ByKey: map[string]*mcp.ClientSession{}}
@@ -92,7 +92,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-				set, err := status.Tool(r, intakefixture.ChiefAgent, scope, clock.Now)
+				set, err := status.Tool(r, intakefixture.ManagerAgent, scope, clock.Now)
 				return []coreadapter.Tool{set}, err
 			},
 			Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}},
@@ -130,7 +130,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, args := range []map[string]any{
-			{"goal": "Finish the importer on " + intakefixture.ChiefThread + ".", "note": "Started.", "agents": []string{}},
+			{"goal": "Finish the importer on " + intakefixture.ManagerThread + ".", "note": "Started.", "agents": []string{}},
 			{"goal": "Ship resumable uploads.", "note": "The plan is drafted.", "agents": []string{"The architect is drafting the plan."}},
 			{"goal": "Ship resumable uploads.", "note": "The plan is ready for review. Work is starting.", "agents": []string{"The architect is idle."}},
 		} {

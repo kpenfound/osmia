@@ -26,7 +26,7 @@ func TestRetiredContextKeepsEventsPending(t *testing.T) {
 			unavailable := fmt.Errorf("%w: no live member context", trace.ErrMemberRetired)
 			opts := Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil }}
 			if phase == "target" {
-				opts.ChiefTarget = func(context.Context, config.WorkstreamID) (*trace.Repository, func(), error) {
+				opts.ManagerTarget = func(context.Context, config.WorkstreamID) (*trace.Repository, func(), error) {
 					return nil, func() {}, unavailable
 				}
 			} else {

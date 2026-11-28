@@ -110,9 +110,9 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 		if !merged && view.Dependencies[0].BuildBranch == "" {
 			t.Fatal("dependent has no upstream branch or commit to build against")
 		}
-		chief, _, bundleStream, closeChief, err := f.S.Lifecycle().ChiefRepository(ctx, repository, stream)
+		manager, _, bundleStream, closeManager, err := f.S.Lifecycle().ManagerRepository(ctx, repository, stream)
 		fixturekit.Must(t, err)
-		context, err := service.TestChiefContext(ctx, provider, chief, closeChief, repository.Project(), bundleStream)
+		context, err := service.TestManagerContext(ctx, provider, manager, closeManager, repository.Project(), bundleStream)
 		fixturekit.Must(t, err)
 		if !strings.Contains(context, "Use the upstream interface.") || !strings.Contains(context, "Downstream depends on upstream.") || !strings.Contains(context, "source: "+trace.ProjectSpecsPath+" (record "+trace.ProjectSpecsDocument) {
 			t.Fatal("shared chief lost the ratified project contract")

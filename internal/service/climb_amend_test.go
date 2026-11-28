@@ -23,7 +23,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// amendClimbSpec has the chief of staff's amendment of the climb spec presented
+// amendClimbSpec has the manager's amendment of the climb spec presented
 // and approves it as the owner, which sets the running service resealing and
 // applying it.
 func (c *climbFixture) amendClimbSpec(t *testing.T, stream config.WorkstreamID, amended string) {
@@ -36,11 +36,11 @@ func (c *climbFixture) amendClimbSpec(t *testing.T, stream config.WorkstreamID, 
 		t.Fatal("the workstream has no seal")
 	}
 	at := time.Now().UTC()
-	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
+	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
 	header := func(schema, id string, by trace.Actor) trace.Header {
 		return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: 1, Project: repository.Project(), Workstream: stream, At: at, Actor: by, Cause: "fixture"}
 	}
-	request := trace.Amendment{Header: header("osmia.trace.amendment", "1", chief), Requester: chief, Role: trace.Manager, Thread: trace.Manager, Turn: "events_1",
+	request := trace.Amendment{Header: header("osmia.trace.amendment", "1", manager), Requester: manager, Role: trace.Manager, Thread: trace.Manager, Turn: "events_1",
 		Citations: []string{"climb#metric"}, Change: "Amend the climb spec", Reason: "The owner changed the climb", Seal: sealed.Seal, SealRevision: sealDoc.Revision, SpecHash: sealed.SpecHash}
 	document := func(id, path, content string) trace.Document {
 		return trace.Document{Header: header("osmia.trace.document", id, intake.ArchitectActor), Path: path, Content: content}

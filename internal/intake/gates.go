@@ -147,7 +147,7 @@ func (s *Controller) guardedCard(repository *trace.Repository, e *InboxEntry, g 
 }
 
 // CarriedJudgment returns the binding Jev judgment recorded for the subject by
-// a decision of the chief of staff that was not carried out, when there is one:
+// a decision of the manager that was not carried out, when there is one:
 // a binding pick of an outcome other than putting the subject to the owner,
 // whose subject nevertheless reached the owner's gate. Such an item goes to the
 // owner without a gate judgment, with Jev's judgment shown.
@@ -592,9 +592,9 @@ func (s *Controller) AmendmentGateOf(repository *trace.Repository, stream config
 var escalationRoles = questions.RoutingRoles
 
 // TextOptions returns the options of a decision whose every option is carried
-// out with text: one option for each distinct text the chief of staff wrote,
+// out with text: one option for each distinct text the manager wrote,
 // named option-<n> after its place. Jev never writes text, so an option whose
-// text the chief did not write is not offered.
+// text the manager did not write is not offered.
 func TextOptions(texts []string) []jev.DecisionOption {
 	var options []jev.DecisionOption
 	seen := map[string]bool{}
@@ -716,7 +716,7 @@ func (s *Controller) escalationGate(repository *trace.Repository, e trace.InboxE
 
 // EscalationCard is an escalation's card as the owner sees it, or nothing while
 // Jev's judgment of it is pending or its pick is not applied. A card whose
-// subject carries a binding judgment Jev made as the chief of staff's pick,
+// subject carries a binding judgment Jev made as the manager's pick,
 // which the service could not carry out, shows it.
 func (s *Controller) EscalationCard(repository *trace.Repository, e trace.InboxEntry, view InboxEntry) (InboxEntry, bool, error) {
 	if s.Jev == nil {
@@ -747,7 +747,7 @@ func (s *Controller) RuleInboxBy(ctx context.Context, repository *trace.Reposito
 
 // WorkstreamGates returns the gates the workstream has reached whose decision
 // Jev may make: its ratification and the objections that block it, its
-// presented amendments that change intent, its contested units the chief of
+// presented amendments that change intent, its contested units the manager of
 // staff escalated, its delivery card, its charter proposals and the
 // cancellations presented in its conversation. Whatever the owner already
 // decided is included, for the gate's own decision to say so.

@@ -22,7 +22,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
+func TestWorkgroupSharesOneManagerAcrossMembersAndARestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	const second config.WorkstreamID = "w_00000000000000000000000000000f02"
@@ -175,9 +175,9 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 	}()
 	repo := <-lives
 	current = repo
-	chiefSettled := func(repository *trace.Repository) bool {
-		chief, err := repository.ManagerThread(fixturekit.Stream)
-		return err == nil && len(chief.Turns) > 0 && !slices.ContainsFunc(chief.Turns, func(q trace.QueuedTurn) bool {
+	managerSettled := func(repository *trace.Repository) bool {
+		manager, err := repository.ManagerThread(fixturekit.Stream)
+		return err == nil && len(manager.Turns) > 0 && !slices.ContainsFunc(manager.Turns, func(q trace.QueuedTurn) bool {
 			return q.CompletedAt.IsZero()
 		})
 	}
@@ -193,7 +193,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 			return false
 		}
 		th, err := repo.Thread(fixturekit.Stream, fixturekit.DemoAgent)
-		return err == nil && slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == questions.TurnID("1") }) && chiefSettled(repo)
+		return err == nil && slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == questions.TurnID("1") }) && managerSettled(repo)
 	}
 	pump(s, escalatedAndAnswered)
 
@@ -207,12 +207,12 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 	if own, err := repo.Thread(second, trace.Manager); err == nil && len(own.Turns) != 0 {
 		t.Fatalf("workstream %s's own chief-of-staff identity gained a turn: %+v", second, own)
 	}
-	chief1, err := repo.ManagerThread(fixturekit.Stream)
+	manager1, err := repo.ManagerThread(fixturekit.Stream)
 	fixturekit.Must(t, err)
-	chief2, err := repo.ManagerThread(second)
+	manager2, err := repo.ManagerThread(second)
 	fixturekit.Must(t, err)
-	if chief1.Identity.ID != trace.Manager || chief2.Identity.ID != trace.Manager || len(chief1.Turns) != len(chief2.Turns) {
-		t.Fatalf("workstreams do not share one chief-of-staff thread: %+v vs %+v", chief1, chief2)
+	if manager1.Identity.ID != trace.Manager || manager2.Identity.ID != trace.Manager || len(manager1.Turns) != len(manager2.Turns) {
+		t.Fatalf("workstreams do not share one chief-of-staff thread: %+v vs %+v", manager1, manager2)
 	}
 
 	ruling1, err := repo.Questions(fixturekit.Stream)
@@ -255,7 +255,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 	clock.Advance(time.Minute)
 	pump(s2, func() bool {
 		th, err := repo2.Thread(second, "agent_second")
-		return err == nil && slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == questions.TurnID("1") }) && chiefSettled(repo2)
+		return err == nil && slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == questions.TurnID("1") }) && managerSettled(repo2)
 	})
 
 	resumed, err := repo2.Thread(second, "agent_second")

@@ -121,7 +121,7 @@ func TestDriftReviewerGrantNamesEveryDriftReviewerToolAndReadOnlyCandidateView(t
 	}
 }
 
-func TestDriftMasonAskRecordsAChiefOfStaffQuestionNamingTheDriftRebaseAndDeliversToDriftMasonThread(t *testing.T) {
+func TestDriftMasonAskRecordsAManagerQuestionNamingTheDriftRebaseAndDeliversToDriftMasonThread(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, _ := journey.NewFinalFixtureWith(t, "drift-mason-ask", "")
 	d := journey.Drifter{Foreman: &journey.Foreman{Masons: journey.NewMasonController(f.S, repository)}}
@@ -151,7 +151,7 @@ func TestDriftMasonAskRecordsAChiefOfStaffQuestionNamingTheDriftRebaseAndDeliver
 		t.Fatalf("the question does not name the drift rebase: %q", asked[0].Asked.Question)
 	}
 
-	journey.ChiefAnswers(t, f, repository, stream, "1", "Keep both owners on one line.", "spec#1")
+	journey.ManagerAnswers(t, f, repository, stream, "1", "Keep both owners on one line.", "spec#1")
 	th, err := repository.Thread(stream, intake.DriftMasonAgent)
 	fixturekit.Must(t, err)
 	if len(th.Turns) != 2 || th.Turns[1].Request.TurnID != questions.TurnID("1") {
@@ -193,7 +193,7 @@ func TestDriftMasonAnswerContinuationResumesTheResolutionWorkspaceThroughDoneAcr
 	journey.CompleteClaimedTurn(t, f, repository, stream, intake.DriftMasonAgent, q, &coreadapter.Outcome{Status: questions.Waiting, Report: "Asked question 1"})
 
 	journey.AwaitResolution(t, f.S, d, stream, op, "its mason's resolution")
-	journey.ChiefAnswers(t, f, repository, stream, "1", "Keep both owners on one line.", "spec#1")
+	journey.ManagerAnswers(t, f, repository, stream, "1", "Keep both owners on one line.", "spec#1")
 
 	repository = restartRepository(t, f, repository)
 	d = journey.Drifter{Foreman: &journey.Foreman{Masons: journey.NewMasonController(f.S, repository)}}
@@ -252,7 +252,7 @@ func TestDriftReviewerAnswerContinuationSeesCandidateAndDiffsAndCompletesTheRevi
 	journey.CompleteClaimedTurn(t, f, repository, stream, intake.DriftReviewerAgent, review, &coreadapter.Outcome{Status: questions.Waiting, Report: "Asked question 1"})
 
 	journey.AwaitResolution(t, f.S, d, stream, op, "review 1 of candidate")
-	journey.ChiefAnswers(t, f, repository, stream, "1", "Yes, one line.", "spec#1")
+	journey.ManagerAnswers(t, f, repository, stream, "1", "Yes, one line.", "spec#1")
 
 	answer1Scope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: intake.ReviewerRole, Thread: intake.DriftReviewerAgent, Turn: questions.TurnID("1")}
 	answer1 := journey.ClaimOldestTurn(t, f, repository, stream, intake.DriftReviewerAgent)
@@ -268,7 +268,7 @@ func TestDriftReviewerAnswerContinuationSeesCandidateAndDiffsAndCompletesTheRevi
 	}
 	journey.CompleteClaimedTurn(t, f, repository, stream, intake.DriftReviewerAgent, answer1, &coreadapter.Outcome{Status: questions.Waiting, Report: "Asked question 2"})
 	journey.AwaitResolution(t, f.S, d, stream, op, "review 1 of candidate")
-	journey.ChiefAnswers(t, f, repository, stream, "2", "No, only CODEOWNERS.", "spec#1")
+	journey.ManagerAnswers(t, f, repository, stream, "2", "No, only CODEOWNERS.", "spec#1")
 
 	asked, err := repository.Questions(stream)
 	fixturekit.Must(t, err)

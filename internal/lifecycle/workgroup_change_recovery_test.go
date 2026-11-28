@@ -263,7 +263,7 @@ func changeFailureNotices(t *testing.T, repo *trace.Repository, stream config.Wo
 	return bodies
 }
 
-func TestFailedChangeSettlesItsRequesterAndTellsTheChief(t *testing.T) {
+func TestFailedChangeSettlesItsRequesterAndTellsTheManager(t *testing.T) {
 	t.Parallel()
 	f, stream, repo := journey.NewApprovedFixture(t, "failed-contract")
 	defer repo.Close()
@@ -339,7 +339,7 @@ func TestFailedChangeSettlesItsRequesterAndTellsTheChief(t *testing.T) {
 	}
 }
 
-func TestFailedCrossRepoChangeTellsTheChiefThroughTheLeader(t *testing.T) {
+func TestFailedCrossRepoChangeTellsTheManagerThroughTheLeader(t *testing.T) {
 	t.Parallel()
 	f := journey.NewConfiguredProductionDesignFixture(t, journey.ProductionDesignConfiguration{Options: func(opts *journey.Options) {
 		opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {

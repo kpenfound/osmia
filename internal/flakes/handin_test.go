@@ -165,7 +165,7 @@ func TestHandInCarriesTheGroupsEarlierHistory(t *testing.T) {
 	}
 }
 
-func TestHandInKeepsTheChiefsNotesInTheirOwnSection(t *testing.T) {
+func TestHandInKeepsTheManagersNotesInTheirOwnSection(t *testing.T) {
 	f := newFixture(t)
 	o := recordOne(t, f, groupA, "1")
 	g, _, _ := f.store.Group(groupA)

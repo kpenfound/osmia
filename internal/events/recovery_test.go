@@ -8,7 +8,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestRecoveryContinuationKeepsEventPendingUntilChiefFinishes(t *testing.T) {
+func TestRecoveryContinuationKeepsEventPendingUntilManagerFinishes(t *testing.T) {
 	at := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
 	first := trace.QueuedTurn{Request: trace.TurnRequest{Header: trace.Header{ID: "request_event"}, TurnID: "events_one"},
 		Response: &trace.TurnResponse{Header: trace.Header{ID: "response_event"}, Result: coreadapter.SessionResult{Cancelled: true}}, CompletedAt: at}

@@ -73,7 +73,7 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	j := newFlowJourney(t)
 	stream := j.Stream
 	j.FinalTurn(1, 1, cleanFinalReport("Uploads resume and skip acknowledged chunks."))
-	j.chief.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst, briefShipNext}})
+	j.manager.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst, briefShipNext}})
 
 	j.start(t)
 	first := j.awaitPushes(t, 1)[0]
@@ -179,7 +179,7 @@ func TestFinalChecksWaitForTheLoadStatusAndTheCloudRunBeforeSettling(t *testing.
 	if run.Status != "passed" || run.Push != 1 || run.PushedCommit != firstCommit {
 		t.Fatalf("the check result %+v", run)
 	}
-	if got := j.chief.heardOf("posted no `load` status"); got != 1 {
+	if got := j.manager.heardOf("posted no `load` status"); got != 1 {
 		t.Fatalf("the chief of staff heard that load never ran %d times", got)
 	}
 }
@@ -255,11 +255,11 @@ func TestFailedCloudChecksAreRerunOnceAndTheFreshRunSettlesTheReview(t *testing.
 	}
 }
 
-func TestChiefOfStaffTriagesAFinalReviewFindingWithoutTheOwner(t *testing.T) {
+func TestManagerTriagesAFinalReviewFindingWithoutTheOwner(t *testing.T) {
 	j := newFlowJourney(t)
 	stream := j.Stream
 	j.FinalTurn(1, 1, blockingFinalReport)
-	j.chief.plan(1, triageFindingAsCode())
+	j.manager.plan(1, triageFindingAsCode())
 
 	j.start(t)
 	first := j.awaitPushes(t, 1)[0]
@@ -277,9 +277,9 @@ func TestChiefOfStaffTriagesAFinalReviewFindingWithoutTheOwner(t *testing.T) {
 	all, _, err := followup.ReadTriage(j.live(), stream)
 	fixturekit.Must(t, err)
 	if all[0].Finding != "finding-1" || all[0].Outcome != followup.TriageCode || all[0].ByJev() {
-		t.Fatalf("triage %+v (calls %q)", all, j.chief.calls(1))
+		t.Fatalf("triage %+v (calls %q)", all, j.manager.calls(1))
 	}
-	if calls := j.chief.calls(1); len(calls) != 2 || !strings.Contains(calls[1], `"recorded":true`) {
+	if calls := j.manager.calls(1); len(calls) != 2 || !strings.Contains(calls[1], `"recorded":true`) {
 		t.Fatalf("the chief of staff's triage calls %q", calls)
 	}
 	j.requireNoProblems(t)
@@ -290,8 +290,8 @@ func TestMovedFeatureBranchIsPushedToTheSameDraftAsANewReview(t *testing.T) {
 	stream := j.Stream
 	j.FinalTurn(1, 1, blockingFinalReport)
 	j.FinalTurn(2, 1, cleanFinalReport("Uploads resume and skip acknowledged chunks."))
-	j.chief.plan(1, triageFindingAsCode())
-	j.chief.plan(2, briefPlan{Text: briefText, Items: []string{briefShipFirst, briefShipNext}})
+	j.manager.plan(1, triageFindingAsCode())
+	j.manager.plan(2, briefPlan{Text: briefText, Items: []string{briefShipFirst, briefShipNext}})
 
 	j.start(t)
 	first := j.awaitPushes(t, 1)[0]
@@ -376,7 +376,7 @@ func TestAssembledWorkstreamWaitsForAGitHubCredentialThenPublishes(t *testing.T)
 		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
 		return err
 	})
-	j.chief.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst}})
+	j.manager.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst}})
 	j.Pulls.Mu.Lock()
 	j.Pulls.Uncredentialed = true
 	j.Pulls.Mu.Unlock()

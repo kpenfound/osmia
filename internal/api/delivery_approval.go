@@ -112,10 +112,10 @@ type DeliveryReady struct {
 	At          time.Time `json:"at"`
 }
 
-// The states of a delivery brief: BriefWaiting while the chief of staff's turn
+// The states of a delivery brief: BriefWaiting while the manager's turn
 // for the final review's notice has not ended and no brief is recorded,
 // BriefRecorded once one is, and BriefNoneRecorded when that turn ended
-// without one, no chief turn can run, or delivery was approved without one.
+// without one, no manager turn can run, or delivery was approved without one.
 const (
 	BriefWaiting      = "waiting"
 	BriefRecorded     = "recorded"
@@ -126,7 +126,7 @@ const (
 // whose brief state is BriefNoneRecorded.
 const NoBriefRecorded = "No brief was recorded for this review"
 
-// DeliveryBrief is the short brief the chief of staff recorded for one final
+// DeliveryBrief is the short brief the manager recorded for one final
 // review. Review, ReviewRevision and Commit identify the review it covers.
 // Screenshots are the IDs of images the preview tool captured at that commit,
 // readable at the images endpoint of the workstream they were captured for.

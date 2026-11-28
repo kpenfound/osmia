@@ -512,7 +512,7 @@ func TestProjectSpecContractGuardFailureAndRetry(t *testing.T) {
 	}
 	assertGuardRatifiable(t, f, id, 2, old.Revision+1)
 }
-func TestProjectSpecContractGuardRedraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
+func TestProjectSpecContractGuardRedraftStopsRetryingAndTheManagerAsksAgain(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, id, _ := projectSliceRefreshFixture(t)
@@ -561,8 +561,8 @@ func TestProjectSpecContractGuardRedraftStopsRetryingAndTheChiefAsksAgain(t *tes
 		})
 		return err
 	})
-	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
-	out, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, mustRepo(t, f.S, f.Project2), f.Stream2, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, chief, "chief-turn-1")
+	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
+	out, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, mustRepo(t, f.S, f.Project2), f.Stream2, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "chief-turn-1")
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}

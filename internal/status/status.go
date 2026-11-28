@@ -1,4 +1,4 @@
-// Package status checks and stores the chief of staff's workstream status.
+// Package status checks and stores the manager's workstream status.
 package status
 
 import (
@@ -43,7 +43,7 @@ var (
 var slashWords = []string{"and/or", "either/or", "i/o", "input/output", "read/write", "yes/no", "on/off", "ci/cd", "pass/fail", "n/a", "w/o", "24/7"}
 
 // Check returns why content cannot be the workstream status, or nil. Every
-// message names the field and is written for the chief of staff to act on.
+// message names the field and is written for the manager to act on.
 // Known identifiers are rejected where they appear as a whole token, but only
 // those shaped like identifiers (containing a digit or underscore, or at least
 // 16 characters), so ordinary words used as test IDs do not reject prose.
@@ -202,9 +202,9 @@ func idByte(b byte) bool {
 	return b == '_' || b == '-' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }
 
-// Tool binds set_status to one claimed chief-of-staff turn. A status the
+// Tool binds set_status to one claimed manager turn. A status the
 // check refuses is an ordinary result, {"stored":false,"reason":...}, so the
-// chief of staff reads why; a stored one is {"stored":true,"revision":n}.
+// manager reads why; a stored one is {"stored":true,"revision":n}.
 func Tool(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time) (coreadapter.Tool, error) {
 	return ToolHolding(repository, agent, scope, now, nil)
 }

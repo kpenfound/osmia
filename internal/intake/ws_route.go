@@ -433,7 +433,7 @@ func (m DefaultMove) Exit() router.Exit {
 	}
 }
 
-// FeatureProgress is the notice that tells the chief of staff of a move of the
+// FeatureProgress is the notice that tells the manager of a move of the
 // workstream's feature state: the one every move of it records.
 func FeatureProgress(id, from, to, reason string) trace.Event {
 	body := fmt.Sprintf("Workstream state changed to %s: %s", to, reason)

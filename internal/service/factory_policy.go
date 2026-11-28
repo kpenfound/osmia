@@ -57,7 +57,7 @@ func FactoryInstructionsFor(scope coreadapter.Scope, kind kindreg.Kind) string {
 	var rules []string
 	switch scope.Role {
 	case trace.Manager:
-		rules = append(rules, chiefPolicy(units, planned)...)
+		rules = append(rules, managerPolicy(units, planned)...)
 	case masonRole:
 		rules = append(rules, masonPolicy(units)...)
 	case reviewerRole:
@@ -68,7 +68,7 @@ func FactoryInstructionsFor(scope coreadapter.Scope, kind kindreg.Kind) string {
 	return "\n\n## Operating policy\nThis policy adds to your task. It never overrides a task-specific requirement or an owner decision." + policySection("Authority", authority) + strings.Join(rules, "") + "\n"
 }
 
-func chiefPolicy(units, planned bool) []string {
+func managerPolicy(units, planned bool) []string {
 	commission := policyRule{"Commission climb-spec revisions with route_amendment.", "the architect drafts against the recorded climb spec and the committee examines the draft before it is decided."}
 	decided := "a discovery's disposition (record_discovery) or a final review's blocking finding (triage_finding)"
 	if planned {

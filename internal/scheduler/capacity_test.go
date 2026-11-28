@@ -202,7 +202,7 @@ func TestClaimsHoldSlotsUntilARestartInterruptsThem(t *testing.T) {
 	}
 }
 
-func TestChiefOfStaffTakesNoSlot(t *testing.T) {
+func TestManagerTakesNoSlot(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t, "mason1", "mason2")
 	defer repo.Close()
@@ -319,7 +319,7 @@ func TestPassPublishesTheTurnsItLeftWithoutASlot(t *testing.T) {
 	}
 }
 
-func TestWorkstreamOfAnUnregisteredKindRunsOnlyItsChiefOfStaff(t *testing.T) {
+func TestWorkstreamOfAnUnregisteredKindRunsOnlyItsManager(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t, "mason1")
 	defer repo.Close()

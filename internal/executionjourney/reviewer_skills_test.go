@@ -39,7 +39,7 @@ const (
 	fakeChecklist     = "1. The candidate keeps its promises.\n"
 	notGivenMarkdown  = "---\nname: other-skill\ndescription: A skill the reviewer was not given.\n---\n"
 
-	codexReviewerRoles = intakefixture.ChiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nprofile = \"other\"\nsandbox = \"container\"\nimage = \"fixture-image\"\nskills = [\"" + fakeSkillRef + "\"]\n"
+	codexReviewerRoles = intakefixture.ManagerRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nprofile = \"other\"\nsandbox = \"container\"\nimage = \"fixture-image\"\nskills = [\"" + fakeSkillRef + "\"]\n"
 )
 
 type skillClones map[string]string

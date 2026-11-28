@@ -61,11 +61,11 @@ func approveAmendment(t *testing.T, f *journey.ShedFixture, repository *trace.Re
 	affected, err := json.Marshal(intake.AffectedRevision(sealedSpec, spec, before, after))
 	fixturekit.Must(t, err)
 	at := f.Clock.Now()
-	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
+	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
 	header := func(schema, id string, by trace.Actor) trace.Header {
 		return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: 1, Project: repository.Project(), Workstream: stream, At: at, Actor: by, Cause: "fixture"}
 	}
-	request := trace.Amendment{Header: header("osmia.trace.amendment", "1", chief), Requester: chief, Role: trace.Manager, Thread: trace.Manager, Turn: "events_1",
+	request := trace.Amendment{Header: header("osmia.trace.amendment", "1", manager), Requester: manager, Role: trace.Manager, Thread: trace.Manager, Turn: "events_1",
 		Citations: []string{"spec#1"}, Change: "Resume from a durable checkpoint", Reason: "Acknowledgements are not durable", Seal: sealed.Seal, SealRevision: sealDoc.Revision, SpecHash: sealed.SpecHash}
 	fixturekit.Must(t, repository.Append(ctx, request))
 	document := func(id, path, content string) trace.Document {

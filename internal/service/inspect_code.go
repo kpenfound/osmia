@@ -47,7 +47,7 @@ func inspectCode(cfg *config.Config, repo *trace.Repository, scope coreadapter.S
 		if err := decoder.Decode(&in); err != nil {
 			return nil, err
 		}
-		target, stream, refusal, err := chiefMember(repo, scope, in.Workstream)
+		target, stream, refusal, err := managerMember(repo, scope, in.Workstream)
 		if err != nil {
 			return nil, err
 		}

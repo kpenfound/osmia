@@ -371,5 +371,5 @@ func (j *flowJourney) feature(t *testing.T) string {
 
 func (j *flowJourney) awaitHeard(t *testing.T, text string) {
 	t.Helper()
-	intakefixture.Eventually(t, "the chief of staff never heard "+text, func() bool { return j.chief.heardOf(text) > 0 })
+	intakefixture.Eventually(t, "the chief of staff never heard "+text, func() bool { return j.manager.heardOf(text) > 0 })
 }

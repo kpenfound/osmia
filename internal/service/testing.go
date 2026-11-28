@@ -231,7 +231,7 @@ func (a TestAccess) Handle(w http.ResponseWriter, r *http.Request) { a.s.handle(
 // NewFixtureForTest composes an idle fixture from local state without launching controllers.
 func NewFixtureForTest(cfg *config.Config, opts Options, store *runtime.Store, repos []*trace.Repository) *Service {
 	s := &Service{cfg: cfg, options: opts, store: store, checkSlots: &checkSlotPool{limit: cfg.Capacity.Checks}, fleet: fleet.NewRegistry(fleet.Options{})}
-	s.chief = newChiefSlotPool(cfg.Capacity.Manager, nil, s.conversationSignal.wake)
+	s.manager = newManagerSlotPool(cfg.Capacity.Manager, nil, s.conversationSignal.wake)
 	for _, r := range repos {
 		s.projects = append(s.projects, &activeProject{id: r.Project(), repository: r})
 	}
@@ -336,7 +336,7 @@ func (a TestAccess) SetStoppedRuntime(store *runtime.Store) error {
 	}
 }
 
-// DecideTool returns the decide tool of the claimed chief-of-staff turn scope
+// DecideTool returns the decide tool of the claimed manager turn scope
 // names, as the service composes it.
 func (a TestAccess) DecideTool(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	controls := &runtimeControls{}
@@ -344,7 +344,7 @@ func (a TestAccess) DecideTool(r *trace.Repository, scope coreadapter.Scope) cor
 	return controls.decide(r, scope)
 }
 
-// TriageTool returns the triage_finding tool of the claimed chief-of-staff turn
+// TriageTool returns the triage_finding tool of the claimed manager turn
 // scope names, as the service composes it.
 func (a TestAccess) TriageTool(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	controls := &runtimeControls{}

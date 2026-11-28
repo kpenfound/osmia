@@ -158,7 +158,7 @@ func lastProgress(repository *trace.Repository, stream config.WorkstreamID) (tim
 			case r.From == r.To:
 			case r.Subject == trace.FeatureSubject:
 				mark(r.At, "the workstream moving to "+featureState(r.To))
-			case strings.HasPrefix(r.Subject, "unit-") && r.Actor == chiefActor:
+			case strings.HasPrefix(r.Subject, "unit-") && r.Actor == managerActor:
 			case strings.HasPrefix(r.Subject, "unit-") && slices.Contains(unitProgress, r.To):
 				mark(r.At, fmt.Sprintf("unit %s moving to %s", strings.TrimPrefix(r.Subject, "unit-"), r.To))
 			case r.Subject == shedSubject, strings.HasPrefix(r.Subject, amendmentSubject("")), r.Subject == finalReviewSubject, r.Subject == publicationSubject:

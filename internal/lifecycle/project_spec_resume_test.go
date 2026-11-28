@@ -239,7 +239,7 @@ func TestProjectSpecDraftRepeatsAfterEachServiceStop(t *testing.T) {
 	}
 }
 
-func TestProjectSpecDraftResumeLeavesNoOwnerOrChiefAction(t *testing.T) {
+func TestProjectSpecDraftResumeLeavesNoOwnerOrManagerAction(t *testing.T) {
 	t.Parallel()
 	f := newCrossRepoRatifyFixture(t)
 	defer f.Stop(t)
@@ -319,8 +319,8 @@ func TestProjectSpecDraftServiceStopKeepsRefusalHistory(t *testing.T) {
 	haltGuardControllers(t, f)
 
 	note := "Cite no charter rule; neither charter numbers any."
-	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
-	if _, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, mustRepo(t, f.S, f.Project), f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, chief, "chief-turn-1"); apiFault != nil {
+	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
+	if _, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, mustRepo(t, f.S, f.Project), f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "chief-turn-1"); apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	scriptProjectSpecTurn(f, "project-spec-draft-7", refuse)

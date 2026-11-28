@@ -10,7 +10,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestBrowserChiefPreviewThroughMemberArchive(t *testing.T) {
+func TestBrowserManagerPreviewThroughMemberArchive(t *testing.T) {
 	f := servicetest.NewPreviewJourney(t)
 	p := openBrowser(t)
 	p.Run(chromedp.Navigate("http://" + f.S.WebAddr() + "/#workgroup=" + string(f.Group.ID)))

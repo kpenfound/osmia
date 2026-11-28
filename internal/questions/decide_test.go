@@ -28,7 +28,7 @@ func askAs(t *testing.T, f fixture, agent, role, turn, text string) string {
 	return rest[:strings.Index(rest, `"`)]
 }
 
-func rawChief(t *testing.T, f fixture, turn string) map[string]coreadapter.Tool {
+func rawManager(t *testing.T, f fixture, turn string) map[string]coreadapter.Tool {
 	t.Helper()
 	scope := f.turn(t, "chief-"+turn, trace.Manager, turn)
 	list, err := questions.Tools(f.repo, "chief-"+turn, scope, func() time.Time { return start })
@@ -68,10 +68,10 @@ func TestOutcomeToolsRefuseBeforeDecideAndOnAnotherQuestionsResult(t *testing.T)
 	f := setup(t)
 	one := askAs(t, f, "mason1", "mason", "build1", "Where does state live?")
 	two := askAs(t, f, "mason2", "mason", "build2", "Where do logs live?")
-	chief := rawChief(t, f, "chief1")
+	manager := rawManager(t, f, "chief1")
 	before := f.head(t)
 	for name, input := range inputs(one) {
-		got := call(t, chief[name], input)
+		got := call(t, manager[name], input)
 		if !strings.Contains(got, `"recorded":false`) || !strings.Contains(got, "call decide") {
 			t.Fatalf("%s before decide: %s", name, got)
 		}
@@ -82,7 +82,7 @@ func TestOutcomeToolsRefuseBeforeDecideAndOnAnotherQuestionsResult(t *testing.T)
 	decideFallback(t, f.repo, stream, two)
 	before = f.head(t)
 	for name, input := range inputs(one) {
-		if got := call(t, chief[name], input); !strings.Contains(got, "call decide") {
+		if got := call(t, manager[name], input); !strings.Contains(got, "call decide") {
 			t.Fatalf("%s with another question's result: %s", name, got)
 		}
 	}
@@ -96,7 +96,7 @@ func TestOutcomeToolsRefuseBeforeDecideAndOnAnotherQuestionsResult(t *testing.T)
 	}
 }
 
-func TestABindingPickAllowsOnlyItsOutcomeWithTheChiefsTextAndSurvivesARestart(t *testing.T) {
+func TestABindingPickAllowsOnlyItsOutcomeWithTheManagersTextAndSurvivesARestart(t *testing.T) {
 	for _, pickName := range []string{"answer", "escalate"} {
 		t.Run(pickName, func(t *testing.T) {
 			f := setup(t)
@@ -106,14 +106,14 @@ func TestABindingPickAllowsOnlyItsOutcomeWithTheChiefsTextAndSurvivesARestart(t 
 			if res.Status != jev.Binding || res.Pick != pickName {
 				t.Fatalf("result %+v", res)
 			}
-			check := func(chief map[string]coreadapter.Tool) {
+			check := func(manager map[string]coreadapter.Tool) {
 				t.Helper()
 				for name, input := range inputs(id) {
 					if name == pickName {
 						continue
 					}
 					before := f.head(t)
-					got := call(t, chief[name], input)
+					got := call(t, manager[name], input)
 					if !strings.Contains(got, `"recorded":false`) || !strings.Contains(got, "Jev decided "+pickName) || !strings.Contains(got, res.Judgment) {
 						t.Fatalf("%s against the pick: %s", name, got)
 					}
@@ -122,7 +122,7 @@ func TestABindingPickAllowsOnlyItsOutcomeWithTheChiefsTextAndSurvivesARestart(t 
 					}
 				}
 			}
-			check(rawChief(t, f, "chief1"))
+			check(rawManager(t, f, "chief1"))
 			if err := f.repo.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -131,9 +131,9 @@ func TestABindingPickAllowsOnlyItsOutcomeWithTheChiefsTextAndSurvivesARestart(t 
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { f.repo.Close() })
-			chief := rawChief(t, f, "chief2")
-			check(chief)
-			if got := call(t, chief[pickName], inputs(id)[pickName]); !strings.Contains(got, `"recorded":true`) {
+			manager := rawManager(t, f, "chief2")
+			check(manager)
+			if got := call(t, manager[pickName], inputs(id)[pickName]); !strings.Contains(got, `"recorded":true`) {
 				t.Fatalf("the picked outcome: %s", got)
 			}
 			if len(p.Requests()) != 1 {
@@ -170,7 +170,7 @@ func TestABelowThresholdOrFallbackResultAllowsAnyOutcome(t *testing.T) {
 			f := setup(t)
 			id := askAs(t, f, "mason1", "mason", "build1", "Where does state live?")
 			decide(t, f, id)
-			if got := call(t, rawChief(t, f, "chief1")["answer"], inputs(id)["answer"]); !strings.Contains(got, `"recorded":true`) {
+			if got := call(t, rawManager(t, f, "chief1")["answer"], inputs(id)["answer"]); !strings.Contains(got, `"recorded":true`) {
 				t.Fatalf("answer: %s", got)
 			}
 			if r := states(t, f)[id].Ruling; r == nil || r.DecidedBy != "" || r.Actor.Kind != "agent" {
@@ -183,7 +183,7 @@ func TestABelowThresholdOrFallbackResultAllowsAnyOutcome(t *testing.T) {
 func TestAQuestionJevDoesNotRouteKeepsItsRoute(t *testing.T) {
 	f := setup(t)
 	id := askAs(t, f, "architect1", "architect", "draft1", "Does this project need a change?")
-	if got := call(t, rawChief(t, f, "chief1")["answer"], inputs(id)["answer"]); !strings.Contains(got, `"recorded":true`) {
+	if got := call(t, rawManager(t, f, "chief1")["answer"], inputs(id)["answer"]); !strings.Contains(got, `"recorded":true`) {
 		t.Fatalf("answer: %s", got)
 	}
 	if recs := f.judgments(t); len(recs) != 0 {
@@ -199,7 +199,7 @@ func TestARefusedAmendmentRoutingGoesToTheOwnerWithJevsJudgment(t *testing.T) {
 	if res.Status != jev.Binding {
 		t.Fatalf("result %+v", res)
 	}
-	got := call(t, rawChief(t, f, "chief1")["route_amendment"], inputs(id)["route_amendment"])
+	got := call(t, rawManager(t, f, "chief1")["route_amendment"], inputs(id)["route_amendment"])
 	if !strings.Contains(got, `"recorded":true`) || !strings.Contains(got, "owner's inbox") {
 		t.Fatalf("route: %s", got)
 	}
@@ -225,8 +225,8 @@ func TestRelayingAnOwnersRulingNeedsNoDecideResult(t *testing.T) {
 	if _, err := f.repo.Rule(context.Background(), 1, "Files.", owner, start.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	chief := tools(t, f, "chief", scope, start.Add(2*time.Hour))
-	if got := call(t, chief["relay_ruling"], `{"question":"`+id+`","text":"Keep state in files.","scope":"local"}`); !strings.Contains(got, `"recorded":true`) {
+	manager := tools(t, f, "chief", scope, start.Add(2*time.Hour))
+	if got := call(t, manager["relay_ruling"], `{"question":"`+id+`","text":"Keep state in files.","scope":"local"}`); !strings.Contains(got, `"recorded":true`) {
 		t.Fatalf("relay: %s", got)
 	}
 	if recs := f.judgments(t); len(recs) != 0 {

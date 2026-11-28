@@ -344,7 +344,7 @@ func TestSessionStopKeepsWorktreeChangesAndReturnsIdle(t *testing.T) {
 	}
 }
 
-func TestSessionTurnInterruptedByRestartIsRecoveredLikeAChiefOfStaffTurn(t *testing.T) {
+func TestSessionTurnInterruptedByRestartIsRecoveredLikeAManagerTurn(t *testing.T) {
 	t.Parallel()
 	s, c, project, stream, engine, _ := newSessionChatFixture(t)
 	root := s.Cfg.Root.String()
@@ -655,7 +655,7 @@ func newConfinementFixture(t *testing.T) (*journey.Service, *journey.Client, con
 	return s, c, added.Project.ID, engine
 }
 
-func confinementChiefTurn(t *testing.T, s *journey.Service, c *journey.Client, engine *confinementEngine) (resume, prompt string) {
+func confinementManagerTurn(t *testing.T, s *journey.Service, c *journey.Client, engine *confinementEngine) (resume, prompt string) {
 	t.Helper()
 	repository := s.Sole().Repository
 	streams, err := repository.Workstreams()
@@ -714,18 +714,18 @@ func TestResumeConfinedToSessionTurns(t *testing.T) {
 		t.Fatalf("the session's own second turn did not resume through the heuristic fallback: %q", sessionResumed)
 	}
 
-	chiefResume, chiefPrompt := confinementChiefTurn(t, s, c, engine)
-	if chiefResume != "" {
-		t.Fatalf("a chief-of-staff turn resumed although only the session role may: %q", chiefResume)
+	managerResume, managerPrompt := confinementManagerTurn(t, s, c, engine)
+	if managerResume != "" {
+		t.Fatalf("a chief-of-staff turn resumed although only the session role may: %q", managerResume)
 	}
-	if !strings.Contains(chiefPrompt, "second chief message") {
-		t.Fatalf("chief-of-staff turn input: %q", chiefPrompt)
+	if !strings.Contains(managerPrompt, "second chief message") {
+		t.Fatalf("chief-of-staff turn input: %q", managerPrompt)
 	}
 
 	s2, c2, _, engine2 := newConfinementFixture(t)
-	_, basePrompt := confinementChiefTurn(t, s2, c2, engine2)
-	if normalizeReplayPrompt(basePrompt) != normalizeReplayPrompt(chiefPrompt) {
-		t.Fatalf("chief-of-staff turn input with a session present %q, without one %q", chiefPrompt, basePrompt)
+	_, basePrompt := confinementManagerTurn(t, s2, c2, engine2)
+	if normalizeReplayPrompt(basePrompt) != normalizeReplayPrompt(managerPrompt) {
+		t.Fatalf("chief-of-staff turn input with a session present %q, without one %q", managerPrompt, basePrompt)
 	}
 }
 
@@ -774,7 +774,7 @@ func runLandingWithSession(t *testing.T, withSession bool) (masonResume, masonPr
 		masonResume, masonPrompt = req.ResumeID, req.Prompt
 		return masons.Turn(ctx, req, verified, tools)
 	}
-	chiefFallback := f.Engine.Turns["*"]
+	managerFallback := f.Engine.Turns["*"]
 	var sessionResumeIDs []string
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, "message_") {
@@ -784,7 +784,7 @@ func runLandingWithSession(t *testing.T, withSession bool) (masonResume, masonPr
 		if strings.HasPrefix(req.Name, intake.ReviewerAgent("resume")+"-review-") {
 			reviewResume, reviewPrompt = req.ResumeID, req.Prompt
 		}
-		return chiefFallback(ctx, req, verified, tools)
+		return managerFallback(ctx, req, verified, tools)
 	}
 	f.Engine.Mu.Unlock()
 

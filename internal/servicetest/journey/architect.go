@@ -339,7 +339,7 @@ func (f *ArchitectFixture) AwaitRetry(t *testing.T, stream config.WorkstreamID, 
 	return reason
 }
 
-// Notice returns the body of the notice the given transition told the chief
+// Notice returns the body of the notice the given transition told the manager
 // of staff with.
 func (f *ArchitectFixture) Notice(t *testing.T, stream config.WorkstreamID, transition string) string {
 	t.Helper()
@@ -514,7 +514,7 @@ func (f *HandInFixture) CheckHanded(t *testing.T, out api.HandInResponse, key, n
 	fixturekit.Must(t, err)
 	var notices []trace.OutboxEntry
 	for _, e := range outbox {
-		if intakefixture.ChiefEvent(e.Event) {
+		if intakefixture.ManagerEvent(e.Event) {
 			notices = append(notices, e)
 		}
 	}

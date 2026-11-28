@@ -33,20 +33,20 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func newAskingFixture(t *testing.T, members, rounds int, p *intakefixture.Faults) (*journey.ShedFixture, *intakefixture.Chief) {
+func newAskingFixture(t *testing.T, members, rounds int, p *intakefixture.Faults) (*journey.ShedFixture, *intakefixture.Manager) {
 	t.Helper()
 	return newAskingFixtureWith(t, members, rounds, p, nil)
 }
 
-func newAskingFixtureWith(t *testing.T, members, rounds int, p *intakefixture.Faults, prepare func(*journey.Options)) (*journey.ShedFixture, *intakefixture.Chief) {
+func newAskingFixtureWith(t *testing.T, members, rounds int, p *intakefixture.Faults, prepare func(*journey.Options)) (*journey.ShedFixture, *intakefixture.Manager) {
 	t.Helper()
-	f := journey.NewDebateFixtureWith(t, members, rounds, intakefixture.ChiefRole, func(opts *journey.Options) {
+	f := journey.NewDebateFixtureWith(t, members, rounds, intakefixture.ManagerRole, func(opts *journey.Options) {
 		opts.Threads = journey.Enforce(*opts, service.Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts}).Threads
 		if prepare != nil {
 			prepare(opts)
 		}
 	})
-	c := &intakefixture.Chief{P: p, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
+	c := &intakefixture.Manager{P: p, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	f.Engine.Mu.Lock()
 	defer f.Engine.Mu.Unlock()
 	f.Engine.Turns["*"] = c.Turn
@@ -413,18 +413,18 @@ func TestAnswerQueuedBehindAReservedTurnRuns(t *testing.T) {
 	_, err = repo.ClaimTurn(ctx, stream, member, "token_"+reserved, filepath.Join(home, reserved), f.Clock.Now())
 	fixturekit.Must(t, err)
 
-	chief, err := repo.Thread(stream, trace.Manager)
+	manager, err := repo.Thread(stream, trace.Manager)
 	fixturekit.Must(t, err)
-	if chief.Active != "" {
-		fixturekit.Must(t, repo.AbandonTurn(ctx, stream, trace.Manager, chief.Active, f.Clock.Now()))
+	if manager.Active != "" {
+		fixturekit.Must(t, repo.AbandonTurn(ctx, stream, trace.Manager, manager.Active, f.Clock.Now()))
 	}
-	chiefHeader := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_planted", Revision: 1, Project: f.Project, Workstream: stream, At: f.Clock.Now(), Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "planted"}
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: chiefHeader, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "planted", Profile: second.Profile, Prompt: "Answer"})
+	managerHeader := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_planted", Revision: 1, Project: f.Project, Workstream: stream, At: f.Clock.Now(), Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "planted"}
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: managerHeader, AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "planted", Profile: second.Profile, Prompt: "Answer"})
 	fixturekit.Must(t, err)
 	_, err = repo.ClaimTurn(ctx, stream, trace.Manager, "token_planted", filepath.Join(home, "planted"), f.Clock.Now())
 	fixturekit.Must(t, err)
-	chiefScope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Thread: trace.Manager, Turn: "planted", Role: trace.Manager}
-	_, err = repo.AnswerQuestion(ctx, trace.Manager, chiefScope, "1", intakefixture.AskedAnswer, []string{"charter#1"}, f.Clock.Now())
+	managerScope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Thread: trace.Manager, Turn: "planted", Role: trace.Manager}
+	_, err = repo.AnswerQuestion(ctx, trace.Manager, managerScope, "1", intakefixture.AskedAnswer, []string{"charter#1"}, f.Clock.Now())
 	fixturekit.Must(t, err)
 
 	fixturekit.Must(t, repo.Close())
@@ -625,11 +625,11 @@ func TestAbandoningAParkedRoundLeavesItParked(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	p := &intakefixture.Faults{}
-	var chiefReviewHeld atomic.Bool
-	chiefReviewHeld.Store(true)
+	var managerReviewHeld atomic.Bool
+	managerReviewHeld.Store(true)
 	f, c := newAskingFixtureWith(t, 1, 1, p, func(opts *journey.Options) {
 		opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
-			return op.Action == thread.TurnAction && chiefReviewHeld.Load()
+			return op.Action == thread.TurnAction && managerReviewHeld.Load()
 		}
 	})
 	defer f.Stop(t)
@@ -641,7 +641,7 @@ func TestAbandoningAParkedRoundLeavesItParked(t *testing.T) {
 	stream := f.HandIn(t, "design", fixturekit.HandedDesign)
 	f.AwaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
 
-	chiefReviewHeld.Store(false)
+	managerReviewHeld.Store(false)
 
 	f.AwaitQuestion(t, stream, "1", trace.QuestionAnswered)
 	if _, err := f.C.Abandon(ctx, stream, "Superseded."); err != nil {

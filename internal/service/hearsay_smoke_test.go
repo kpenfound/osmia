@@ -256,10 +256,10 @@ func TestHearsaySmokeRun(t *testing.T) {
 	f.ask(stream, "1", "Is the upload cap 10 MiB or unbounded?", hr(1))
 	f.escalate(stream, "1", "Is the upload cap 10 MiB or unbounded?", hr(2))
 	f.ruling(stream, "1", 1, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Cap uploads at 10 MiB."}, hr(3), trace.Actor{Kind: "owner", ID: "local"})
-	f.ruling(stream, "1", 2, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Cap uploads at 10 MiB.", ReturnedAnswer: "RELAYED-TO-THE-ASKERS", Scope: trace.ScopeLocal}, hr(4), chiefActor)
+	f.ruling(stream, "1", 2, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Cap uploads at 10 MiB.", ReturnedAnswer: "RELAYED-TO-THE-ASKERS", Scope: trace.ScopeLocal}, hr(4), managerActor)
 	const assumption = "Treat the 10 MiB cap as inclusive."
 	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":%q,"actor":{"kind":"agent","id":"chief_of_staff"},"thread":"chief","turn":"t1","at":%q}]}`, string(stream), assumption, hr(5).Format(time.RFC3339))
-	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(5), chiefActor)
+	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(5), managerActor)
 
 	res, err := f.s.publishPass(context.Background(), f.repo, f.s.current())
 	fixturekit.Must(t, err)

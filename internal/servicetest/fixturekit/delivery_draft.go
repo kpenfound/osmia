@@ -11,7 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// SetStatusGoal records goal as the workstream's chief-of-staff status, which
+// SetStatusGoal records goal as the workstream's manager status, which
 // is the workstream's title.
 func SetStatusGoal(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, goal string, at time.Time) {
 	t.Helper()

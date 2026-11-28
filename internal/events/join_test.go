@@ -12,7 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestEventDeliveryRechecksChiefTransferredAfterResolution(t *testing.T) {
+func TestEventDeliveryRechecksManagerTransferredAfterResolution(t *testing.T) {
 	t.Parallel()
 	for _, transfer := range []bool{true, false} {
 		name := "unexplained-missing-chief"
@@ -31,7 +31,7 @@ func TestEventDeliveryRechecksChiefTransferredAfterResolution(t *testing.T) {
 			defer wt.Close()
 			f.notify(t, repo, "join-notice")
 			f.clock.Advance(time.Minute)
-			d, err := New(repo, Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil }, ChiefTarget: func(context.Context, config.WorkstreamID) (*trace.Repository, func(), error) {
+			d, err := New(repo, Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil }, ManagerTarget: func(context.Context, config.WorkstreamID) (*trace.Repository, func(), error) {
 				id, err := repo.CrossRepoWorkgroupOf(stream)
 				if err != nil {
 					return nil, func() {}, err
@@ -70,15 +70,15 @@ func TestEventDeliveryRechecksChiefTransferredAfterResolution(t *testing.T) {
 				t.Fatalf("transfer lost its retryable event: %+v", out)
 			}
 			must(t, d.Pass(ctx))
-			chief, err := wt.ManagerThread(stream)
+			manager, err := wt.ManagerThread(stream)
 			must(t, err)
-			if len(chief.Turns) != 1 {
-				t.Fatalf("shared delivery count = %d", len(chief.Turns))
+			if len(manager.Turns) != 1 {
+				t.Fatalf("shared delivery count = %d", len(manager.Turns))
 			}
 			must(t, d.Pass(ctx))
-			chief, err = wt.ManagerThread(stream)
+			manager, err = wt.ManagerThread(stream)
 			must(t, err)
-			if len(chief.Turns) != 1 {
+			if len(manager.Turns) != 1 {
 				t.Fatal("shared delivery repeated")
 			}
 		})

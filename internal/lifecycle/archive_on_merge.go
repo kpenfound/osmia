@@ -9,7 +9,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// MergeArchiver archives, as the chief of staff, each delivered workstream of
+// MergeArchiver archives, as the manager, each delivered workstream of
 // its project whose current own pull request is durably recorded merged.
 type MergeArchiver struct {
 	S          *Controller

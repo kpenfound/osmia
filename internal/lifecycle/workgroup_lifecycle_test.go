@@ -64,10 +64,10 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 			}
 			memberRepo, err := f.S.Repository(survivorProject)
 			fixturekit.Must(t, err)
-			first, host, _, closeFirst, err := f.S.Lifecycle().ChiefRepository(ctx, memberRepo, survivor)
+			first, host, _, closeFirst, err := f.S.Lifecycle().ManagerRepository(ctx, memberRepo, survivor)
 			fixturekit.Must(t, err)
 			defer func() { closeFirst() }()
-			second, _, _, closeSecond, err := f.S.Lifecycle().ChiefRepository(ctx, memberRepo, survivor)
+			second, _, _, closeSecond, err := f.S.Lifecycle().ManagerRepository(ctx, memberRepo, survivor)
 			fixturekit.Must(t, err)
 			defer func() { closeSecond() }()
 			if first != second {
@@ -214,7 +214,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 			})
 			otherRepo, err := f.S.Repository(f.Project)
 			fixturekit.Must(t, err)
-			otherChief, err := otherRepo.ManagerThread(unrelated)
+			otherManager, err := otherRepo.ManagerThread(unrelated)
 			fixturekit.Must(t, err)
 			lifecycleWorker(t, f, retiredProject, retired, retiredWorker, "lifecycle-ask", "consolidated-origin")
 			lifecycleWorker(t, f, survivorProject, survivor, "worker_unaffected", "lifecycle-ask", "consolidated-survivor")
@@ -261,7 +261,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				t.Helper()
 				repo, err := f.S.Repository(survivorProject)
 				fixturekit.Must(t, err)
-				target, currentHost, _, release, err := f.S.Lifecycle().ChiefRepository(ctx, repo, survivor)
+				target, currentHost, _, release, err := f.S.Lifecycle().ManagerRepository(ctx, repo, survivor)
 				fixturekit.Must(t, err)
 				defer release()
 				inbox, err := f.C.Inbox(ctx)
@@ -368,7 +368,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				journey.LifecycleAwait(t, f, "survivor event acknowledgment "+boundary, func() bool {
 					outbox, err := repo.Outbox(survivor)
 					fixturekit.Must(t, err)
-					chief, err := target.Thread(host, trace.Manager)
+					manager, err := target.Thread(host, trace.Manager)
 					fixturekit.Must(t, err)
 					for _, e := range outbox {
 						if e.Event.Operation != nil || !strings.Contains(e.Event.Body, "direct-"+boundary) {
@@ -388,7 +388,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 							}
 						}
 						delivered := 0
-						for _, turn := range chief.Turns {
+						for _, turn := range manager.Turns {
 							if claims[turn.Request.TurnID] && !turn.CompletedAt.IsZero() && turn.Status() == "idle" {
 								delivered++
 							}
@@ -451,7 +451,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				fixturekit.Must(t, err)
 				continuedOther, err := otherRepo.ManagerThread(unrelated)
 				fixturekit.Must(t, err)
-				if !intakefixture.EqualJSONTest(otherChief.Identity, continuedOther.Identity) {
+				if !intakefixture.EqualJSONTest(otherManager.Identity, continuedOther.Identity) {
 					t.Fatal("retirement replaced an unrelated chief")
 				}
 				archived, err := f.C.Status(ctx, retired)
@@ -526,7 +526,7 @@ func TestDesignProductionLifecycleRejectsUnprovedRetirement(t *testing.T) {
 	}
 	repo, err := f.S.Repository(f.Project2)
 	fixturekit.Must(t, err)
-	authority, _, _, release, err := f.S.Lifecycle().ChiefRepository(ctx, repo, f.Stream2)
+	authority, _, _, release, err := f.S.Lifecycle().ManagerRepository(ctx, repo, f.Stream2)
 	fixturekit.Must(t, err)
 	defer release()
 	path, err := f.S.Current().Root.WorkstreamTrace(f.Project, f.Stream1)
@@ -638,7 +638,7 @@ func TestDesignProductionLifecycleArchiveRecoveryAtBoundaries(t *testing.T) {
 			fixturekit.Must(t, err)
 			id, err := repo.CrossRepoWorkgroupOf(f.Stream1)
 			fixturekit.Must(t, err)
-			authority, host, _, release, err := f.S.Lifecycle().ChiefRepository(ctx, repo, f.Stream1)
+			authority, host, _, release, err := f.S.Lifecycle().ManagerRepository(ctx, repo, f.Stream1)
 			fixturekit.Must(t, err)
 			approval, pins, found, err := trace.ReadGroupApproval(authority, host)
 			fixturekit.Must(t, err)
@@ -694,7 +694,7 @@ func TestDesignProductionLifecycleArchiveRecoveryAtBoundaries(t *testing.T) {
 			})
 			survivor, err := f.S.Repository(f.Project2)
 			fixturekit.Must(t, err)
-			target, actualHost, _, closeTarget, err := f.S.Lifecycle().ChiefRepository(ctx, survivor, f.Stream2)
+			target, actualHost, _, closeTarget, err := f.S.Lifecycle().ManagerRepository(ctx, survivor, f.Stream2)
 			fixturekit.Must(t, err)
 			got, doc, found, err := trace.ReadGroupApproval(target, actualHost)
 			fixturekit.Must(t, err)

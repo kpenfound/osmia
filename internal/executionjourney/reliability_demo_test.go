@@ -118,7 +118,7 @@ func newReliability(t *testing.T, fallback bool, units ...string) *reliability {
 	f.Opts.Threads, f.Opts.Controls = enforced.Threads, enforced.Controls
 	f.Engine.Mu.Lock()
 	f.Engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
-	chief := f.Engine.Turns["*"]
+	manager := f.Engine.Turns["*"]
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, intake.ReviewerAgent("resume")+"-review-") {
 			body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": fixturekit.ReviewSummary, "findings": []api.ReviewFinding{}})
@@ -127,7 +127,7 @@ func newReliability(t *testing.T, fallback bool, units ...string) *reliability {
 			}
 			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 		}
-		return chief(ctx, req, verified, tools)
+		return manager(ctx, req, verified, tools)
 	}
 	f.Engine.Mu.Unlock()
 	return r

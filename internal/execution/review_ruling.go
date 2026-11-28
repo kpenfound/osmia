@@ -330,7 +330,7 @@ func (r *reviewers) applyBounceRuling(ctx context.Context, scheduled bool, strea
 
 func (s *Controller) routeRuling(ctx context.Context, scheduled bool, in UnitExitInput, ruling ContestedRuling) *APIError {
 	in.Trigger = TriggerManagerRuling
-	in.Authority = &router.Authority{Kind: router.AuthorityChief, Target: in.Default}
+	in.Authority = &router.Authority{Kind: router.AuthorityManager, Target: in.Default}
 	switch ruling.By {
 	case "", "owner":
 		in.Trigger, in.Authority = TriggerOwnerRuling, &router.Authority{Kind: router.AuthorityOwner, Target: in.Default}

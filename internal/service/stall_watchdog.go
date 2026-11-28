@@ -429,7 +429,7 @@ func readStallProgress(repository *trace.Repository, stream config.WorkstreamID)
 			if r.Unit != "" && (strings.HasPrefix(r.Subject, "unit-") || strings.HasPrefix(r.Subject, "unit_")) {
 				out.names[r.Subject] = r.Unit
 			}
-			if r.Actor == chiefActor || router.IsJournal(r.Subject) {
+			if r.Actor == managerActor || router.IsJournal(r.Subject) {
 				continue
 			}
 			switch {

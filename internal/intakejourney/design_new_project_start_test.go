@@ -343,13 +343,13 @@ func TestNewProjectStartCreatesTheProjectAndAllocatesIt(t *testing.T) {
 	}
 
 	r := f.homeRepository(t)
-	chief, host, _, release, err := f.s.ChiefRepository(ctx, r, stream)
+	manager, host, _, release, err := f.s.ManagerRepository(ctx, r, stream)
 	fixturekit.Must(t, err)
 	defer release()
-	if _, shared := trace.WorkgroupProjectID(chief.Project()); !shared {
-		t.Fatalf("the conversation stayed in %s", chief.Project())
+	if _, shared := trace.WorkgroupProjectID(manager.Project()); !shared {
+		t.Fatalf("the conversation stayed in %s", manager.Project())
 	}
-	if _, err := chief.Thread(host, trace.Manager); err != nil {
+	if _, err := manager.Thread(host, trace.Manager); err != nil {
 		t.Fatalf("the workgroup holds no chief of staff thread: %v", err)
 	}
 	if _, err := r.Thread(stream, trace.Manager); !errors.Is(err, os.ErrNotExist) {

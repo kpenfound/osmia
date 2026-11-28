@@ -45,9 +45,9 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 	fixturekit.Must(t, err)
 	sharedID, err := repo.CrossRepoWorkgroupOf(f.Stream1)
 	fixturekit.Must(t, err)
-	target, host, _, closeTarget, err := f.S.Lifecycle().ChiefRepository(ctx, repo, f.Stream1)
+	target, host, _, closeTarget, err := f.S.Lifecycle().ManagerRepository(ctx, repo, f.Stream1)
 	fixturekit.Must(t, err)
-	chief, err := target.ManagerThread(host)
+	manager, err := target.ManagerThread(host)
 	closeTarget()
 	fixturekit.Must(t, err)
 
@@ -69,9 +69,9 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 	fixturekit.Must(t, err)
 	blockArchiveCleanup(t, repo, f.Project, retained, fixturekit.DemoStart, intake.RegistrationActor)
 	fixturekit.Must(t, repo.CreateSessionWorkstream(ctx, session, "default", f.Repos[0].Main, "osmia/session/"+string(session), "Explore uploads", fixturekit.DemoStart, intake.RegistrationActor))
-	originalChiefs := map[config.WorkstreamID]trace.Thread{}
+	originalManagers := map[config.WorkstreamID]trace.Thread{}
 	for _, stream := range []config.WorkstreamID{live, retained} {
-		originalChiefs[stream], err = repo.ManagerThread(stream)
+		originalManagers[stream], err = repo.ManagerThread(stream)
 		fixturekit.Must(t, err)
 	}
 	sessionPath := filepath.Join(f.Opts.Config.Root, "workstreams", string(f.Project), string(session))
@@ -127,10 +127,10 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 		if len(groups) != 1 || groups[0].ID != sharedID || !slices.Equal(groups[0].Members, []config.WorkstreamID{f.Origin, f.Stream1, f.Stream2}) {
 			t.Fatalf("shared authority lost exact membership: %+v", groups)
 		}
-		sharedChief, err := authority.ManagerThread(f.Origin)
+		sharedManager, err := authority.ManagerThread(f.Origin)
 		authority.Close()
 		fixturekit.Must(t, err)
-		if !reflect.DeepEqual(sharedChief.Identity, chief.Identity) {
+		if !reflect.DeepEqual(sharedManager.Identity, manager.Identity) {
 			t.Fatal("startup replaced the shared chief thread")
 		}
 		for _, member := range []membership{{f.Project, f.Stream1}, {f.Project2, f.Stream2}} {
@@ -171,7 +171,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 		}
 		r, err := f.S.Repository(f.Project)
 		fixturekit.Must(t, err)
-		for stream, original := range originalChiefs {
+		for stream, original := range originalManagers {
 			current, err := r.ManagerThread(stream)
 			fixturekit.Must(t, err)
 			if !reflect.DeepEqual(current.Identity, original.Identity) {

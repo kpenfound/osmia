@@ -57,7 +57,7 @@ func TestFeedShowsTheRecordedBriefAsItsOwnEntry(t *testing.T) {
 	}
 }
 
-// Each member's briefs show in the shared chief's workgroup feed labelled with
+// Each member's briefs show in the shared manager's workgroup feed labelled with
 // that member, and never in another member's feed.
 func TestWorkgroupFeedLabelsEachMembersBrief(t *testing.T) {
 	t.Parallel()

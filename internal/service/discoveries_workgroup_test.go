@@ -85,7 +85,7 @@ func TestAnOpenDiscoveryOfAWorkgroupMemberHoldsTheMember(t *testing.T) {
 	}
 }
 
-func TestSharedChiefListsTheDiscoveriesOfAMember(t *testing.T) {
+func TestSharedManagerListsTheDiscoveriesOfAMember(t *testing.T) {
 	t.Parallel()
 	d := openMemberDiscovery(t)
 	raw, err := factoryContext(d.wg, d.scope).Handle(context.Background(), json.RawMessage(`{"path":"discoveries","workstream":"`+string(d.m2)+`"}`))
@@ -97,7 +97,7 @@ func TestSharedChiefListsTheDiscoveriesOfAMember(t *testing.T) {
 	}
 }
 
-func TestSharedChiefCannotReadAWorkstreamOutsideItsWorkgroup(t *testing.T) {
+func TestSharedManagerCannotReadAWorkstreamOutsideItsWorkgroup(t *testing.T) {
 	t.Parallel()
 	d := openMemberDiscovery(t)
 	raw, err := factoryContext(d.wg, d.scope).Handle(context.Background(), json.RawMessage(`{"workstream":"w_00000000000000000000000000000099"}`))
@@ -107,7 +107,7 @@ func TestSharedChiefCannotReadAWorkstreamOutsideItsWorkgroup(t *testing.T) {
 	}
 }
 
-func TestSharedChiefDeclinesAMemberDiscoveryInTheMembersTrace(t *testing.T) {
+func TestSharedManagerDeclinesAMemberDiscoveryInTheMembersTrace(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	d := openMemberDiscovery(t)

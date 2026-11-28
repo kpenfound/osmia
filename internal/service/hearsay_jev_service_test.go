@@ -29,13 +29,13 @@ func publishThrough(t *testing.T, s *Service, repo *trace.Repository) []fixturek
 }
 
 // A ruling Jev made through the gate worker on an escalated question, and the
-// chief of staff's relay of it, reach the work source as one decision of Jev's
+// manager's relay of it, reach the work source as one decision of Jev's
 // with no author. Nothing of it reaches the owner source.
 func TestPublishPostsTheRulingTheGateWorkerRecordedForJev(t *testing.T) {
 	ctx := context.Background()
 	p := &gateJev{confidence: 0.95, pick: func(_ string, options []string) string { return options[1] }}
 	f, repo, stream := newEscalationFixture(t, p)
-	chief := escalate(t, f, masonRole, "Resume from the last chunk.", "Restart the upload.")
+	manager := escalate(t, f, masonRole, "Resume from the last chunk.", "Restart the upload.")
 	gates := f.gates(t)
 	if len(gates) != 1 {
 		t.Fatalf("gates %+v", gates)
@@ -45,7 +45,7 @@ func TestPublishPostsTheRulingTheGateWorkerRecordedForJev(t *testing.T) {
 	if !ok {
 		t.Fatal("the gate recorded no judgment")
 	}
-	if _, err := repo.RelayRuling(ctx, "chief", chief, "1", "Restart the upload.", trace.ScopeLocal, f.now()); err != nil {
+	if _, err := repo.RelayRuling(ctx, "chief", manager, "1", "Restart the upload.", trace.ScopeLocal, f.now()); err != nil {
 		t.Fatal(err)
 	}
 

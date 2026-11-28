@@ -81,7 +81,7 @@ func NewQuestionSetup(t *testing.T, prefix, global, charter string, askers []Que
 	views := filepath.Join(cfg.Root.String(), "views")
 	fixturekit.Must(t, os.Mkdir(views, 0700))
 
-	every := append([]string{"file_read", questions.AskTool}, questions.ChiefTools...)
+	every := append([]string{"file_read", questions.AskTool}, questions.ManagerTools...)
 	f.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		f.Lives <- r
 		turns := &isolation.Turns{Workspaces: &fixturekit.DemoWorkspaces{Directory: cfg.Project.Clone}, Views: isolation.Views{Directory: views}, Engine: f.Engine,

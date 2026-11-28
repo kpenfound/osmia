@@ -11,7 +11,7 @@ const AssembledState = "assembled"
 
 // MaxFinalRounds is how many final reviews of one workstream may find
 // blocking problems before further revisions of its assembled plan are the
-// owner's decision rather than the chief of staff's.
+// owner's decision rather than the manager's.
 const MaxFinalRounds = 3
 
 // NextRevision returns the revision the next record of a workstream

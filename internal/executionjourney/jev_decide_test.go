@@ -42,7 +42,7 @@ func withJev(t *testing.T, p *jevfixture.Provider) func(*journey.Options) {
 	}
 }
 
-func (b *bounceFixture) chiefTurn(match string, script func(ctx context.Context, tools *mcp.ClientSession) error) {
+func (b *bounceFixture) managerTurn(match string, script func(ctx context.Context, tools *mcp.ClientSession) error) {
 	b.f.Engine.Mu.Lock()
 	defer b.f.Engine.Mu.Unlock()
 	next := b.f.Engine.Turns["*"]
@@ -77,7 +77,7 @@ func callDecideContest(ctx context.Context, tools *mcp.ClientSession) (string, e
 	return rawTool(ctx, tools, "decide", map[string]any{"kind": "contested-ruling", "subject": bounceUnit, "evidence": contestEvidence})
 }
 
-func TestAConfidentDecidePickBindsTheChiefsContestedRuling(t *testing.T) {
+func TestAConfidentDecidePickBindsTheManagersContestedRuling(t *testing.T) {
 	t.Parallel()
 	provider := &jevfixture.Provider{Confidence: 0.96, Pick: func(options []string) string {
 		if slices.Contains(options, "review") {
@@ -96,7 +96,7 @@ func TestAConfidentDecidePickBindsTheChiefsContestedRuling(t *testing.T) {
 	}
 	type outcome struct{ before, decided, against, picked string }
 	done := make(chan outcome, 1)
-	b.chiefTurn("jev rules bounce now", func(ctx context.Context, tools *mcp.ClientSession) error {
+	b.managerTurn("jev rules bounce now", func(ctx context.Context, tools *mcp.ClientSession) error {
 		var o outcome
 		var err error
 		if o.before, err = rawTool(ctx, tools, execution.ResolveContestedTool, map[string]any{"unit": bounceUnit, "decision": "review", "note": bounceNote}); err != nil {
@@ -175,7 +175,7 @@ func TestAConfidentDecidePickBindsTheChiefsContestedRuling(t *testing.T) {
 	}
 }
 
-func TestWithJevUnconfiguredTheChiefDecidesAndTheContestReachesTheOwner(t *testing.T) {
+func TestWithJevUnconfiguredTheManagerDecidesAndTheContestReachesTheOwner(t *testing.T) {
 	t.Parallel()
 	b := newBounceFixture(t, "reviews")
 	defer b.stop(t)
@@ -183,7 +183,7 @@ func TestWithJevUnconfiguredTheChiefDecidesAndTheContestReachesTheOwner(t *testi
 
 	done := make(chan [2]string, 1)
 	const note = "The retry needs the owner's decision."
-	b.chiefTurn("escalate after decide", func(ctx context.Context, tools *mcp.ClientSession) error {
+	b.managerTurn("escalate after decide", func(ctx context.Context, tools *mcp.ClientSession) error {
 		decided, err := callDecideContest(ctx, tools)
 		if err != nil {
 			return err

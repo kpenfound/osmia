@@ -78,7 +78,7 @@ func TestSharedFeedStaysReadableAfterEveryMemberIsAutoArchived(t *testing.T) {
 	g.host.Mu.Unlock()
 	journey.LifecycleAwait(t, g.f(), "the chief of staff archives every member", func() bool {
 		for _, m := range resolutionMembers(g.f()) {
-			if a, ok := intakefixture.ArchiveRecord(t, g.S.Store, m.stream); !ok || a.Actor != runtime.ArchiveActorChief {
+			if a, ok := intakefixture.ArchiveRecord(t, g.S.Store, m.stream); !ok || a.Actor != runtime.ArchiveActorManager {
 				return false
 			}
 		}
@@ -101,7 +101,7 @@ func TestSharedFeedStaysReadableAfterEveryMemberIsAutoArchived(t *testing.T) {
 			t.Fatalf("%s: members=%+v", phase, feed.Members)
 		}
 		for _, m := range feed.Members {
-			if !m.Archived || m.ArchivedBy != api.ArchivedByChief {
+			if !m.Archived || m.ArchivedBy != api.ArchivedByManager {
 				t.Fatalf("%s: member summary=%+v", phase, m)
 			}
 		}

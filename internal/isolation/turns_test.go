@@ -403,7 +403,7 @@ func TestRoleGrantRefusesAnUnknownRole(t *testing.T) {
 	}
 }
 
-func TestChiefOfStaffToolsOnlyReachChiefOfStaff(t *testing.T) {
+func TestManagerToolsOnlyReachManager(t *testing.T) {
 	for _, name := range []string{"set_status", "prioritise", "decide_amendment", "decide_charter", "move_unit", "move_workstream", "hand_back_drift", "flake_fix", "record_delivery_brief", "pull_request_checks", "ask_owner_about_checks"} {
 		for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason"} {
 			t.Run(name+"/"+role, func(t *testing.T) {
@@ -436,11 +436,11 @@ func TestChiefOfStaffToolsOnlyReachChiefOfStaff(t *testing.T) {
 }
 
 func TestQuestionToolsFollowTheRole(t *testing.T) {
-	chief := []string{"answer", "escalate", "relay_ruling", "route_amendment", "propose_charter", "decide"}
+	manager := []string{"answer", "escalate", "relay_ruling", "route_amendment", "propose_charter", "decide"}
 	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason"} {
 		t.Run(role, func(t *testing.T) {
 			r, _, h, engine, input := fixture(t, role, "container")
-			granted := append([]string{"ask", "amend"}, chief...)
+			granted := append([]string{"ask", "amend"}, manager...)
 			r.Grants[role] = a.Capabilities{Tools: granted}
 			handle := func(context.Context, json.RawMessage) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }
 			r.Scoped = func(context.Context, a.Scope) ([]a.Tool, error) {
@@ -459,7 +459,7 @@ func TestQuestionToolsFollowTheRole(t *testing.T) {
 			}
 			want := []string{"ask"}
 			if role == "chief_of_staff" {
-				want = chief
+				want = manager
 			} else if role == "mason" {
 				want = []string{"ask", "amend"}
 			}
@@ -654,7 +654,7 @@ func TestServiceTurnsForwardResumeChecksToEngine(t *testing.T) {
 	}
 }
 
-func TestPreviewIsChiefServiceTool(t *testing.T) {
+func TestPreviewIsManagerServiceTool(t *testing.T) {
 	for _, role := range []string{"chief_of_staff", "architect", "mason", "reviewer", "committee", "foreman", "session"} {
 		grant, err := roleGrant(role, a.Capabilities{Tools: []string{"preview"}})
 		if err != nil {

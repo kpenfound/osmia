@@ -131,9 +131,9 @@ type Kind struct {
 	PullRequestSection func(PullRequest) string
 	// Progress reads the kind's progress from a workstream's reading.
 	Progress func(Reading) Progress
-	// ChiefTools names the tools the kind adds to the chief of staff's.
-	ChiefTools []string
-	Settings   Settings
+	// ManagerTools names the tools the kind adds to the manager's.
+	ManagerTools []string
+	Settings     Settings
 }
 
 var unitStates = []string{"planned", "ready", "implementing", "checking", "reviewing", "approved", "merged"}
@@ -150,7 +150,7 @@ var feature = Kind{
 	Progress: func(r Reading) Progress {
 		return Progress{Panel: "units", Summary: unitsSummary(r.Units)}
 	},
-	ChiefTools: []string{"move_unit"},
+	ManagerTools: []string{"move_unit"},
 }
 
 func unitsSummary(units Units) string {
@@ -214,11 +214,11 @@ func Normalize(requested string) (string, error) {
 	return k.Name, nil
 }
 
-// ChiefToolNames lists the chief-of-staff tool names any registered kind adds.
-func ChiefToolNames() []string {
+// ManagerToolNames lists the manager tool names any registered kind adds.
+func ManagerToolNames() []string {
 	var names []string
 	for _, k := range registered {
-		for _, n := range k.ChiefTools {
+		for _, n := range k.ManagerTools {
 			if !slices.Contains(names, n) {
 				names = append(names, n)
 			}

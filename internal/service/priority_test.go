@@ -72,7 +72,7 @@ func newPriorityRig(t *testing.T) *priorityRig {
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{
 		Header:  trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_events_seed", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "events"},
 		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "events_seed", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
-		SystemPrompt: fmt.Sprintf(followUpPrompt, fixturekit.Stream) + "\n\n" + chiefGuidance(), Prompt: "A service event."})
+		SystemPrompt: fmt.Sprintf(followUpPrompt, fixturekit.Stream) + "\n\n" + managerGuidance(), Prompt: "A service event."})
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.Close())
 
@@ -227,7 +227,7 @@ func (r *priorityRig) requireOwnerPause() {
 	}
 }
 
-func TestChiefEventTurnsCannotActForTheOwner(t *testing.T) {
+func TestManagerEventTurnsCannotActForTheOwner(t *testing.T) {
 	t.Parallel()
 	r := newPriorityRig(t)
 	r.requireNoProblems()
@@ -240,7 +240,7 @@ func TestChiefEventTurnsCannotActForTheOwner(t *testing.T) {
 	}
 }
 
-func TestChiefRefusesInvalidPriorityOrders(t *testing.T) {
+func TestManagerRefusesInvalidPriorityOrders(t *testing.T) {
 	t.Parallel()
 	r := newPriorityRig(t)
 	r.send(priorityInvalidPrompt)
@@ -264,7 +264,7 @@ func TestChiefRefusesInvalidPriorityOrders(t *testing.T) {
 	}
 }
 
-func TestChiefSetsPriorityOrderForTheOwner(t *testing.T) {
+func TestManagerSetsPriorityOrderForTheOwner(t *testing.T) {
 	t.Parallel()
 	r := newPriorityRig(t)
 	sent := r.send(priorityValidPrompt)
@@ -279,7 +279,7 @@ func TestChiefSetsPriorityOrderForTheOwner(t *testing.T) {
 	r.requireRecordedFor(sent, want)
 }
 
-func TestChiefPausesTheFactoryForTheOwner(t *testing.T) {
+func TestManagerPausesTheFactoryForTheOwner(t *testing.T) {
 	t.Parallel()
 	r := newPriorityRig(t)
 	r.send(priorityPausePrompt)
@@ -287,7 +287,7 @@ func TestChiefPausesTheFactoryForTheOwner(t *testing.T) {
 	r.requireOwnerPause()
 }
 
-func TestChiefResumesTheFactoryForTheOwner(t *testing.T) {
+func TestManagerResumesTheFactoryForTheOwner(t *testing.T) {
 	t.Parallel()
 	r := newPriorityRig(t)
 	r.send(priorityPausePrompt)
@@ -298,7 +298,7 @@ func TestChiefResumesTheFactoryForTheOwner(t *testing.T) {
 	}
 }
 
-func TestOwnerTurnsOfTheChiefHaveTheChiefToolsAndGuidance(t *testing.T) {
+func TestOwnerTurnsOfTheManagerHaveTheManagerToolsAndGuidance(t *testing.T) {
 	t.Parallel()
 	r := newPriorityRig(t)
 	r.send(priorityValidPrompt)
@@ -323,7 +323,7 @@ func TestOwnerTurnsOfTheChiefHaveTheChiefToolsAndGuidance(t *testing.T) {
 	}
 }
 
-func TestPriorityOrderAndChiefPauseSurviveARestart(t *testing.T) {
+func TestPriorityOrderAndManagerPauseSurviveARestart(t *testing.T) {
 	t.Parallel()
 	r := newPriorityRig(t)
 	sent := r.send(priorityValidPrompt)

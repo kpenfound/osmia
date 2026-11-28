@@ -182,7 +182,7 @@ func TestMoveRefusals(t *testing.T) {
 	}
 }
 
-func TestChiefOfStaffRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
+func TestManagerRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	m := journey.NewMoveFixture(t, "chief-moves")
@@ -232,14 +232,14 @@ func TestChiefOfStaffRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 	if left, err := execution.ManagerRulingsLeft(m.Repo, m.Stream, "resume"); err != nil || left != execution.ManagerContestLimit {
 		t.Fatalf("rulings left after the owner's ruling: %d %v", left, err)
 	}
-	actions, err := service.ChiefActions(m.Repo, m.Stream)
+	actions, err := service.ManagerActions(m.Repo, m.Stream)
 	fixturekit.Must(t, err)
 	if len(actions) != 4 || actions[0].Text != "Moved unit resume from reviewing to checking. Run the checks again." || actions[3].Text != "Held unit resume for you, from implementing: "+hold || actions[3].Turn != "events_1" {
 		t.Fatalf("conversation actions %+v", actions)
 	}
 }
 
-func TestChiefOfStaffRecordsTheOwnersMove(t *testing.T) {
+func TestManagerRecordsTheOwnersMove(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, stream, repo := newCheckingFixture(t, "chief-owner-move")

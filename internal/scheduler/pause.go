@@ -7,8 +7,8 @@ import (
 )
 
 // Held reports whether a pause in force holds the candidate's turn. A pause
-// covers the factory, a project or one of its workstreams; chief-of-staff turns
-// are never held, so the owner can still reach the chief of staff.
+// covers the factory, a project or one of its workstreams; manager turns
+// are never held, so the owner can still reach the manager.
 func Held(pauses []runtime.Pause, project config.ProjectID, c Candidate) bool {
 	if trace.ManagerLike(c.Thread.Identity.Role) {
 		for _, p := range pauses {
@@ -46,7 +46,7 @@ func Pausing(pauses []runtime.Pause, project config.ProjectID, stream config.Wor
 
 // Stopping returns the first hard pause in force that covers the workstream of
 // the project, and whether there is one. A hard pause also stops the turns
-// already running on the workstream's threads, except chief-of-staff turns.
+// already running on the workstream's threads, except manager turns.
 func Stopping(pauses []runtime.Pause, project config.ProjectID, stream config.WorkstreamID) (runtime.Pause, bool) {
 	for _, p := range pauses {
 		if p.Mode == "hard" && covers(p, project, stream) {

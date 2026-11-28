@@ -165,7 +165,7 @@ func TestResumedSessionsKeepTheirSystemPromptAfterPolicyAndPromptTextChange(t *t
 
 func TestLegacyBaselineIsEstablishedOnlyWhereTheServiceAddedNothingToTheRecordedPrompt(t *testing.T) {
 	opening := trace.QueuedTurn{Request: trace.TurnRequest{SystemPrompt: "recorded", TurnID: "opened"}}
-	production := map[string]coreadapter.Capabilities{trace.Manager: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, sessionRole: {WriteFiles: true, Execute: true, Web: true}}
+	production := map[string]coreadapter.Capabilities{trace.Manager: managerGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, sessionRole: {WriteFiles: true, Execute: true, Web: true}}
 	for role := range production {
 		if prompt, ok := legacyBaseline(production)(role, opening); ok {
 			t.Fatalf("%s: a prompt %q was recovered although the service appended text to it that no record shows", role, prompt)

@@ -661,7 +661,7 @@ func TestARestartAtAnyPointEndsTheAttemptWithOneRecordOneChargeAndTheRightBest(t
 	}
 }
 
-func TestThreeAttemptsInARowWithoutACandidateRaiseOneStallToTheChief(t *testing.T) {
+func TestThreeAttemptsInARowWithoutACandidateRaiseOneStallToTheManager(t *testing.T) {
 	t.Parallel()
 	r := newLoopRig(t, func(s *Spec) { s.Stop.MaxAttempts = 6 })
 	for n := 1; n <= 3; n++ {

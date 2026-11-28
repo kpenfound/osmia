@@ -84,7 +84,7 @@ func TestBrowserProjectPaneKeepsProjectInboxDecisionsSeparate(t *testing.T) {
 		ws := f.streams[id]
 		_, err = repo.EnsureManager(ctx, ws, demoStart, ownerActor)
 		must(t, err)
-		chief, err := repo.ManagerThread(ws)
+		manager, err := repo.ManagerThread(ws)
 		must(t, err)
 		claim := func(agent, thread, turn string) coreadapter.Scope {
 			t.Helper()
@@ -99,9 +99,9 @@ func TestBrowserProjectPaneKeepsProjectInboxDecisionsSeparate(t *testing.T) {
 		must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: demoRole, ThreadID: "pane_worker_thread"}))
 		q, err := repo.Ask(ctx, "pane_worker", claim("pane_worker", "pane_worker_thread", "pane_worker_turn"), "May this project's contract change?", demoStart)
 		must(t, err)
-		chiefScope := claim(trace.Manager, chief.Identity.ThreadID, "pane_chief_turn")
-		chiefScope.Role = trace.Manager
-		_, err = repo.EscalateQuestions(ctx, trace.Manager, chiefScope, trace.EscalationRequest{Questions: []string{q.ID}, Rephrasing: "May this project's contract change?", Blocked: "The asking worker.", Recommendation: "Keep the contract."}, demoStart)
+		managerScope := claim(trace.Manager, manager.Identity.ThreadID, "pane_chief_turn")
+		managerScope.Role = trace.Manager
+		_, err = repo.EscalateQuestions(ctx, trace.Manager, managerScope, trace.EscalationRequest{Questions: []string{q.ID}, Rephrasing: "May this project's contract change?", Blocked: "The asking worker.", Recommendation: "Keep the contract."}, demoStart)
 		must(t, err)
 		must(t, repo.Close())
 	}

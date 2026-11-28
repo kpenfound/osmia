@@ -192,7 +192,7 @@ type Events struct {
 }
 
 // EventWindow is how long the service collects a workstream's events before
-// delivering them to its chief of staff as one turn.
+// delivering them to its manager as one turn.
 func (c *Config) EventWindow() time.Duration {
 	d, _ := time.ParseDuration(c.Events.Window)
 	return d
@@ -201,7 +201,7 @@ func (c *Config) EventWindow() time.Duration {
 const defaultProgressWindow = 15 * time.Minute
 
 // EventProgressWindow is how long an event of routine progress waits for
-// others before the service delivers it to the chief of staff.
+// others before the service delivers it to the manager.
 func (c *Config) EventProgressWindow() time.Duration {
 	d, _ := time.ParseDuration(c.Events.ProgressWindow)
 	return d
@@ -217,7 +217,7 @@ type Profile struct {
 }
 type Role struct {
 	Profile string `toml:"profile" json:"profile"`
-	// EventsProfile is the profile of the chief of staff's turns that
+	// EventsProfile is the profile of the manager's turns that
 	// deliver service events; empty uses Profile. Turns answering the owner
 	// use Profile.
 	EventsProfile string `toml:"events_profile" json:"events_profile,omitempty"`
@@ -290,7 +290,7 @@ type Project struct {
 	// Off, the project is posted without repos.
 	HearsayDeclareRepo bool `toml:"hearsay_declare_repo" json:"hearsay_declare_repo,omitempty"`
 	// FlakeFixes turns flake-fix workstreams on for the project: with it on,
-	// a flaky check is recorded and the chief of staff may open a workstream
+	// a flaky check is recorded and the manager may open a workstream
 	// to fix its cause. Off, a flaky check is only counted as a pass.
 	FlakeFixes bool `toml:"flake_fixes" json:"flake_fixes,omitempty"`
 	// UpstreamRebase is the Go duration between a workstream's scheduled

@@ -15,7 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The chief-of-staff tools of a Hill Climb workstream: steering the next
+// The manager tools of a Hill Climb workstream: steering the next
 // attempt with a note, and concluding the climb.
 const (
 	climbSteerTool    = "climb_steer"

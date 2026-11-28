@@ -32,7 +32,7 @@ func (r *takenAfterStart) Repository(ctx context.Context, owner, name string) (p
 	return repo, found, err
 }
 
-func TestNewProjectStartRefusedAfterStartReachesTheInboxAndTheChief(t *testing.T) {
+func TestNewProjectStartRefusedAfterStartReachesTheInboxAndTheManager(t *testing.T) {
 	f := newNewProjectStartFixture(t, true)
 	ctx := context.Background()
 	repos := &takenAfterStart{Repositories: f.github.Client()}

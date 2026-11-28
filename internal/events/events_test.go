@@ -232,7 +232,7 @@ func TestOperationEventsAreNotDelivered(t *testing.T) {
 	}
 }
 
-func TestOnlyTheChiefOfStaffReceivesEvents(t *testing.T) {
+func TestOnlyTheManagerReceivesEvents(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t)
 	defer repo.Close()
@@ -710,7 +710,7 @@ func TestRepeatedEventFailuresBackOffAcrossRestart(t *testing.T) {
 	}
 }
 
-func TestRepeatedlyFailedEventIsHeldUntilTheChiefAnswersTheOwner(t *testing.T) {
+func TestRepeatedlyFailedEventIsHeldUntilTheManagerAnswersTheOwner(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t)
 	defer repo.Close()
@@ -816,7 +816,7 @@ func TestProgressWaitsForItsWindowOrTheNextNotice(t *testing.T) {
 	}
 }
 
-func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelivery(t *testing.T) {
+func TestCrossRepoWorkgroupEventDeliveredToSharedManagerOnceAcrossRestartMidDelivery(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, repo := setup(t)
@@ -848,7 +848,7 @@ func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelive
 	members := func() []trace.CrossRepoMember {
 		return []trace.CrossRepoMember{{Workstream: stream, Project: repo}, {Workstream: stream2, Project: repo2}}
 	}
-	chiefTarget := func(context.Context, config.WorkstreamID) (*trace.Repository, func(), error) {
+	managerTarget := func(context.Context, config.WorkstreamID) (*trace.Repository, func(), error) {
 		wt, err := trace.OpenWorkgroupTrace(f.root, g.ID, members())
 		if err != nil {
 			return nil, nil, err
@@ -859,7 +859,7 @@ func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelive
 	f.notify(t, repo, "cross-repo-event")
 	f.clock.Advance(time.Minute)
 
-	d, err := New(repo, Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil }, ChiefTarget: chiefTarget})
+	d, err := New(repo, Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil }, ManagerTarget: managerTarget})
 	must(t, err)
 	var fired bool
 	d.boundary = crashAt("before-enqueue", 1, &fired)
@@ -873,7 +873,7 @@ func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelive
 	}
 
 	repo = f.reopen(t, repo)
-	d, err = New(repo, Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil }, ChiefTarget: chiefTarget})
+	d, err = New(repo, Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil }, ManagerTarget: managerTarget})
 	must(t, err)
 	must(t, d.Pass(ctx))
 

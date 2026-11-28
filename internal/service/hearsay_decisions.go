@@ -25,14 +25,14 @@ const (
 )
 
 const (
-	deciderOwner = "owner"
-	deciderChief = trace.Manager
+	deciderOwner   = "owner"
+	deciderManager = trace.Manager
 )
 
 type decider int
 
 const (
-	byChief decider = iota
+	byManager decider = iota
 	byOwner
 	byJev
 )
@@ -54,7 +54,7 @@ func (d publishedDecision) decider() string {
 	if d.by == byOwner {
 		return deciderOwner
 	}
-	return deciderChief
+	return deciderManager
 }
 
 func (d publishedDecision) source(in *publishInputs) string {
@@ -483,7 +483,7 @@ func amendmentDecider(doc trace.Document, verdict intake.AmendmentDecision) (dec
 	case doc.Actor.Kind == "owner":
 		return byOwner, true
 	case doc.Actor.Kind == "agent" && doc.Actor.ID == trace.Manager:
-		return byChief, true
+		return byManager, true
 	}
 	return 0, false
 }

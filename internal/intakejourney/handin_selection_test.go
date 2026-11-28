@@ -305,10 +305,10 @@ func TestHandInRecordedSingleSelectionKeepsOrdinaryPacket(t *testing.T) {
 				if _, found, err := intake.DesignSelectionOf(repo, f.Origin); err != nil || found {
 					t.Fatalf("single-project hand-in recorded a selection: found=%v error=%v", found, err)
 				}
-				chief, host, _, closeChief, err := f.S.ChiefRepository(context.Background(), repo, f.Stream1)
+				manager, host, _, closeManager, err := f.S.ManagerRepository(context.Background(), repo, f.Stream1)
 				fixturekit.Must(t, err)
-				thread, err := chief.Thread(host, trace.Manager)
-				closeChief()
+				thread, err := manager.Thread(host, trace.Manager)
+				closeManager()
 				fixturekit.Must(t, err)
 				if !intakefixture.EqualJSONTest(thread.Identity, f.Before.Identity) {
 					t.Fatal("single selection replaced the hand-in chief")
@@ -367,7 +367,7 @@ func TestHandInProductionMultipleReposPreservesSkippedDebate(t *testing.T) {
 	f.CheckContinuation(t)
 }
 
-func TestHandInProductionSharedChiefResumesBothQuestionsAfterRestart(t *testing.T) {
+func TestHandInProductionSharedManagerResumesBothQuestionsAfterRestart(t *testing.T) {
 	t.Parallel()
 	f := newHandInProductionFixture(t)
 	handInProduction(t, f, api.HandInRequest{})

@@ -121,7 +121,7 @@ func TestArchiveCommandsRefuseInvalidArguments(t *testing.T) {
 func TestStatusFactsNameWhoArchived(t *testing.T) {
 	state := "delivered"
 	for _, tc := range []struct{ by, want string }{
-		{wire.ArchivedByChief, " archived=true archived_by=chief_of_staff"},
+		{wire.ArchivedByManager, " archived=true archived_by=chief_of_staff"},
 		{wire.ArchivedByOwner, " archived=true archived_by=owner"},
 		{"", " archived=true"},
 	} {

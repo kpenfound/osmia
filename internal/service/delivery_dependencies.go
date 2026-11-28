@@ -37,7 +37,7 @@ func (s *Service) deliveryFor(cfg *config.Config) *delivery.Controller {
 		DependentBaseChanged: dependentBaseChanged, BranchBase: lifecycle.BranchBase, DriftRebaseNotes: lifecycle.DriftRebaseNotes,
 		WorkgroupEdgePending: workgroupEdgePending, PendingMergeOrderReferences: lifecycle.PendingMergeOrderReferences,
 		EdgePublicationWait: lifecycle.EdgePublicationWait, UnresolvedMergeOrderEdge: lifecycle.UnresolvedMergeOrderEdge,
-		CanonicalPublication: lifecycle.CanonicalPublication, ChiefThread: s.chiefThread, RequestRebase: s.requestRebase,
+		CanonicalPublication: lifecycle.CanonicalPublication, ManagerThread: s.managerThread, RequestRebase: s.requestRebase,
 	})
 }
 

@@ -111,13 +111,13 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 		})
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Project spec delivered", SessionDir: req.SessionDir, NumTurns: 1}, err
 	}
-	chiefTurn := f.Engine.Turns["*"]
+	managerTurn := f.Engine.Turns["*"]
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.Contains(req.Prompt, "Report the shared workgroup goal.") {
 			_, err := fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Ship resumable uploads.", "note": "Both repos share one design.", "agents": []string{}})
 			return intakefixture.QuestionResult(req, "pane-chief-status", "Reported the shared goal."), err
 		}
-		return chiefTurn(ctx, req, turn, tools)
+		return managerTurn(ctx, req, turn, tools)
 	}
 	f.Engine.Mu.Unlock()
 	p := browsertest.OpenBrowser(t)

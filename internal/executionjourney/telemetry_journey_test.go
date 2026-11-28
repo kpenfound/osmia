@@ -126,7 +126,7 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	var reviewing atomic.Int32
 	var resumeReviews atomic.Int32
 	f.Engine.Mu.Lock()
-	chief := f.Engine.Turns["*"]
+	manager := f.Engine.Turns["*"]
 	f.Engine.Turns[execution.MasonTurnID("resume")] = gated
 	f.Engine.Turns[execution.MasonTurnID("upload")] = gated
 	f.Engine.Turns[execution.MasonTurnID("audit")] = gated
@@ -166,7 +166,7 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 				return nil, fmt.Errorf("final report: %s: %v", body, err)
 			}
 		default:
-			return chief(ctx, req, turn, tools)
+			return manager(ctx, req, turn, tools)
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: journeyReply, SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}

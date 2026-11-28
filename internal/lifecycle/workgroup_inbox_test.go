@@ -103,7 +103,7 @@ clone = "`+home2+`"
 	views := filepath.Join(cfg.Root.String(), "views")
 	fixturekit.Must(t, os.Mkdir(views, 0700))
 	agents := map[string]string{trace.Manager: trace.Manager, "thread_mason": fixturekit.DemoAgent, "thread_mason2": "agent_mason2", "thread_u1": "agent_u1", "thread_u2": "agent_u2"}
-	every := append([]string{"file_read", questions.AskTool}, questions.ChiefTools...)
+	every := append([]string{"file_read", questions.AskTool}, questions.ManagerTools...)
 	f.cfg.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		f.mu.Lock()
 		f.live[r.Project()] = r
@@ -277,7 +277,7 @@ func (f *crossRepoInboxFixture) snapshot(s *journey.Service) (bool, string) {
 			inspect(p.Repository, stream)
 		}
 	}
-	target, host, _, close, err := s.Lifecycle().ChiefRepository(context.Background(), projects[0].Repository, f.stream1)
+	target, host, _, close, err := s.Lifecycle().ManagerRepository(context.Background(), projects[0].Repository, f.stream1)
 	if err != nil {
 		return false, strings.Join(details, "; ") + fmt.Sprintf("; shared chief: %v", err)
 	}
@@ -606,7 +606,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			fixturekit.Must(t, err)
 			threads = append(threads, th)
 		}
-		target, host, _, close, err := s.Lifecycle().ChiefRepository(ctx, repo1, f.stream1)
+		target, host, _, close, err := s.Lifecycle().ManagerRepository(ctx, repo1, f.stream1)
 		fixturekit.Must(t, err)
 		defer close()
 		th, err := target.ManagerThread(host)

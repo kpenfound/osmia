@@ -61,14 +61,14 @@ func TestLandingDemonstration(t *testing.T) {
 	demo := &journey.LandingDemo{Reviews: map[string][]service.UnitReviewIdentity{}}
 	f.Engine.Mu.Lock()
 	f.Engine.Turns[execution.MasonTurnID("audit")] = masons.Turn
-	chief := f.Engine.Turns["*"]
+	manager := f.Engine.Turns["*"]
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for unit := range landingUnits {
 			if strings.HasPrefix(req.Name, intake.ReviewerAgent(unit)+"-review-") {
 				return demo.Review(ctx, unit, req, tools)
 			}
 		}
-		return chief(ctx, req, verified, tools)
+		return manager(ctx, req, verified, tools)
 	}
 	f.Engine.Mu.Unlock()
 

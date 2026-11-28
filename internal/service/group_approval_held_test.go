@@ -70,11 +70,11 @@ func (c *logCapture) held(id config.WorkgroupID) []logLine {
 }
 
 type heldApprovalFixture struct {
-	s       *Service
-	logs    *logCapture
-	groups  []trace.Workgroup
-	streams [][]config.WorkstreamID
-	chiefs  []*trace.Repository
+	s        *Service
+	logs     *logCapture
+	groups   []trace.Workgroup
+	streams  [][]config.WorkstreamID
+	managers []*trace.Repository
 }
 
 func newHeldApprovalFixture(t *testing.T, count int, crossListed bool) *heldApprovalFixture {
@@ -103,15 +103,15 @@ func newHeldApprovalFixture(t *testing.T, count int, crossListed bool) *heldAppr
 			streams = append(streams, stream)
 			known[r.Project()] = append(known[r.Project()], stream)
 		}
-		chief, group, err := trace.CreateWorkgroupTrace(ctx, f.cfg.Root, members, fixturekit.DemoStart, ownerActor, "fixture")
+		manager, group, err := trace.CreateWorkgroupTrace(ctx, f.cfg.Root, members, fixturekit.DemoStart, ownerActor, "fixture")
 		fixturekit.Must(t, err)
-		t.Cleanup(func() { chief.Close() })
+		t.Cleanup(func() { manager.Close() })
 		for _, m := range members {
 			fixturekit.Must(t, m.Project.JoinCrossRepoWorkgroup(ctx, m.Workstream, group.ID, fixturekit.DemoStart, ownerActor, "fixture"))
 		}
 		h.groups = append(h.groups, group)
 		h.streams = append(h.streams, streams)
-		h.chiefs = append(h.chiefs, chief)
+		h.managers = append(h.managers, manager)
 	}
 	if crossListed {
 		all := slices.Concat(known[repos[0].Project()], known[repos[1].Project()])
@@ -317,7 +317,7 @@ func TestGroupApprovalPassReleasesHeldWorkgroupWhenApprovalCompletes(t *testing.
 		{Project: h.s.projects[0].id, Workstream: h.streams[0][0]},
 		{Project: h.s.projects[1].id, Workstream: h.streams[0][1]},
 	}
-	fixturekit.Must(t, trace.RecordGroupApproval(context.Background(), h.chiefs[0], h.groups[0].Members[0], trace.GroupApproval{Workgroup: id, Members: pins, Complete: true}, fixturekit.DemoStart, ownerActor))
+	fixturekit.Must(t, trace.RecordGroupApproval(context.Background(), h.managers[0], h.groups[0].Members[0], trace.GroupApproval{Workgroup: id, Members: pins, Complete: true}, fixturekit.DemoStart, ownerActor))
 	h.passes(t, 2)
 	if _, held := heldGroupApprovals.Load(h.s.heldGroupApprovalKey(id)); held {
 		t.Fatal("a completed approval stayed recorded as unverified")

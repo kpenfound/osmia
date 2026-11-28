@@ -247,7 +247,7 @@ func (r Root) WorkstreamStaging() (string, error) {
 }
 
 // WorkgroupTrace is the directory of a cross-repo workgroup's own trace
-// database: its membership record, its shared chief-of-staff thread, its
+// database: its membership record, its shared manager thread, its
 // inbox numbering and its project spec, kept outside every one of its
 // members' own traces and outside every target repository. It is a sibling
 // of "projects" and "workstreams", never nested under either, so nothing

@@ -48,7 +48,7 @@ type Options struct {
 	// Capacity bounds the turns in flight. Masons, reviewers and committee
 	// members share their role kind's slots across workstreams; every other
 	// role runs one turn at a time per workstream. Each workstream also runs at
-	// most PerWorkstream turns. Chief-of-staff turns take no slot. Nil leaves
+	// most PerWorkstream turns. Manager turns take no slot. Nil leaves
 	// dispatch unbounded.
 	Capacity *config.Capacity
 	// Priorities returns the runtime priority order of workstreams, read once
@@ -406,7 +406,7 @@ type Wait struct {
 // Slots is the slot accounting of a shared pool, as its projects' passes
 // last published it.
 type Slots struct {
-	// Used counts the turns in flight by role, chief-of-staff turns aside.
+	// Used counts the turns in flight by role, manager turns aside.
 	Used map[string]int
 	// Waiting lists, in the order the passes offered them, the queued turns
 	// that Holds did not hold and that found no free slot.

@@ -92,14 +92,14 @@ func TestStartupRecoversClaimedAndUnclaimedSessionsForEveryRole(t *testing.T) {
 		}
 	}
 	fixturekit.Must(t, s.recoverSessions(ctx, cfg, repo))
-	chief, err := repo.ManagerThread(fixturekit.Stream)
+	manager, err := repo.ManagerThread(fixturekit.Stream)
 	fixturekit.Must(t, err)
-	if len(chief.Turns) != 2 {
-		t.Fatalf("repeated startup queued another chief turn: %+v", chief.Turns)
+	if len(manager.Turns) != 2 {
+		t.Fatalf("repeated startup queued another chief turn: %+v", manager.Turns)
 	}
 }
 
-func TestServiceStartRunsChiefInterruptionTurn(t *testing.T) {
+func TestServiceStartRunsManagerInterruptionTurn(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixtureAt(t, t.TempDir())

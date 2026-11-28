@@ -28,7 +28,7 @@ const (
 	kindSkillRef     = "https://github.com/kpenfound/skills#hill-climb-evaluator"
 )
 
-var chiefToolProbes = []string{"file_write", "shell", "git_push", "set_status", "decide", "decide_amendment", "decide_change", "request_change", "prioritise", "pause", "resume", "move_workstream", "route_amendment", "inspect_code", "record_discovery", "factory_context", "project_context", "ask", "preview", "notify"}
+var managerToolProbes = []string{"file_write", "shell", "git_push", "set_status", "decide", "decide_amendment", "decide_change", "request_change", "prioritise", "pause", "resume", "move_workstream", "route_amendment", "inspect_code", "record_discovery", "factory_context", "project_context", "ask", "preview", "notify"}
 
 func designedFixture(t *testing.T) (*journey.Service, *journey.Client, config.ProjectID, *fixturekit.DemoEngine) {
 	t.Helper()
@@ -61,8 +61,8 @@ func TestADesignTurnRunsOnTheDesignerRoleAndItsOwnThreadWithOnlyTheDesignTools(t
 	fixturekit.Must(t, err)
 	stream := opened.Design.Workstream
 	repository := s.Sole().Repository
-	if chief, err := repository.ManagerThread(stream); err != nil || len(chief.Turns) != 0 {
-		t.Fatalf("a new design session's chief-of-staff thread holds turns: %+v %v", chief.Turns, err)
+	if manager, err := repository.ManagerThread(stream); err != nil || len(manager.Turns) != 0 {
+		t.Fatalf("a new design session's chief-of-staff thread holds turns: %+v %v", manager.Turns, err)
 	}
 	if th, err := repository.DesignerThread(stream); err != nil || th.Identity.Role != trace.Designer || th.Identity.ThreadID != trace.Designer {
 		t.Fatalf("design thread: %+v %v", th.Identity, err)
@@ -78,7 +78,7 @@ func TestADesignTurnRunsOnTheDesignerRoleAndItsOwnThreadWithOnlyTheDesignTools(t
 		if want := []string{"draft_brief", "file_read", "read_repo", "set_title"}; !slices.Equal(names, want) {
 			fail("tools %v", names)
 		}
-		for _, probe := range chiefToolProbes {
+		for _, probe := range managerToolProbes {
 			if out, err := fixturekit.CallTool(ctx, tools, probe, map[string]any{}); err == nil {
 				fail("a designer turn called %s: %s", probe, out)
 			}
@@ -109,8 +109,8 @@ func TestADesignTurnRunsOnTheDesignerRoleAndItsOwnThreadWithOnlyTheDesignTools(t
 	if len(th.Turns) != 1 || th.Turns[0].Request.AgentID != trace.Designer || th.Turns[0].Request.Profile.Name != "design" || th.Turns[0].Request.Profile.Model != "design-model" {
 		t.Fatalf("design thread turns: %+v", th.Turns)
 	}
-	if chief, err := repository.ManagerThread(stream); err != nil || len(chief.Turns) != 0 {
-		t.Fatalf("a design turn reached the chief-of-staff thread: %+v %v", chief.Turns, err)
+	if manager, err := repository.ManagerThread(stream); err != nil || len(manager.Turns) != 0 {
+		t.Fatalf("a design turn reached the chief-of-staff thread: %+v %v", manager.Turns, err)
 	}
 }
 
@@ -123,9 +123,9 @@ func TestADesignSessionOpenedBeforeTheDesignerRoleKeepsItsMessagesAndMovesItsNex
 	stream := opened.Design.Workstream
 	repository := s.Sole().Repository
 	now := func() time.Time { return time.Now().UTC() }
-	legacy := intakefixture.ClaimChiefTurn(t, repository, home, stream, now, intakefixture.ChiefTurnInput{
+	legacy := intakefixture.ClaimManagerTurn(t, repository, home, stream, now, intakefixture.ManagerTurnInput{
 		Turn: "message_legacy", Prompt: "Earlier question from the owner", Cause: "owner-message", Token: "legacy-token", Directory: "legacy", Actor: intake.OwnerActor})
-	fixturekit.AnswerChief(t, repository, stream, legacy.Turn, "Earlier answer from the agent")
+	fixturekit.AnswerManager(t, repository, stream, legacy.Turn, "Earlier answer from the agent")
 	fixturekit.Must(t, intakefixture.RecordDesignDraft(t, repository, stream, "Decisions: ship it.\nIntent and tradeoffs: keep it simple.\nRejected options: a rewrite."))
 
 	var mu sync.Mutex
@@ -144,7 +144,7 @@ func TestADesignSessionOpenedBeforeTheDesignerRoleKeepsItsMessagesAndMovesItsNex
 			problems = append(problems, "tools "+strings.Join(names, ","))
 			mu.Unlock()
 		}
-		for _, probe := range chiefToolProbes {
+		for _, probe := range managerToolProbes {
 			if _, err := fixturekit.CallTool(ctx, tools, probe, map[string]any{}); err == nil {
 				mu.Lock()
 				problems = append(problems, "called "+probe)
@@ -184,14 +184,14 @@ func TestADesignSessionOpenedBeforeTheDesignerRoleKeepsItsMessagesAndMovesItsNex
 	}
 	design, err := repository.DesignerThread(stream)
 	fixturekit.Must(t, err)
-	chief, err := repository.ManagerThread(stream)
+	manager, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
-	if len(design.Turns) != 1 || len(chief.Turns) != 1 {
-		t.Fatalf("the new turn is on thread %d turns, the chief's has %d, want 1 and 1", len(design.Turns), len(chief.Turns))
+	if len(design.Turns) != 1 || len(manager.Turns) != 1 {
+		t.Fatalf("the new turn is on thread %d turns, the chief's has %d, want 1 and 1", len(design.Turns), len(manager.Turns))
 	}
 }
 
-func TestStartingAfterDesignGivesTheChiefANewThreadAndCarriesTheKindThrough(t *testing.T) {
+func TestStartingAfterDesignGivesTheManagerANewThreadAndCarriesTheKindThrough(t *testing.T) {
 	t.Parallel()
 	s, c, home, engine := designedFixture(t)
 	ctx := context.Background()
@@ -218,12 +218,12 @@ func TestStartingAfterDesignGivesTheChiefANewThreadAndCarriesTheKindThrough(t *t
 	if kind, err := repository.Kind(stream); err != nil || kind != "hill-climb" {
 		t.Fatalf("the kind Start handed in: %q %v", kind, err)
 	}
-	chief, err := repository.ManagerThread(stream)
+	manager, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
-	if chief.Identity.Role != trace.Manager {
-		t.Fatalf("chief thread: %+v", chief.Identity)
+	if manager.Identity.Role != trace.Manager {
+		t.Fatalf("chief thread: %+v", manager.Identity)
 	}
-	for _, q := range chief.Turns {
+	for _, q := range manager.Turns {
 		if q.Request.AgentID != trace.Manager || q.Request.Prompt == "Draft it" || q.Request.SystemPrompt == intake.DesignRolePrompt {
 			t.Fatalf("the design conversation reached the chief's thread: %+v", q.Request)
 		}
@@ -276,9 +276,9 @@ func TestStartingFromASessionOpenedBeforeTheDesignerRoleNeverResumesItsBackendSe
 	stream := opened.Design.Workstream
 	repository := s.Sole().Repository
 	now := func() time.Time { return time.Now().UTC() }
-	legacy := intakefixture.ClaimChiefTurn(t, repository, home, stream, now, intakefixture.ChiefTurnInput{
+	legacy := intakefixture.ClaimManagerTurn(t, repository, home, stream, now, intakefixture.ManagerTurnInput{
 		Turn: "message_legacy", Prompt: "Earlier question from the owner", Cause: "owner-message", Token: "legacy-token", Directory: "legacy", Actor: intake.OwnerActor})
-	fixturekit.AnswerChief(t, repository, stream, legacy.Turn, "Earlier answer from the agent")
+	fixturekit.AnswerManager(t, repository, stream, legacy.Turn, "Earlier answer from the agent")
 	fixturekit.Must(t, intakefixture.RecordDesignDraft(t, repository, stream, "Decisions: ship it.\nIntent and tradeoffs: keep it simple.\nRejected options: a rewrite."))
 
 	var mu sync.Mutex
@@ -303,9 +303,9 @@ func TestStartingFromASessionOpenedBeforeTheDesignerRoleNeverResumesItsBackendSe
 		return err == nil
 	})
 	s.Until(t, "the chief of staff answered after Start", func() bool {
-		chief, err := repository.ManagerThread(stream)
+		manager, err := repository.ManagerThread(stream)
 		fixturekit.Must(t, err)
-		return slices.ContainsFunc(chief.Turns, func(q trace.QueuedTurn) bool {
+		return slices.ContainsFunc(manager.Turns, func(q trace.QueuedTurn) bool {
 			return q.Request.Prompt == "What is next?" && q.Response != nil && !q.CompletedAt.IsZero()
 		})
 	})
@@ -314,9 +314,9 @@ func TestStartingFromASessionOpenedBeforeTheDesignerRoleNeverResumesItsBackendSe
 	if len(resumed) > 0 || len(replayed) > 0 {
 		t.Fatalf("a chief turn after Start resumed the design session's backend session %v or replayed its conversation %v", resumed, replayed)
 	}
-	chief, err := repository.ManagerThread(stream)
+	manager, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
-	if chief.Epoch == 0 {
-		t.Fatalf("the chief's thread keeps the design conversation in its current run: %+v", chief.Identity)
+	if manager.Epoch == 0 {
+		t.Fatalf("the chief's thread keeps the design conversation in its current run: %+v", manager.Identity)
 	}
 }

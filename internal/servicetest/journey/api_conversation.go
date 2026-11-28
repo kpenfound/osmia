@@ -11,7 +11,7 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-func RunChief(opts *Options, cfg *config.Config, turns *fixturekit.ChiefTurns) {
+func RunManager(opts *Options, cfg *config.Config, turns *fixturekit.ManagerTurns) {
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: turns, Now: opts.Reconciliation.Now, ResumableRoles: func(string) bool { return true }},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {

@@ -21,7 +21,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
+func TestServiceDeliversEventsToTheManagerOnceAcrossRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "ev-")
@@ -143,7 +143,7 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	fixturekit.Must(t, err)
 	notices := 0
 	for _, e := range entries {
-		if intakefixture.ChiefEvent(e.Event) {
+		if intakefixture.ManagerEvent(e.Event) {
 			notices++
 		}
 		if !e.Acknowledged {
@@ -215,7 +215,7 @@ func TestAbandonedWorkstreamEventsAreNotDelivered(t *testing.T) {
 	fixturekit.Must(t, err)
 	notices := 0
 	for _, e := range entries {
-		if !intakefixture.ChiefEvent(e.Event) {
+		if !intakefixture.ManagerEvent(e.Event) {
 			continue
 		}
 		notices++

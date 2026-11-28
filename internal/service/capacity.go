@@ -60,14 +60,14 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) *CapacityStatus {
 		role.Waiting = append(role.Waiting, SlotWait{Project: w.Project, Workstream: w.Workstream, Unit: w.Unit, Review: w.Review, Session: w.Session, Preview: w.Preview, Verify: w.Verify, Reason: DeferCapacity})
 	}
 	out.Roles = append(out.Roles, role)
-	out.Roles = append(out.Roles, s.chiefCapacity(limits.Manager))
+	out.Roles = append(out.Roles, s.managerCapacity(limits.Manager))
 	return out
 }
 
-func (s *Service) chiefCapacity(limit int) RoleCapacity {
-	chief := s.ChiefSlots()
-	role := RoleCapacity{Role: chiefRole, Limit: &limit, Used: chief.Used, Waiting: []SlotWait{}}
-	for _, w := range chief.Waiting {
+func (s *Service) managerCapacity(limit int) RoleCapacity {
+	manager := s.ManagerSlots()
+	role := RoleCapacity{Role: managerRole, Limit: &limit, Used: manager.Used, Waiting: []SlotWait{}}
+	for _, w := range manager.Waiting {
 		role.Waiting = append(role.Waiting, SlotWait{Project: w.Project, Workstream: w.Workstream, Agent: w.Agent, Turn: w.Turn, Reason: DeferCapacity})
 	}
 	return role

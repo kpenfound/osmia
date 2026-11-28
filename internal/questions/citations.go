@@ -1,5 +1,5 @@
-// Package questions carries a role's question to the chief of staff and the
-// chief of staff's choice back: the ask tool, the chief of staff's question
+// Package questions carries a role's question to the manager and the
+// manager's choice back: the ask tool, the manager's question
 // tools, citation checks and delivery of an answer to the asker's thread.
 package questions
 

@@ -713,8 +713,8 @@ func TestBranchNames(t *testing.T) {
 }
 
 func TestDesignerRoleIsAnOrdinaryRoleThatNeverFallsBackToTheManager(t *testing.T) {
-	chief := topConfig + "[profiles.chief]\nagent = 'codex'\nmodel = 'chief-model'\n[roles.manager]\nprofile = 'chief'\nsandbox = 'container'\nimage = 'chief-image'\nskills = ['https://github.com/example/skills#chief-skill']\n"
-	c, err := load(fixture(t, chief, projectConfig))
+	manager := topConfig + "[profiles.chief]\nagent = 'codex'\nmodel = 'chief-model'\n[roles.manager]\nprofile = 'chief'\nsandbox = 'container'\nimage = 'chief-image'\nskills = ['https://github.com/example/skills#chief-skill']\n"
+	c, err := load(fixture(t, manager, projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -724,7 +724,7 @@ func TestDesignerRoleIsAnOrdinaryRoleThatNeverFallsBackToTheManager(t *testing.T
 	if got := c.RoleExecution("designer"); got.Mode != "none" || got.Image != "" || len(got.Skills) != 0 {
 		t.Fatalf("an unconfigured designer's execution: %+v", got)
 	}
-	configured := chief + "[roles.designer]\nprofile = 'chief'\nsandbox = 'sbx'\nimage = 'osmia:latest'\nskills = ['https://github.com/example/skills#design-skill']\n"
+	configured := manager + "[roles.designer]\nprofile = 'chief'\nsandbox = 'sbx'\nimage = 'osmia:latest'\nskills = ['https://github.com/example/skills#design-skill']\n"
 	c, err = load(fixture(t, configured, projectConfig))
 	if err != nil {
 		t.Fatal(err)

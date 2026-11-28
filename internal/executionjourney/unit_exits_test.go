@@ -247,14 +247,14 @@ func TestAnOwnerApprovalIsAPinnedMove(t *testing.T) {
 	}
 }
 
-func TestAChiefMoveToApprovedIsNeverLegal(t *testing.T) {
+func TestAManagerMoveToApprovedIsNeverLegal(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, stream, repo := newCheckingFixture(t, "route-chief-approval")
 	journey.RouteThrough(f.S, &jevfixture.Transitions{})
 	before := intakefixture.UnitWorkflow(t, repo, stream, "resume")
 	x, err := f.S.Execution().UnitExit(execution.UnitExitInput{Repo: repo, Stream: stream, Unit: "resume", Trigger: "unit.move_proposal", Cause: "chief-proposal-1",
-		Default: intake.UnitApproved, Note: "Looks fine.", Actor: intake.ChiefActor, Active: true})
+		Default: intake.UnitApproved, Note: "Looks fine.", Actor: intake.ManagerActor, Active: true})
 	fixturekit.Must(t, err)
 	res, err := f.S.Core().RouteExit(ctx, x)
 	fixturekit.Must(t, err)

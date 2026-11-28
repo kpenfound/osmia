@@ -16,7 +16,7 @@ func TestHeldCoversPausedScopes(t *testing.T) {
 	const other config.ProjectID = "p_00000000000000000000000000000002"
 	const sibling config.WorkstreamID = "w_00000000000000000000000000000002"
 	worker := Candidate{Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: "mason"}}}
-	chief := Candidate{Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: trace.Manager}}}
+	manager := Candidate{Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: trace.Manager}}}
 	pause := func(scope string, p config.ProjectID, w config.WorkstreamID) runtime.Pause {
 		return runtime.Pause{Target: runtime.Target{Scope: scope, Project: p, Workstream: w}, Mode: "soft", Source: "owner"}
 	}
@@ -39,7 +39,7 @@ func TestHeldCoversPausedScopes(t *testing.T) {
 			if got := Held(tc.pauses, project, worker); got != tc.held {
 				t.Fatalf("worker held %v, want %v", got, tc.held)
 			}
-			if Held(tc.pauses, project, chief) {
+			if Held(tc.pauses, project, manager) {
 				t.Fatal("chief-of-staff turn held")
 			}
 			if got := Paused(tc.pauses, project, stream); got != tc.held {
@@ -86,13 +86,13 @@ func TestStoppingCoversHardPausesOnly(t *testing.T) {
 	}
 }
 
-func TestPauseHoldsWorkerTurnsWhileChiefOfStaffRuns(t *testing.T) {
+func TestPauseHoldsWorkerTurnsWhileManagerRuns(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t, "alpha")
 	defer repo.Close()
 	_, err := repo.EnsureManager(ctx, stream, f.clock.Now(), owner)
 	must(t, err)
-	queueChief := func(turn string) {
+	queueManager := func(turn string) {
 		t.Helper()
 		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_chief_" + turn, Project: project, Workstream: stream, At: f.clock.Now(), Actor: owner, Cause: "message_" + turn, Depth: 1},
 			AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Message " + turn}
@@ -101,7 +101,7 @@ func TestPauseHoldsWorkerTurnsWhileChiefOfStaffRuns(t *testing.T) {
 	}
 	f.queue(t, repo, "alpha", "one")
 	f.queue(t, repo, "alpha", "two")
-	queueChief("one")
+	queueManager("one")
 
 	var mu sync.Mutex
 	var pauses []runtime.Pause
@@ -130,7 +130,7 @@ func TestPauseHoldsWorkerTurnsWhileChiefOfStaffRuns(t *testing.T) {
 
 	must(t, c.Pass(ctx))
 	must(t, c.Pass(ctx))
-	queueChief("two")
+	queueManager("two")
 	must(t, c.Pass(ctx))
 	must(t, c.Pass(ctx))
 	got := ranNow()

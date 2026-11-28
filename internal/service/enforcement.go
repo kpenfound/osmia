@@ -56,27 +56,27 @@ func CoreEnforcement(root config.Root) Enforcement {
 	}
 }
 
-var chiefGrant = coreadapter.Capabilities{Web: true, Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, checks.TraceToolName, status.ToolName, "notify", "capacity", "inspect_code", "preview", briefToolName, checksTool, delivery.ChecksChoiceToolName, prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, intake.DecideCharterTool, resolveContestedTool, resolveObjectionTool, decideTool, flakeFixToolName, triageTool, moveUnitTool, climbSteerTool, climbConcludeTool, moveWorkstreamTool, handBackDriftTool, dropDependencyTool, retryChangeTool, followUpTool, draftBriefToolName, designReadRepoToolName, designTitleToolName}, questions.ChiefTools...), ProjectContextTool)}
+var managerGrant = coreadapter.Capabilities{Web: true, Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, checks.TraceToolName, status.ToolName, "notify", "capacity", "inspect_code", "preview", briefToolName, checksTool, delivery.ChecksChoiceToolName, prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, intake.DecideCharterTool, resolveContestedTool, resolveObjectionTool, decideTool, flakeFixToolName, triageTool, moveUnitTool, climbSteerTool, climbConcludeTool, moveWorkstreamTool, handBackDriftTool, dropDependencyTool, retryChangeTool, followUpTool, draftBriefToolName, designReadRepoToolName, designTitleToolName}, questions.ManagerTools...), ProjectContextTool)}
 
-var ChiefOrdinaryTools = slices.DeleteFunc(slices.Clone(chiefGrant.Tools), func(name string) bool {
+var ManagerOrdinaryTools = slices.DeleteFunc(slices.Clone(managerGrant.Tools), func(name string) bool {
 	return name == draftBriefToolName || name == designReadRepoToolName || name == designTitleToolName
 })
 
-var chiefOrdinaryNarrow = coreadapter.Capabilities{Tools: ChiefOrdinaryTools, Web: true}
+var managerOrdinaryNarrow = coreadapter.Capabilities{Tools: ManagerOrdinaryTools, Web: true}
 
-// ChiefOrdinaryToolsOf lists the tools an ordinary chief-of-staff turn holds
+// ManagerOrdinaryToolsOf lists the tools an ordinary manager turn holds
 // for a workstream of the named kind: every ordinary tool except the ones only
 // another kind adds. A kind this build does not register holds none of the
 // kind tools.
-func ChiefOrdinaryToolsOf(kind string) []string {
+func ManagerOrdinaryToolsOf(kind string) []string {
 	own := map[string]bool{}
 	if k, ok := kindregistry.Lookup(kind); ok {
-		for _, name := range k.ChiefTools {
+		for _, name := range k.ManagerTools {
 			own[name] = true
 		}
 	}
-	others := kindregistry.ChiefToolNames()
-	return slices.DeleteFunc(slices.Clone(ChiefOrdinaryTools), func(name string) bool {
+	others := kindregistry.ManagerToolNames()
+	return slices.DeleteFunc(slices.Clone(ManagerOrdinaryTools), func(name string) bool {
 		return slices.Contains(others, name) && !own[name]
 	})
 }
@@ -88,30 +88,30 @@ var designNarrow = coreadapter.Capabilities{Tools: designOnlyTools, Web: true}
 // designerGrant is everything a design turn is granted: the design tools and
 // web access. A design session's own agent never holds a write, execution,
 // version-control, credential or owner-gate tool, nor any other tool of the
-// chief of staff.
+// manager.
 var designerGrant = coreadapter.Capabilities{Tools: slices.Clone(designOnlyTools), Web: true}
 
-func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeControls, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
+func managerTools(cfg *config.Config, r *trace.Repository, controls *runtimeControls, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
 	set, err := status.ToolHolding(r, trace.Manager, scope, now, controls.heldGates(r, config.WorkstreamID(scope.Workstream)))
 	if err != nil {
 		return nil, err
 	}
-	kindTools, kindErr := controls.kindChiefTools(r, scope, now)
+	kindTools, kindErr := controls.kindManagerTools(r, scope, now)
 	if kindErr != nil {
 		return nil, kindErr
 	}
-	chief, err := questions.Tools(r, trace.Manager, scope, now)
-	for i, t := range chief {
+	manager, err := questions.Tools(r, trace.Manager, scope, now)
+	for i, t := range manager {
 		if t.Name == questions.RouteAmendmentTool {
-			chief[i] = controls.lifecycle().ReopenForRevision(r, scope, t)
+			manager[i] = controls.lifecycle().ReopenForRevision(r, scope, t)
 		}
 	}
-	return controls.reportQueued(cfg, r, scope, now, append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), controls.cloudTrace(cfg, r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.deliveryBrief(r, scope), delivery.ChecksToolOf(controls.deliveryController, r, scope), delivery.ChecksChoiceToolOf(controls.deliveryController, r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.ChangeControl(r, scope, false), controls.ChangeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.intake().ResolveObjection(r, scope), controls.decide(r, scope), controls.flakeFix(r, scope), controls.triageFinding(r, scope), controls.MoveWorkstream(r, scope), controls.HandBackDrift(r, scope, now), controls.lifecycle().DropDependency(r, scope), controls.lifecycle().RetryChange(r, scope), newFollowUpTool(r, scope, now)}, chief...), append(kindTools, ProjectContext(r, scope))...)), err
+	return controls.reportQueued(cfg, r, scope, now, append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), controls.cloudTrace(cfg, r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.deliveryBrief(r, scope), delivery.ChecksToolOf(controls.deliveryController, r, scope), delivery.ChecksChoiceToolOf(controls.deliveryController, r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.ChangeControl(r, scope, false), controls.ChangeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.intake().ResolveObjection(r, scope), controls.decide(r, scope), controls.flakeFix(r, scope), controls.triageFinding(r, scope), controls.MoveWorkstream(r, scope), controls.HandBackDrift(r, scope, now), controls.lifecycle().DropDependency(r, scope), controls.lifecycle().RetryChange(r, scope), newFollowUpTool(r, scope, now)}, manager...), append(kindTools, ProjectContext(r, scope))...)), err
 }
 
-// kindChiefTools builds the chief-of-staff tools the workstream's kind adds.
+// kindManagerTools builds the manager tools the workstream's kind adds.
 // A workstream whose kind this build does not register gets none.
-func (c *runtimeControls) kindChiefTools(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
+func (c *runtimeControls) kindManagerTools(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
 	stream, err := config.ParseWorkstreamID(scope.Workstream)
 	if err != nil {
 		return nil, err
@@ -126,7 +126,7 @@ func (c *runtimeControls) kindChiefTools(r *trace.Repository, scope coreadapter.
 		climbConcludeTool: func() coreadapter.Tool { return c.climbConclude(r, scope) },
 	}
 	var tools []coreadapter.Tool
-	for _, name := range kind.ChiefTools {
+	for _, name := range kind.ManagerTools {
 		if build, found := builders[name]; found {
 			tools = append(tools, build())
 		}
@@ -141,7 +141,7 @@ var unitMasonGrant = execution.UnitMasonGrant
 var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, factoryContextTool, discoveryTool, execution.VerdictTool, reviewtools.DiffToolName}}
 
 // Enforce returns opts with Architect, Committee and Threads running every
-// role turn through e. Thread turns are granted to the chief of staff, mason
+// role turn through e. Thread turns are granted to the manager, mason
 // and reviewer; a turn of any other role fails with a recorded reason. A
 // sandbox the platform cannot enforce fails the turn with core's reason. Unit
 // and final review check runs use e.Checks, or the runner opts already holds
@@ -180,7 +180,7 @@ func Enforce(opts Options, e Enforcement) Options {
 			Workspaces:         threadWorkspaces{units: units, drifts: drifts, sessions: sessionWorkspaces{cfg: cfg}},
 			Views:              isolation.Views{Directory: views},
 			PreserveMasonViews: true,
-			Grants:             map[string]coreadapter.Capabilities{trace.Manager: chiefGrant, trace.Designer: designerGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, sessionRole: {WriteFiles: true, Execute: true, Web: true, Tools: []string{"show_image"}}},
+			Grants:             map[string]coreadapter.Capabilities{trace.Manager: managerGrant, trace.Designer: designerGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, sessionRole: {WriteFiles: true, Execute: true, Web: true, Tools: []string{"show_image"}}},
 			Offered: func(_ context.Context, scope coreadapter.Scope) []string {
 				if verifyOffered(controls.currentConfig(r, cfg), scope) {
 					return []string{verifytool.ToolName}
@@ -240,7 +240,7 @@ func Enforce(opts Options, e Enforcement) Options {
 						return designSelection(ctx, controls, r, root, project, stream, scope, settings)
 					}
 					workspace := filepath.Join(root, trace.Manager, project, scope.Workstream)
-					paths, err := StageChiefDocuments(r, stream, workspace)
+					paths, err := StageManagerDocuments(r, stream, workspace)
 					if err != nil {
 						return isolation.Selection{}, err
 					}
@@ -248,7 +248,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					if err != nil {
 						return isolation.Selection{}, err
 					}
-					tools := ChiefOrdinaryToolsOf(stored)
+					tools := ManagerOrdinaryToolsOf(stored)
 					if verifyOffered(controls.currentConfig(r, cfg), scope) {
 						tools = append(tools, verifytool.ToolName)
 					}
@@ -295,7 +295,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				if scope.Role != trace.Manager {
 					return nil, nil
 				}
-				tools, err := chiefTools(cfg, r, controls, scope, now)
+				tools, err := managerTools(cfg, r, controls, scope, now)
 				if err != nil {
 					return nil, err
 				}

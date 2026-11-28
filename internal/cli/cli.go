@@ -829,7 +829,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if o.json {
 			return output(stdout, stderr, result)
 		}
-		if result.Archived && result.ArchivedBy == wire.ArchivedByChief {
+		if result.Archived && result.ArchivedBy == wire.ArchivedByManager {
 			fmt.Fprintf(stdout, "Workstream %s was permanently archived by the chief of staff because its pull request merged; its title remains and its trace will be deleted\n", result.Workstream)
 		} else if result.Archived {
 			fmt.Fprintf(stdout, "Workstream %s permanently archived; its title remains and its trace will be deleted\n", result.Workstream)

@@ -84,7 +84,7 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 		opts.Reconciliation.Now = (&fixturekit.FixedClock{At: fixturekit.DemoStart}).Now
 		cfg, err := projectstore.LoadConfig(opts.Config)
 		fixturekit.Must(t, err)
-		journey.RunChief(opts, cfg, &fixturekit.ChiefTurns{})
+		journey.RunManager(opts, cfg, &fixturekit.ManagerTurns{})
 		opts.Boundary = func(ctx context.Context, name string) error {
 			if err := joining.Checkpoint(ctx, name); err != nil {
 				return err
@@ -180,12 +180,12 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 		if _, ok := trace.WorkgroupOf(groups, member.stream); ok {
 			t.Fatal("startup added replacement local group")
 		}
-		target, _, _, close, err := f.S.Lifecycle().ChiefRepository(context.Background(), r, member.stream)
+		target, _, _, close, err := f.S.Lifecycle().ManagerRepository(context.Background(), r, member.stream)
 		fixturekit.Must(t, err)
-		chief, err := target.ManagerThread(member.stream)
+		manager, err := target.ManagerThread(member.stream)
 		close()
 		fixturekit.Must(t, err)
-		if chief.Identity != shared.Identity {
+		if manager.Identity != shared.Identity {
 			t.Fatal("shared chief identity changed")
 		}
 	}
@@ -261,12 +261,12 @@ func TestDraftWorkgroupResumesAuthenticatedRetractedMemberAcrossRestart(t *testi
 	if apiFault != nil || id != g.ID {
 		t.Fatalf("retry replaced join: %s %v", id, apiFault)
 	}
-	target, _, _, close, err := f.S.Lifecycle().ChiefRepository(ctx, repo1, f.Stream1)
+	target, _, _, close, err := f.S.Lifecycle().ManagerRepository(ctx, repo1, f.Stream1)
 	fixturekit.Must(t, err)
-	chief, err := target.ManagerThread(f.Stream1)
+	manager, err := target.ManagerThread(f.Stream1)
 	close()
 	fixturekit.Must(t, err)
-	if chief.Identity != original.Identity {
+	if manager.Identity != original.Identity {
 		t.Fatal("retry replaced original shared chief")
 	}
 	awaitProjectSpec(f, t)

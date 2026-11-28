@@ -7,8 +7,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// Require is the precondition of the chief of staff's outcome tool for a
-// subject occurrence of a decision kind: the chief's decision is recorded only
+// Require is the precondition of the manager's outcome tool for a
+// subject occurrence of a decision kind: the manager's decision is recorded only
 // when a decide result exists for that same occurrence. It reads the
 // occurrence's recorded result and never asks Jev.
 //

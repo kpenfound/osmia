@@ -76,7 +76,7 @@ func recoveryDocuments(t *testing.T, repo *trace.Repository, stream config.Works
 	return n
 }
 
-func TestAStallNeitherJevNorTheChiefClearedOpensOneRecoveryCard(t *testing.T) {
+func TestAStallNeitherJevNorTheManagerClearedOpensOneRecoveryCard(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := newStallFixture(t, "", nil)
@@ -196,7 +196,7 @@ func (m *moveRecoveryFixture) approve(req RecoveryRequest) (RecoveryResponse, *A
 	return m.f.s.approveRecovery(context.Background(), string(m.stream), req)
 }
 
-// A chief's proposal that belongs to the owner, here approving a candidate,
+// A manager's proposal that belongs to the owner, here approving a candidate,
 // produces exactly one recovery card, which shows the pinned move and is in the
 // feed. A second look finds the same card.
 func TestAnOwnerBoundProposalOpensOneRecoveryCard(t *testing.T) {

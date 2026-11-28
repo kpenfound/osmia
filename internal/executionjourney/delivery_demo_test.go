@@ -44,7 +44,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 		return nil
 	}
 	f.Engine.Mu.Lock()
-	chief := f.Engine.Turns["*"]
+	manager := f.Engine.Turns["*"]
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
@@ -66,7 +66,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 				return nil, fmt.Errorf("final report: %s: %v", body, err)
 			}
 		default:
-			return chief(ctx, req, turn, tools)
+			return manager(ctx, req, turn, tools)
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}

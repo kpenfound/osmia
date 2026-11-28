@@ -160,7 +160,7 @@ func (f *handoffTitleFixture) notices(t *testing.T) (recorded, acknowledged int)
 	return recorded, acknowledged
 }
 
-func (f *handoffTitleFixture) chiefThread(t *testing.T, shared bool) trace.Thread {
+func (f *handoffTitleFixture) managerThread(t *testing.T, shared bool) trace.Thread {
 	t.Helper()
 	r, err := f.s.Repository(f.home)
 	fixturekit.Must(t, err)
@@ -169,7 +169,7 @@ func (f *handoffTitleFixture) chiefThread(t *testing.T, shared bool) trace.Threa
 		fixturekit.Must(t, err)
 		return th
 	}
-	target, host, _, closeTarget, err := f.s.ChiefRepository(context.Background(), r, f.origin)
+	target, host, _, closeTarget, err := f.s.ManagerRepository(context.Background(), r, f.origin)
 	fixturekit.Must(t, err)
 	defer closeTarget()
 	th, err := target.Thread(host, trace.Manager)
@@ -228,7 +228,7 @@ func TestDesignStartDeliversOneHandoffTitleTurnToTheThreadThatContinues(t *testi
 			f.s.Until(t, "the hand-off title turn to be delivered before the routine-progress window", func() bool { return f.deliveredTurns() > 0 })
 			f.s.Until(t, "the hand-off turn to settle", func() bool {
 				recorded, acknowledged := f.notices(t)
-				turns := handoffTitleTurns(f.chiefThread(t, which.adopted))
+				turns := handoffTitleTurns(f.managerThread(t, which.adopted))
 				return recorded == 1 && acknowledged == 1 && len(turns) == 1 && !turns[0].CompletedAt.IsZero()
 			})
 			for i := range 2 {
@@ -251,7 +251,7 @@ func TestDesignStartDeliversOneHandoffTitleTurnToTheThreadThatContinues(t *testi
 			if got := f.deliveredTurns(); got != 1 {
 				t.Fatalf("%d hand-off turns reached the chief of staff, want 1", got)
 			}
-			thread := f.chiefThread(t, which.adopted)
+			thread := f.managerThread(t, which.adopted)
 			turns := handoffTitleTurns(thread)
 			if len(turns) != 1 || turns[0].Response == nil || turns[0].CompletedAt.IsZero() {
 				t.Fatalf("hand-off turns on the continuing thread: %+v", turns)

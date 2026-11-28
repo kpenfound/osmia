@@ -59,7 +59,7 @@ func (f previewImage) assertGroupImage(t *testing.T, removed bool) {
 	}
 }
 
-func TestChiefPreviewImageIsServedAndSharedWithTheWorkgroup(t *testing.T) {
+func TestManagerPreviewImageIsServedAndSharedWithTheWorkgroup(t *testing.T) {
 	f := newCapturedPreview(t)
 	f.assertGroupImage(t, false)
 	response, err := http.Get("http://" + f.S.WebAddr() + f.attachment.URL)

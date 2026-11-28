@@ -28,7 +28,7 @@ import (
 
 // Design session tool and document names. file_read, draft_brief, read_repo and
 // set_title are the only tools a design session's agent may ever reach; every
-// other tool a chief-of-staff turn can hold, including every write,
+// other tool a manager turn can hold, including every write,
 // version-control, credential or owner-gate tool, is narrowed away for it
 // (enforcement.go).
 const (
@@ -235,7 +235,7 @@ func RenderDesignView(project config.ProjectID, w trace.WorkstreamStatus) Design
 // with a design thread of its own and no feature state, wrapped in its own
 // one-workstream workgroup like every other workstream. It takes no spec, no
 // plan and no units, and the owner's conversation with it never reaches the
-// tools or the context an ordinary chief of staff has.
+// tools or the context an ordinary manager has.
 func (s *Controller) OpenDesign(ctx context.Context, req DesignOpenRequest) (DesignView, *APIError) {
 	if req.NewProject && req.Project == "" {
 		ids := s.Current().ProjectIDs()
@@ -697,7 +697,7 @@ func (s *Controller) DraftBriefTool(repository *trace.Repository, scope coreadap
 			k := revision + 1
 			at := now()
 			h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: DesignDraftDocument, Revision: k,
-				Project: repository.Project(), Workstream: stream, At: at, Actor: ChiefActor, Cause: DraftBriefToolName}
+				Project: repository.Project(), Workstream: stream, At: at, Actor: ManagerActor, Cause: DraftBriefToolName}
 			data, err := json.Marshal(brief)
 			if err != nil {
 				return nil, err
@@ -765,7 +765,7 @@ func DesignTitleTool(repository *trace.Repository, scope coreadapter.Scope, now 
 			}
 			k := revision + 1
 			h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: DesignTitleDocument, Revision: k,
-				Project: repository.Project(), Workstream: stream, At: now(), Actor: ChiefActor, Cause: DesignTitleToolName}
+				Project: repository.Project(), Workstream: stream, At: now(), Actor: ManagerActor, Cause: DesignTitleToolName}
 			data, err := json.Marshal(designTitleRecord{Title: title})
 			if err != nil {
 				return nil, err
@@ -918,7 +918,7 @@ func DesignTranscript(repository *trace.Repository, stream config.WorkstreamID) 
 	return text, nil
 }
 
-// earlierDesignThread is the chief-of-staff thread a design session opened
+// earlierDesignThread is the manager thread a design session opened
 // before design sessions had a thread of their own held its conversation on.
 // It is empty for every other session. Nothing is sent to it any more; its
 // messages are still read.
@@ -945,7 +945,7 @@ func threadTranscript(th trace.Thread) string {
 
 // designHistoryContext carries a design session's earlier conversation into
 // the turns of its design thread until one of them has answered. A session
-// opened before the design thread existed holds its conversation on the chief
+// opened before the design thread existed holds its conversation on the manager
 // of staff's thread, where this thread's backend session never saw it, so the
 // agent reads the conversation and its latest brief here.
 func designHistoryContext(repository *trace.Repository, stream config.WorkstreamID, designer, earlier trace.Thread) (string, error) {
@@ -972,7 +972,7 @@ func designHistoryContext(repository *trace.Repository, stream config.Workstream
 // StartDesignWorkgroup hands a design session's latest drafted brief to the
 // architect flow: it records the brief, with the conversation transcript
 // attached for reference, as the workstream's handed input, exactly as an
-// ordinary hand-in does. The workgroup's chief of staff opens a new thread
+// ordinary hand-in does. The workgroup's manager opens a new thread
 // from that brief and transcript and never resumes the design conversation. It is refused, recording
 // nothing, when the workstream is no longer a design session, a turn is
 // running, or the agent has not drafted a brief yet.

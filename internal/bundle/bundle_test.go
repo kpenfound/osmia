@@ -568,7 +568,7 @@ func TestBundleCharterNotices(t *testing.T) {
 	}
 }
 
-func TestCharterEditsAndChiefNoticesReachOtherWorkstreams(t *testing.T) {
+func TestCharterEditsAndManagerNoticesReachOtherWorkstreams(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 	if err := f.repo.CreateWorkstream(ctx, second, timestamp, owner); err != nil {

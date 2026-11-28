@@ -80,9 +80,9 @@ func TestBrowserAgentMarkdownAcrossConversations(t *testing.T) {
 	const owner = "# Owner **literal**\n| no | formatting |"
 	f.sendAndAnswer(t, p, quiet, owner, browserMarkdown)
 	awaitFeedEvent(p, quiet)
-	chief := `[data-workstream="` + string(quiet) + `"] [data-kind=response] [data-field=text] > .markdown`
-	expected := assertMarkdown(p, chief)
-	assertMarkdownPhone(p, chief)
+	manager := `[data-workstream="` + string(quiet) + `"] [data-kind=response] [data-field=text] > .markdown`
+	expected := assertMarkdown(p, manager)
+	assertMarkdownPhone(p, manager)
 	p.Await("plain owner message", `document.querySelector('[data-kind=message] [data-field=text]').textContent === `+strconv.Quote(owner)+` && !document.querySelector('[data-kind=message] [data-field=text] h1')`)
 	conversation, err := f.c.Conversation(ctx, quiet)
 	must(t, err)
@@ -171,7 +171,7 @@ func TestBrowserMarkdownStatusAndReportsStayExpanded(t *testing.T) {
 	t.Parallel()
 	f := newPageFixture(t)
 	f.status(t, trace.StatusContent{Goal: "Markdown reports", Note: browserMarkdown, Attention: browserMarkdown, Agents: []string{}})
-	f.answerChief(t, stream, f.chief.Turn, browserMarkdown)
+	f.answerManager(t, stream, f.manager.Turn, browserMarkdown)
 	p := openBrowser(t)
 	watchMarkdownEvents(p)
 	p.Run(chromedp.EmulateViewport(390, 844), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
@@ -193,5 +193,5 @@ func TestBrowserMarkdownStatusAndReportsStayExpanded(t *testing.T) {
 	p.OpenActivity()
 	p.Await("report stays open after an update", `document.querySelector(`+quote(card+`[data-kind=session][data-role=chief_of_staff] details`)+`).open`)
 	assertMarkdown(p, report)
-	p.Await("session anchor", `document.getElementById(`+quote("feed-turn-"+f.chief.Turn)+`)?.querySelector('details').open`)
+	p.Await("session anchor", `document.getElementById(`+quote("feed-turn-"+f.manager.Turn)+`)?.querySelector('details').open`)
 }

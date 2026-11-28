@@ -231,7 +231,7 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	}
 	f.Engine.Turns[lifecycle.DriftResolveTurnID(1, 1)] = demo.resolve(intakefixture.TrackedFile, resolvedGit, false, map[string]any{"outcome": "Kept resume's change on upstream's"})
 	f.Engine.Turns[lifecycle.DriftReviewTurnID(1, 1)] = reviewDrift
-	chief := f.Engine.Turns["*"]
+	manager := f.Engine.Turns["*"]
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for unit := range recoveryReports {
 			if strings.HasPrefix(req.Name, intake.ReviewerAgent(unit)+"-review-") {
@@ -245,7 +245,7 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 			}
 			return recoveryResult(req, "Reviewed"), nil
 		}
-		return chief(ctx, req, turn, tools)
+		return manager(ctx, req, turn, tools)
 	}
 	f.Engine.Mu.Unlock()
 	f.Start(t)

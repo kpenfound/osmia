@@ -264,9 +264,9 @@ func SkippedAtHandIn(t trace.Transition) bool {
 }
 
 // EnterSkipped moves a sketched workstream whose debate the owner skipped at
-// hand-in into the shed without a committee, and asks the chief of staff to
+// hand-in into the shed without a committee, and asks the manager to
 // present the packet: a skip recorded before the workstream was sketched told
-// the chief of staff nothing about the drafted documents. A skip through the
+// the manager nothing about the drafted documents. A skip through the
 // shed API moves the workstream itself. A workstream that moved meanwhile is
 // left to the next pass.
 func (d *Debate) EnterSkipped(ctx context.Context, stream config.WorkstreamID, feature trace.WorkflowState, pin shed.Pin) error {
@@ -436,14 +436,14 @@ func Bound(configured int, requests []shed.More, redrafts []shed.Redraft, limit 
 	return fmt.Sprintf("at round %d, the round that debated the redraft the owner asked for", limit)
 }
 
-// Presentation asks the chief of staff to put the decision the packet holds to
+// Presentation asks the manager to put the decision the packet holds to
 // the owner. It is the attention item of a workstream waiting at the gate.
 func Presentation(recommendation string) string {
 	return "The ratification packet is recorded for the owner: the spec and plan revisions, the dissent record and the recommendation to " + recommendation +
 		".\nPresent it, and make the attention of your status the decision the owner has to take now: ratify the revisions, overrule or sustain what blocks, ask for a redraft or for further rounds, or abandon the workstream."
 }
 
-// DecideFirst asks the chief of staff to decide the committee objections that
+// DecideFirst asks the manager to decide the committee objections that
 // stand before it presents the packet, or is empty when none waits for it.
 func DecideFirst(entries []shed.Entry) string {
 	undecided := shed.Undecided(entries)
@@ -487,7 +487,7 @@ func Unopposed(records []shed.Record, open []shed.Entry, n int) string {
 }
 
 // Dissent returns the workstream's dissent record, computed from the recorded
-// rounds, the owner's rulings and the chief of staff's decisions: every
+// rounds, the owner's rulings and the manager's decisions: every
 // objection that stands, with its kind, its member, the part it names, how it
 // was disposed of or escalated and whether it blocks.
 func Dissent(repository *trace.Repository, stream config.WorkstreamID) ([]shed.Entry, error) {
@@ -499,17 +499,17 @@ func Dissent(repository *trace.Repository, stream config.WorkstreamID) ([]shed.E
 }
 
 // DissentRecord is the dissent record of the given records under the owner's
-// rulings and the chief of staff's decisions on the workstream.
+// rulings and the manager's decisions on the workstream.
 func DissentRecord(repository *trace.Repository, stream config.WorkstreamID, records []shed.Record) ([]shed.Entry, error) {
 	rulings, err := shed.AllRulings(repository, stream)
 	if err != nil {
 		return nil, err
 	}
-	chief, err := shed.AllManagerDecisions(repository, stream)
+	manager, err := shed.AllManagerDecisions(repository, stream)
 	if err != nil {
 		return nil, err
 	}
-	return shed.DissentRecord(records, rulings, chief), nil
+	return shed.DissentRecord(records, rulings, manager), nil
 }
 
 // Standing counts the open dissent and how much of it blocks.
@@ -524,7 +524,7 @@ func Standing(open []shed.Entry) string {
 }
 
 // Conclude ends the debate after round n. The workstream stays in the shed:
-// the conclusion is a shed transition, and its notice gives the chief of
+// the conclusion is a shed transition, and its notice gives the manager of
 // staff the reason, the dissent that stands and the packet to present to the
 // owner.
 func (d *Debate) Conclude(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, n int, cause, reason string, open []shed.Entry) error {

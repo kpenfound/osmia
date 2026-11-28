@@ -13,7 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// ContestFixture holds a unit awaiting review and the chief-of-staff tool
+// ContestFixture holds a unit awaiting review and the manager tool
 // that rules on its contest.
 type ContestFixture struct {
 	F      *ShedFixture
@@ -23,13 +23,13 @@ type ContestFixture struct {
 	Tool   coreadapter.Tool
 }
 
-// NewContestFixture seeds a unit under review for key and claims the chief
+// NewContestFixture seeds a unit under review for key and claims the manager
 // event turn that rules on its contest.
 func NewContestFixture(t *testing.T, key string) *ContestFixture {
 	t.Helper()
 	f, stream, repo := NewReviewFixture(t, key)
 	f.S.SetSole(&ActiveProject{Repository: repo})
-	scope := intakefixture.ClaimContestChiefTurn(t, repo, f.Project, stream)
+	scope := intakefixture.ClaimContestManagerTurn(t, repo, f.Project, stream)
 	controls := &RuntimeControls{}
 	controls.Service.Store(f.S)
 	return &ContestFixture{F: f, Stream: stream, Repo: repo, R: &Reviewers{Masons: NewMasonController(f.S, repo)}, Tool: controls.Execution().ResolveContested(repo, scope)}
@@ -63,7 +63,7 @@ func (c *ContestFixture) Raised(t *testing.T, contest trace.Transition) (bool, s
 	return raised, note
 }
 
-// MoveFixture is a ContestFixture with the chief-of-staff move_unit tool.
+// MoveFixture is a ContestFixture with the manager move_unit tool.
 type MoveFixture struct {
 	*ContestFixture
 	Move coreadapter.Tool
@@ -75,5 +75,5 @@ func NewMoveFixture(t *testing.T, key string) *MoveFixture {
 	c := NewContestFixture(t, key)
 	controls := &RuntimeControls{}
 	controls.Service.Store(c.F.S)
-	return &MoveFixture{ContestFixture: c, Move: controls.Execution().MoveUnit(c.Repo, intakefixture.ChiefEventScope(c.F.Project, c.Stream))}
+	return &MoveFixture{ContestFixture: c, Move: controls.Execution().MoveUnit(c.Repo, intakefixture.ManagerEventScope(c.F.Project, c.Stream))}
 }

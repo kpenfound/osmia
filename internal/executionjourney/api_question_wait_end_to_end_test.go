@@ -124,13 +124,13 @@ func awaitQuestionJourneyQuiet(t *testing.T, f *journey.ShedFixture, stream conf
 		outbox, err := f.Repository().Outbox(stream)
 		fixturekit.Must(t, err)
 		for _, entry := range outbox {
-			if intakefixture.ChiefEvent(entry.Event) && !entry.Acknowledged {
+			if intakefixture.ManagerEvent(entry.Event) && !entry.Acknowledged {
 				return false
 			}
 		}
-		chief, err := f.Repository().ManagerThread(stream)
+		manager, err := f.Repository().ManagerThread(stream)
 		fixturekit.Must(t, err)
-		return !slices.ContainsFunc(chief.Turns, func(turn trace.QueuedTurn) bool { return turn.CompletedAt.IsZero() })
+		return !slices.ContainsFunc(manager.Turns, func(turn trace.QueuedTurn) bool { return turn.CompletedAt.IsZero() })
 	})
 }
 
@@ -149,7 +149,7 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 			t.Parallel()
 			problems := &intakefixture.Faults{}
 			passed, prepare := journey.CountingSchedule()
-			f, masons, chief := newAskingMasonFixturePrepared(t, 1, fixturekit.ValidPlan, problems, func(opts *journey.Options) {
+			f, masons, manager := newAskingMasonFixturePrepared(t, 1, fixturekit.ValidPlan, problems, func(opts *journey.Options) {
 				prepare(opts)
 				opts.ShutdownTimeout = 10 * time.Second
 			})
@@ -193,7 +193,7 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 						return nil, err
 					}
 				default:
-					return chief.Turn(ctx, req, turn, tools)
+					return manager.Turn(ctx, req, turn, tools)
 				}
 				return intakefixture.QuestionResult(req, "session-"+req.Name, "Reviewed"), nil
 			}
@@ -372,7 +372,7 @@ func assertQuestionJourneyHistory(t *testing.T, f *journey.ShedFixture, stream c
 		for _, prefix := range []string{"Unit " + unit + " review satisfactory:", "Unit " + unit + " merged:"} {
 			count := 0
 			for _, entry := range outbox {
-				if intakefixture.ChiefEvent(entry.Event) && strings.HasPrefix(entry.Event.Body, prefix) {
+				if intakefixture.ManagerEvent(entry.Event) && strings.HasPrefix(entry.Event.Body, prefix) {
 					count++
 				}
 			}
@@ -396,7 +396,7 @@ func questionJourneySnapshot(t *testing.T, f *journey.ShedFixture, stream config
 	fixturekit.Must(t, err)
 	var notices []trace.Event
 	for _, e := range outbox {
-		if intakefixture.ChiefEvent(e.Event) {
+		if intakefixture.ManagerEvent(e.Event) {
 			notices = append(notices, e.Event)
 		}
 	}
@@ -404,9 +404,9 @@ func questionJourneySnapshot(t *testing.T, f *journey.ShedFixture, stream config
 	for _, agent := range []string{intake.MasonAgent("resume"), intake.MasonAgent("dedupe"), intake.ReviewerAgent("resume"), intake.ReviewerAgent("dedupe"), intake.CommitteeAgent(1)} {
 		threads = append(threads, f.Thread(t, stream, agent))
 	}
-	chief, err := f.Repository().ManagerThread(stream)
+	manager, err := f.Repository().ManagerThread(stream)
 	fixturekit.Must(t, err)
-	threads = append(threads, chief)
+	threads = append(threads, manager)
 	data, err := json.Marshal([]any{transitions, docs, notices, threads})
 	fixturekit.Must(t, err)
 	return string(data)

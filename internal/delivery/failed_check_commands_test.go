@@ -88,7 +88,7 @@ func TestFailedCloudRunGivesEverySurfaceEachFailedCheckWithItsTraceCommand(t *te
 		}
 	}
 
-	got := f.call(ChecksToolOf(f.load(), f.repo, f.chief("poll")), `{"action":"poll","push":1}`)
+	got := f.call(ChecksToolOf(f.load(), f.repo, f.manager("poll")), `{"action":"poll","push":1}`)
 	if got["outcome"] != "failed" {
 		t.Fatalf("poll %v", got)
 	}
@@ -135,7 +135,7 @@ func TestFailedLoadIsTheFailedCheckLoadOnEverySurface(t *testing.T) {
 	if evidence, notice := FinalCheckEvidence(run), f.noticeOf(); !strings.Contains(evidence, want) || !strings.Contains(notice, want) {
 		t.Fatalf("evidence:\n%s\nnotice:\n%s", evidence, notice)
 	}
-	got := f.call(ChecksToolOf(f.load(), f.repo, f.chief("poll")), `{"action":"poll","push":1}`)
+	got := f.call(ChecksToolOf(f.load(), f.repo, f.manager("poll")), `{"action":"poll","push":1}`)
 	listed, _ := got["failed_checks"].([]any)
 	if got["outcome"] != "load_failed" || len(listed) != 1 || listed[0].(map[string]any)["command"] != "dagger trace "+traceLoad {
 		t.Fatalf("poll %v", got)
@@ -151,7 +151,7 @@ func TestFailedRunWithoutAFailingCheckStatusSaysSoWithTheCountsAndTheRunURL(t *t
 		t.Fatalf("run %+v", run)
 	}
 	want := fmt.Sprintf("no failing check status was found, so no failed check can be named: the run's check statuses show 91 checks, 91 passed, 0 failed; run status: %s", run.StatusURL)
-	got := f.call(ChecksToolOf(f.load(), f.repo, f.chief("poll")), `{"action":"poll","push":1}`)
+	got := f.call(ChecksToolOf(f.load(), f.repo, f.manager("poll")), `{"action":"poll","push":1}`)
 	detail, _ := got["detail"].(string)
 	if _, listed := got["failed_checks"]; listed || got["outcome"] != "failed" || !strings.Contains(detail, want) {
 		t.Fatalf("poll %v", got)
@@ -213,7 +213,7 @@ func TestFailedRunLinksCarryNoCredentialOnAnySurface(t *testing.T) {
 		t.Fatalf("run %+v", run)
 	}
 
-	poll := f.call(ChecksToolOf(f.load(), f.repo, f.chief("poll")), `{"action":"poll","push":1}`)
+	poll := f.call(ChecksToolOf(f.load(), f.repo, f.manager("poll")), `{"action":"poll","push":1}`)
 	pollText, err := json.Marshal(poll)
 	if err != nil {
 		t.Fatal(err)

@@ -47,7 +47,7 @@ const (
 	DriftSkipped    = "skipped"
 	// driftHeld is the drift subject's value, held-<k>, once drift rebase
 	// k's conflict resolution stopped: the drift rebase is over, and the
-	// workstream takes no other until the owner asks for one or the chief
+	// workstream takes no other until the owner asks for one or the manager
 	// of staff hands it back.
 	DriftHeld = "held"
 )
@@ -747,7 +747,7 @@ func (d Drifter) Record(ctx context.Context, stream config.WorkstreamID, rebase 
 // removed, and the router decides the drift subject's next state. By default
 // it moves to held-<k> with a notice, the feature branch and the seal stay,
 // and the workstream takes no other drift rebase until the owner asks for
-// one or the chief of staff hands this one back. Jev may instead ask for the
+// one or the manager hands this one back. Jev may instead ask for the
 // drift rebase again from the start. Either ends this operation. A hold the
 // router keeps without moving leaves the operation pending for another
 // attempt.

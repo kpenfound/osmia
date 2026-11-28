@@ -273,7 +273,7 @@ type dependencyCase struct {
 
 const ownerEnded = "owner"
 
-const chiefEnded = trace.Manager
+const managerEnded = trace.Manager
 
 func (c dependencyCase) base() bool { return c.Type == BaseEdgeType }
 
@@ -353,7 +353,7 @@ func (c dependencyCase) evidence() string {
 		return "its pull request was closed without merging"
 	case c.Ended == ownerEnded:
 		return "the owner dropped it"
-	case c.Ended == chiefEnded:
+	case c.Ended == managerEnded:
 		return "the chief of staff dropped it"
 	}
 	return "it was abandoned without being delivered"
@@ -586,8 +586,8 @@ func (s *Controller) dropDependency(ctx context.Context, project config.ProjectI
 		return DropDependencyResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s was abandoned", stream)}
 	}
 	cause, ended := "owner-drop", ownerEnded
-	if authority.Kind == router.AuthorityChief {
-		cause, ended = "chief-drop", chiefEnded
+	if authority.Kind == router.AuthorityManager {
+		cause, ended = "chief-drop", managerEnded
 	}
 	c := dependencyCase{Upstream: req.Upstream, Type: req.Type, Trigger: TriggerUpstreamTerminal, Cause: cause, Ended: ended, Actor: actor, Authority: authority}
 	if dependency, err := repo.WorkstreamBase(stream); err != nil {

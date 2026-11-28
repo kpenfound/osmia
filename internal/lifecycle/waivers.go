@@ -33,7 +33,7 @@ type EdgeWaiver struct {
 	Type     string              `json:"type"`
 	// Ended says why the dependency could not be met: abandoned, closed,
 	// owner when the owner dropped a dependency that had not ended, or
-	// chief_of_staff when the chief of staff did.
+	// chief_of_staff when the manager did.
 	Ended string `json:"ended,omitempty"`
 	// Reason is the decision's reason.
 	Reason string `json:"reason"`

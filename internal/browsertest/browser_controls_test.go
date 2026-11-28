@@ -59,7 +59,7 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 		t.Fatalf("claimed %s, not the message's turn %s", q.Request.TurnID, turn)
 	}
 	p.AwaitText(message+"[data-field=state]", "running")
-	f.answerChief(t, quiet, turn, "Noted; the uploads resume on Friday.")
+	f.answerManager(t, quiet, turn, "Noted; the uploads resume on Friday.")
 	p.AwaitText(card+`[data-kind=response][data-turn="`+turn+`"] [data-field=text]`, "Noted; the uploads resume on Friday.")
 	p.AwaitText(message+"[data-field=state]", "done")
 	p.Await("the same document", `window.notReloaded === true`)
@@ -431,6 +431,6 @@ func TestBrowserConversationShowsEarlierBackgroundTurn(t *testing.T) {
 	p.AwaitText(message+"[data-field=queued-reason]", "waiting for an event turn on this thread")
 	q, err := repo.ClaimTurn(ctx, quiet, trace.Manager, "browser-background", t.TempDir(), time.Now().UTC())
 	must(t, err)
-	f.answerChief(t, quiet, q.Request.TurnID, "Background handled")
+	f.answerManager(t, quiet, q.Request.TurnID, "Background handled")
 	p.AwaitText(message+"[data-field=queued-reason]", "starting")
 }

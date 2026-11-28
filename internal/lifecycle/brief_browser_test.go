@@ -19,8 +19,8 @@ func TestBrowserDeliveryCardIsHeldUntilTheBriefThenShowsIt(t *testing.T) {
 	project := j.Repository.Project()
 	screenshot := j.capture(t, "uploads", j.Report.Commit)
 	items := []string{briefShipFirst, briefShipNext}
-	j.chief.plan(1, briefPlan{Text: briefText, Items: items, Screenshots: []string{screenshot}})
-	j.chief.hold()
+	j.manager.plan(1, briefPlan{Text: briefText, Items: items, Screenshots: []string{screenshot}})
+	j.manager.hold()
 	j.run(t)
 	j.awaitStarts(t, 1)
 
@@ -35,7 +35,7 @@ func TestBrowserDeliveryCardIsHeldUntilTheBriefThenShowsIt(t *testing.T) {
 	}
 	p.Await("no delivery card while the chief of staff writes the brief", `document.querySelector(`+browsertest.Quote(cardSelector)+`) === null`)
 
-	j.chief.release()
+	j.manager.release()
 	p.Await("the delivery card", `document.querySelector(`+browsertest.Quote(cardSelector)+`) !== null`)
 	brief := card + "[data-field=brief] "
 	p.AwaitText(brief+"[data-field=brief-text]", briefText)

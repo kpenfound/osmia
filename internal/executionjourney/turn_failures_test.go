@@ -101,13 +101,13 @@ func TestReviewerInfrastructureFailureContestsUnit(t *testing.T) {
 	f, fake := journey.NewMasonFixture(t, 1, fixturekit.ValidPlan)
 	defer f.Stop(t)
 	fake.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Built")
-	chief := &intakefixture.Chief{P: &intakefixture.Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
+	manager := &intakefixture.Manager{P: &intakefixture.Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	var mu sync.Mutex
 	crash, reviews := true, map[string]int{}
 	f.Engine.Mu.Lock()
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.HasPrefix(req.Name, intake.ReviewerAgent("resume")+"-review-") {
-			return chief.Turn(ctx, req, verified, tools)
+			return manager.Turn(ctx, req, verified, tools)
 		}
 		mu.Lock()
 		reviews[req.Name]++

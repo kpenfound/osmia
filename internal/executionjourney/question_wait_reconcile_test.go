@@ -63,7 +63,7 @@ func TestReviewerQuestionAnswerBeforeWaiting(t *testing.T) {
 	ctx := context.Background()
 	fixturekit.Must(t, r.Pass(ctx))
 	complete := prepareQuestionReview(t, f, repo, stream, true, nil)
-	journey.ChiefAnswers(t, f, repo, stream, "1", "Use the recorded checks.", "spec#1")
+	journey.ManagerAnswers(t, f, repo, stream, "1", "Use the recorded checks.", "spec#1")
 	complete()
 	verdict := service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary}
 	prepareQuestionReview(t, f, repo, stream, false, &verdict)()
@@ -117,7 +117,7 @@ func TestReviewerQuestionInterleavings(t *testing.T) {
 					case 'C':
 						complete()
 					case 'D':
-						journey.ChiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+						journey.ManagerAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
 					case 'W':
 						fixturekit.Must(t, r.Pass(ctx))
 					case 'V':
@@ -181,7 +181,7 @@ func TestReviewerQuestionLaterVerdictReconcilesAfterRestart(t *testing.T) {
 			fixturekit.Must(t, r.Pass(ctx))
 			prepareQuestionReview(t, f, repo, stream, true, nil)()
 			fixturekit.Must(t, r.Pass(ctx))
-			journey.ChiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+			journey.ManagerAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
 
 			prepareQuestionReview(t, f, repo, stream, false, nil)()
 			th, err := repo.Thread(stream, intake.ReviewerAgent("resume"))
@@ -292,7 +292,7 @@ func TestMasonQuestionDoneWhileWaiting(t *testing.T) {
 					t.Fatal("done accepted unanswered wait")
 				}
 			}
-			journey.ChiefRecordsAnswer(t, f, repo, stream, "1", "Use the recorded checks.", "spec#1")
+			journey.ManagerRecordsAnswer(t, f, repo, stream, "1", "Use the recorded checks.", "spec#1")
 			if !tc.early {
 				out, err = reports.Tool(repo, scope).Handle(ctx, json.RawMessage(`{"outcome":"Built and verified.","headline":"Work is complete","happened":"Built and verified the requested behavior."}`))
 				fixturekit.Must(t, err)
@@ -367,7 +367,7 @@ func TestReviewerQuestionWaitOwnershipAndUncertainty(t *testing.T) {
 			fixturekit.Must(t, r.Pass(ctx))
 			prepareQuestionReview(t, f, repo, stream, true, nil)()
 			fixturekit.Must(t, r.Pass(ctx))
-			journey.ChiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+			journey.ManagerAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
 			v := service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary}
 			prepareQuestionReview(t, f, repo, stream, false, &v)()
 			state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
@@ -411,7 +411,7 @@ func TestReviewerQuestionWaitOwnershipAndUncertainty(t *testing.T) {
 					t.Fatal("contest has no notice for the chief and owner feed")
 				}
 				f.S.SetSole(&journey.ActiveProject{Repository: repo})
-				_, apiErr := recordContestedRuling(f.S, ctx, repo, stream, "resume", api.ContestedRulingRequest{Decision: "review", Note: "Review the same candidate again."}, intake.ChiefActor)
+				_, apiErr := recordContestedRuling(f.S, ctx, repo, stream, "resume", api.ContestedRulingRequest{Decision: "review", Note: "Review the same candidate again."}, intake.ManagerActor)
 				if apiErr != nil {
 					t.Fatalf("chief cannot resolve question contest: %+v", apiErr)
 				}
@@ -432,7 +432,7 @@ func TestReviewerQuestionRequiresAnswerDelivery(t *testing.T) {
 	fixturekit.Must(t, r.Pass(ctx))
 	for _, answered := range []bool{false, true} {
 		if answered {
-			journey.ChiefRecordsAnswer(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+			journey.ManagerRecordsAnswer(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
 		}
 		for range 3 {
 			fixturekit.Must(t, r.Pass(ctx))
@@ -465,7 +465,7 @@ func TestReviewerQuestionStaleVerdictNeverApproves(t *testing.T) {
 			fixturekit.Must(t, r.Pass(ctx))
 			prepareQuestionReview(t, f, repo, stream, true, nil)()
 			fixturekit.Must(t, r.Pass(ctx))
-			journey.ChiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+			journey.ManagerAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
 			v := service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary}
 			prepareQuestionReview(t, f, repo, stream, false, &v)()
 
@@ -525,7 +525,7 @@ func TestReviewerEarlyAnswerWithoutVerdictQueuesFreshReview(t *testing.T) {
 	ctx := context.Background()
 	fixturekit.Must(t, r.Pass(ctx))
 	finish := prepareQuestionReview(t, f, repo, stream, true, nil)
-	journey.ChiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+	journey.ManagerAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
 	finish()
 	prepareQuestionReview(t, f, repo, stream, false, nil)()
 	for range 4 {
@@ -574,7 +574,7 @@ func TestReviewerQuestionPendingAnswerHoldsLaterVerdict(t *testing.T) {
 	prepareQuestionReview(t, f, repo, stream, false, &v)()
 	for _, answered := range []bool{false, true} {
 		if answered {
-			journey.ChiefRecordsAnswer(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+			journey.ManagerRecordsAnswer(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
 		}
 		for range 2 {
 			fixturekit.Must(t, r.Pass(ctx))
@@ -605,7 +605,7 @@ func TestMasonDoneRefusesReviewerAndAmendmentWaits(t *testing.T) {
 	fixturekit.Must(t, r.Pass(ctx))
 	prepareQuestionReview(t, f, repo, stream, true, nil)()
 	fixturekit.Must(t, r.Pass(ctx))
-	journey.ChiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+	journey.ManagerAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
 	for _, amendment := range []bool{false, true} {
 		if amendment {
 			state, err := repo.Workflow(stream, trace.UnitSubject("resume"))

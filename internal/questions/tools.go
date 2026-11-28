@@ -31,7 +31,7 @@ const (
 	LogAssumptionTool  = "log_assumption"
 )
 
-// Guidance tells the chief of staff what to do with a question. It belongs
+// Guidance tells the manager what to do with a question. It belongs
 // in the system prompt of every turn that may carry one.
 const Guidance = "## Questions\n" +
 	"When a service event says a question is open, investigate it first (factory_context, inspect_code, read_remote_file), then call decide with kind question-routing, the question's number as subject, and a short evidence summary of what you found. " +
@@ -58,8 +58,8 @@ const Guidance = "## Questions\n" +
 	"When the owner's ruling is a standing rule for the project rather than a decision about this feature, also call propose_charter once for it, with the rule as the charter should state it. For an amendment to another member's charter, set amends to that project's qualified rule citation; the proposal is recorded and decided in that project. " +
 	"The owner ratifies or declines the proposal, so make it the attention of your status until the owner does."
 
-// ChiefTools names the chief of staff's question tools.
-var ChiefTools = []string{AnswerTool, EscalateTool, RelayRulingTool, RouteAmendmentTool, ProposeCharterTool, LogAssumptionTool}
+// ManagerTools names the manager's question tools.
+var ManagerTools = []string{AnswerTool, EscalateTool, RelayRulingTool, RouteAmendmentTool, ProposeCharterTool, LogAssumptionTool}
 
 type refusal struct {
 	Recorded bool   `json:"recorded"`
@@ -67,8 +67,8 @@ type refusal struct {
 }
 
 // Tools returns the question tools of the claimed turn scope names: ask for
-// every role but the chief of staff, and answer, escalate, relay_ruling,
-// route_amendment and propose_charter for the chief of staff. A request the trace refuses is
+// every role but the manager, and answer, escalate, relay_ruling,
+// route_amendment and propose_charter for the manager. A request the trace refuses is
 // an ordinary result, {"recorded":false,"reason":...}, so the agent reads why.
 func Tools(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
 	return tools(repository, agent, scope, now, nil)
@@ -76,7 +76,7 @@ func Tools(repository *trace.Repository, agent string, scope coreadapter.Scope, 
 
 // DriftTools returns the ask and amend tools of the mason turn that
 // resolves the feature branch's conflicts with upstream after drift rebase
-// move: ask reaches the workstream's chief of staff about the drift rebase
+// move: ask reaches the workstream's manager about the drift rebase
 // it resolves, and an amendment it files cites move's upstream commit and
 // parks nothing.
 func DriftTools(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time, move trace.UpstreamMove) ([]coreadapter.Tool, error) {
@@ -91,7 +91,7 @@ func tools(repository *trace.Repository, agent string, scope coreadapter.Scope, 
 		return nil, errors.New("question tools require a trace and a clock")
 	}
 	if scope.Role == trace.Manager {
-		return chiefTools(repository, agent, scope, now), nil
+		return managerTools(repository, agent, scope, now), nil
 	}
 	ask := coreadapter.Tool{Name: AskTool, Effect: coreadapter.ToolMemory,
 		Description: "Ask the chief of staff a question you cannot settle from your own context, including when the task itself looks wrong. question: say what you need decided and what it blocks, so the chief can answer without re-reading your work. charter_conflict: only for a conflict between member charters; give both rules, each qualified with its project ID, and Go sends the question directly to the owner. The question is recorded and your turn ends, so end it as soon as this returns. The answer arrives as your next turn on this thread, however long it takes.",
@@ -282,7 +282,7 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 	return tool
 }
 
-func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time) []coreadapter.Tool {
+func managerTools(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time) []coreadapter.Tool {
 	stream := config.WorkstreamID(scope.Workstream)
 	answer := coreadapter.Tool{Name: AnswerTool, Effect: coreadapter.ToolMemory,
 		Description: "Resolve an open question, including an engineering decision within approved intent. The record need not prescribe the implementation choice: explain your judgment and cite the scope, constraints or evidence it rests on. question: its number. text: the answer and reasoning the asker receives. citations: at least one of " + CitationForms + "; each must exist. An answer that would contradict an earlier ruling must be escalated instead.",

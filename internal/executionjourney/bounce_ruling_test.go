@@ -324,7 +324,7 @@ func TestBounceEscalationReachesTheOwnersInbox(t *testing.T) {
 	}
 }
 
-func TestBounceChiefDecisionValidation(t *testing.T) {
+func TestBounceManagerDecisionValidation(t *testing.T) {
 	t.Parallel()
 	for _, history := range []string{"reviews", "checks", "mixed"} {
 		t.Run(history, func(t *testing.T) {
@@ -353,7 +353,7 @@ func TestBounceChiefDecisionValidation(t *testing.T) {
 	}
 }
 
-func TestBounceOwnerDecisionAnswersChiefEscalation(t *testing.T) {
+func TestBounceOwnerDecisionAnswersManagerEscalation(t *testing.T) {
 	t.Parallel()
 	for _, decision := range []string{"review", "revise"} {
 		t.Run(decision, func(t *testing.T) {
@@ -464,7 +464,7 @@ func TestBounceRulingKeysAreBounded(t *testing.T) {
 	}
 }
 
-func TestBounceRulingAndChiefDecisionCommitTogether(t *testing.T) {
+func TestBounceRulingAndManagerDecisionCommitTogether(t *testing.T) {
 	t.Parallel()
 	for _, decision := range []string{"review", "revise"} {
 		t.Run(decision, func(t *testing.T) {

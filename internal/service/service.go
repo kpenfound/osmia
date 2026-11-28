@@ -201,7 +201,7 @@ type Service struct {
 	pool                  *scheduler.Shared
 	gitOperations         gitOperationPool
 	checkSlots            *checkSlotPool
-	chief                 *chiefSlotPool
+	manager               *managerSlotPool
 	committeeAdmissions   sync.Map
 	modelOperationStreams sync.Map
 	spends                daySpends
@@ -339,7 +339,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	})
 	s.pool = &scheduler.Shared{Changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, Spans: s.slots, Limits: s.poolLimit}
 	s.checkSlots = &checkSlotPool{limit: cfg.Capacity.Checks, changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, spans: s.slots, now: s.now}
-	s.chief = newChiefSlotPool(cfg.Capacity.Manager, func() { s.hub.Publish(Event{Kind: EventCapacity}) }, s.conversationSignal.wake)
+	s.manager = newManagerSlotPool(cfg.Capacity.Manager, func() { s.hub.Publish(Event{Kind: EventCapacity}) }, s.conversationSignal.wake)
 	s.slots.Interrupt(telemetry.PoolID(checksRole))
 	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider, Getenv: func(name string) string {
 		value := os.Getenv(name)
@@ -482,7 +482,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 		reapSandboxes(ctx, view, agent.SandboxCLI)
 	}
-	if err = s.recoverWorkgroupChiefSessions(ctx, projects); err != nil {
+	if err = s.recoverWorkgroupManagerSessions(ctx, projects); err != nil {
 		s.cleanupSocket()
 		st.Close()
 		return nil, fmt.Errorf("recover cross-repo workgroup chief-of-staff threads: %w", err)
@@ -838,7 +838,7 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	if err != nil || repository == nil {
 		return nil, err
 	}
-	if err := EnsureChiefsOfStaff(context.Background(), repository, time.Now().UTC()); err != nil {
+	if err := EnsureManagers(context.Background(), repository, time.Now().UTC()); err != nil {
 		repository.Close()
 		return nil, err
 	}
@@ -935,18 +935,18 @@ func (s *Service) priorities() []runtime.Priority {
 	return st.Priorities
 }
 
-func (s *Service) chiefEventsProfile(cfg *config.Config) func() (coreadapter.Profile, error) {
+func (s *Service) managerEventsProfile(cfg *config.Config) func() (coreadapter.Profile, error) {
 	return func() (coreadapter.Profile, error) {
 		st, _ := s.effective()
 		if name := cfg.Roles[config.ManagerRole].EventsProfile; name != "" && st.Profiles[trace.Manager] == "" {
 			return cfg.NamedProfile(name)
 		}
-		_, profile, err := s.chiefOverride(cfg)
+		_, profile, err := s.managerOverride(cfg)
 		return profile, err
 	}
 }
 
-func (s *Service) chiefOverride(cfg *config.Config) (string, coreadapter.Profile, error) {
+func (s *Service) managerOverride(cfg *config.Config) (string, coreadapter.Profile, error) {
 	st, _ := s.effective()
 	name := st.Profiles[trace.Manager]
 	if name == "" {
@@ -970,7 +970,7 @@ func (s *Service) designerOverride(cfg *config.Config) (string, coreadapter.Prof
 	return name, profile, err
 }
 
-func EnsureChiefsOfStaff(ctx context.Context, repository *trace.Repository, at time.Time) error {
+func EnsureManagers(ctx context.Context, repository *trace.Repository, at time.Time) error {
 	streams, err := repository.Workstreams()
 	if err != nil {
 		return err
@@ -1246,11 +1246,11 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		if err != nil {
 			return nil, err
 		}
-		deliver, err := events.New(repository, events.Options{Workstreams: func() ([]config.WorkstreamID, error) { return intake.ObservedWorkstreams(repository) }, Now: options.Now, Window: cfg.EventWindow(), ProgressWindow: cfg.EventProgressWindow(), Profile: s.chiefEventsProfile(cfg), System: s.intake().ChiefEventsPrompt(cfg.Project.ID, repository),
-			Skip: s.intake().ChiefEventsSkip(repository), ChiefTarget: func(ctx context.Context, stream config.WorkstreamID) (*trace.Repository, func(), error) {
-				target, _, _, close, err := s.chiefRepository(ctx, repository, stream)
+		deliver, err := events.New(repository, events.Options{Workstreams: func() ([]config.WorkstreamID, error) { return intake.ObservedWorkstreams(repository) }, Now: options.Now, Window: cfg.EventWindow(), ProgressWindow: cfg.EventProgressWindow(), Profile: s.managerEventsProfile(cfg), System: s.intake().ManagerEventsPrompt(cfg.Project.ID, repository),
+			Skip: s.intake().ManagerEventsSkip(repository), ManagerTarget: func(ctx context.Context, stream config.WorkstreamID) (*trace.Repository, func(), error) {
+				target, _, _, close, err := s.managerRepository(ctx, repository, stream)
 				if errors.Is(err, errWorkgroupJoining) {
-					return nil, close, fmt.Errorf("%w: %v", events.ErrChiefUnavailable, err)
+					return nil, close, fmt.Errorf("%w: %v", events.ErrManagerUnavailable, err)
 				}
 				return target, close, err
 			}})

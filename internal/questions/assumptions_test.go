@@ -11,7 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestSharedChiefAssumptionToolValidatesAffectedWorkstreams(t *testing.T) {
+func TestSharedManagerAssumptionToolValidatesAffectedWorkstreams(t *testing.T) {
 	t.Parallel()
 	f := setupCrossRepo(t)
 	wg, g, err := trace.CreateWorkgroupTrace(context.Background(), f.root, []trace.CrossRepoMember{{Workstream: crossMember1, Project: f.r1}, {Workstream: crossMember2, Project: f.r2}}, start, owner, "workgroup")

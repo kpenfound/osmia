@@ -205,7 +205,7 @@ func (s *Store) Reserve(ctx context.Context, group, run string) (Decision, error
 	return s.ReserveWithNotes(ctx, group, run, "")
 }
 
-// ReserveWithNotes is Reserve that keeps the chief of staff's notes with the
+// ReserveWithNotes is Reserve that keeps the manager's notes with the
 // reservation, for the hand-in the reserved opening is completed with.
 func (s *Store) ReserveWithNotes(ctx context.Context, group, run, notes string) (Decision, error) {
 	return s.decide(ctx, group, run, "flake-reserve", func(g *Group) (Decision, bool, error) { return g.reserve(run, notes, s.now()) })

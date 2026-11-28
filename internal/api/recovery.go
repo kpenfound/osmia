@@ -6,8 +6,8 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// The origins of a recovery move: a stall that neither Jev nor the chief of
-// staff cleared, a move of the chief of staff's that belongs to the owner, and
+// The origins of a recovery move: a stall that neither Jev nor the manager of
+// staff cleared, a move of the manager's that belongs to the owner, and
 // a move Jev judged would change what the owner approved.
 const (
 	RecoveryStall  = "stall"

@@ -40,7 +40,7 @@ func Unbounded(role string, used int, waiting []api.SlotWait) api.RoleCapacity {
 }
 
 // CapacityWire checks the JSON a service serialized for its capacity view
-// (the "capacity" member of the chief's capacity tool result or of
+// (the "capacity" member of the manager's capacity tool result or of
 // /v1/status) and returns the decoded pool entries in order. The pools
 // bounded factory-wide carry a numeric limit; the architect carries
 // none, says in words that it has no factory-wide limit, runs at most one

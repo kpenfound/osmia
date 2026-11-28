@@ -535,7 +535,7 @@ func TestAnEnforcedManagerTurnHoldsVerifyOnlyWithTheSettingAndKeepsPreview(t *te
 		if slices.Contains(got.MCP, verifytool.ToolName) != enabled || !slices.Contains(got.MCP, "preview") {
 			t.Fatalf("setting %v: manager tools %v", enabled, got.MCP)
 		}
-		want := ChiefOrdinaryToolsOf("feature")
+		want := ManagerOrdinaryToolsOf("feature")
 		if enabled {
 			want = append(want, verifytool.ToolName)
 		}

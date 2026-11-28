@@ -183,7 +183,7 @@ func TestJevDropsADependencyOnAnAbandonedUpstream(t *testing.T) {
 	}
 }
 
-func TestADropBelowTheBarHoldsTheDependentAndWakesTheChief(t *testing.T) {
+func TestADropBelowTheBarHoldsTheDependentAndWakesTheManager(t *testing.T) {
 	t.Parallel()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
 	p := dropsAt(0.8)
@@ -709,14 +709,14 @@ func TestAWaivedMergeOrderEdgeLetsTheDraftBeMarkedReadyAfterAFreshApproval(t *te
 	}
 }
 
-func TestTheChiefOfStaffDropsADependency(t *testing.T) {
+func TestTheManagerDropsADependency(t *testing.T) {
 	t.Parallel()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
 	p := &jevfixture.Transitions{}
 	journey.InspectForTest(f.s).SetRouterJudge(jevfixture.TransitionJudge(f.s.Now, p))
 	host, err := f.repository.ManagerHost(f.downstream)
 	fixturekit.Must(t, err)
-	scope := intakefixture.ClaimChiefTurn(t, f.repository, f.project, host, func() time.Time { return fixturekit.DemoStart }, intakefixture.ChiefTurnInput{
+	scope := intakefixture.ClaimManagerTurn(t, f.repository, f.project, host, func() time.Time { return fixturekit.DemoStart }, intakefixture.ManagerTurnInput{
 		Turn: "events_drop", Prompt: "The upstream will not merge.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-events_drop", Directory: "events_drop",
 	})
 	f.resolvePasses(t)

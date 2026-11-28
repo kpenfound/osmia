@@ -24,12 +24,12 @@ const (
 
 // RoutingRoles are the roles whose questions Jev takes part in routing: the
 // workers that build a feature. A question of any other role, such as the
-// architect's judgment that a project needs no change, is the chief of
+// architect's judgment that a project needs no change, is the manager of
 // staff's to route without Jev; once escalated, Jev decides it at the owner's
 // gate at the owner threshold.
 var RoutingRoles = []string{"mason", "reviewer"}
 
-// RoutingSubject is an open question the chief of staff may route with Jev.
+// RoutingSubject is an open question the manager may route with Jev.
 type RoutingSubject struct {
 	// Repository holds the trace of Stream, the workstream the question
 	// belongs to.
@@ -43,15 +43,15 @@ type RoutingSubject struct {
 // Key is the question's occurrence key.
 func (s RoutingSubject) Key() string { return jev.QuestionKey(s.Question.Asked.ID) }
 
-// Label names the question for the chief of staff.
+// Label names the question for the manager.
 func (s RoutingSubject) Label() string {
 	return fmt.Sprintf("question %s of workstream %s", s.Question.Asked.ID, s.Stream)
 }
 
-// RoutingSubjectOf resolves the question id the way the chief of staff's
+// RoutingSubjectOf resolves the question id the way the manager's
 // question tools name it (a number of the turn's own workstream, or
 // "<workstream>:<number>" of a workgroup member). The returned reason is
-// non-empty when the chief may not route the question with Jev today: it is not
+// non-empty when the manager may not route the question with Jev today: it is not
 // open, it reports a conflict between member charters, or its asker is not a
 // role Jev takes part in routing for. Such a question keeps the route it has.
 func RoutingSubjectOf(repository *trace.Repository, host config.WorkstreamID, id string) (RoutingSubject, string, error) {

@@ -65,7 +65,7 @@ func awaitAcknowledgedNotices(f *journey.ShedFixture, t *testing.T, stream confi
 	intakefixture.Soon(t, "the notices of "+string(stream)+" to be acknowledged", func() bool {
 		outbox, err := f.Repository().Outbox(stream)
 		fixturekit.Must(t, err)
-		return !slices.ContainsFunc(outbox, func(e trace.OutboxEntry) bool { return intakefixture.ChiefEvent(e.Event) && !e.Acknowledged })
+		return !slices.ContainsFunc(outbox, func(e trace.OutboxEntry) bool { return intakefixture.ManagerEvent(e.Event) && !e.Acknowledged })
 	})
 }
 

@@ -1076,14 +1076,14 @@ func TestAPauseHoldsAnExitUntilItLifts(t *testing.T) {
 	})
 }
 
-func TestAChiefMoveIsPinnedButOpensNoOwnerGate(t *testing.T) {
+func TestAManagerMoveIsPinnedButOpensNoOwnerGate(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("checking")
 	f.track("implementing")
 	x := f.exit()
 	x.Trigger, x.Default = "unit.move_proposal", "implementing"
 	x.Actor = trace.Actor{Kind: "agent", ID: trace.Manager}
-	x.Authority = &router.Authority{Kind: router.AuthorityChief, Target: "implementing"}
+	x.Authority = &router.Authority{Kind: router.AuthorityManager, Target: "implementing"}
 	res := route(t, f, x)
 	if !res.Committed || res.State != "implementing" || res.Outcome != "followed" || res.Rule != "pinned" || f.ran("implementing") != 1 {
 		t.Fatalf("result = %+v", res)
@@ -1102,7 +1102,7 @@ func TestAChiefMoveIsPinnedButOpensNoOwnerGate(t *testing.T) {
 		y := g.exit()
 		y.Trigger, y.Default = "unit.move_proposal", target
 		y.Actor = trace.Actor{Kind: "agent", ID: trace.Manager}
-		y.Authority = &router.Authority{Kind: router.AuthorityChief, Target: target}
+		y.Authority = &router.Authority{Kind: router.AuthorityManager, Target: target}
 		if res := route(t, g, y); res.Committed || g.ran(target) != 0 || g.state().Value != "checking" {
 			t.Fatalf("%s: result = %+v", target, res)
 		}

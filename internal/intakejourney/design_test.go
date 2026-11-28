@@ -144,7 +144,7 @@ func TestOrdinaryConversationRefusesADesignSessionAndDesignMessageRefusesAStarte
 	}
 }
 
-func TestStartDesignWorkgroupHandsOffBriefToTheChiefOfStaffsOwnThread(t *testing.T) {
+func TestStartDesignWorkgroupHandsOffBriefToTheManagersOwnThread(t *testing.T) {
 	t.Parallel()
 	s, c, project := journey.NewDesignFixture(t)
 	opened, err := c.OpenDesign(context.Background(), project)
@@ -514,19 +514,19 @@ func newDesignWorkgroupContinuationFixture(t *testing.T) (*journey.Service, *jou
 		turns.Grants[designWorkerRole] = coreadapter.Capabilities{Tools: []string{questions.AskTool}}
 
 		turns.Workspaces, turns.Capture = intake.StagedWorkspaces{}, nil
-		selectChief := turns.Select
+		selectManager := turns.Select
 		turns.Select = func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 			if scope.Role == trace.Manager || scope.Role == trace.Designer {
-				return selectChief(ctx, scope)
+				return selectManager(ctx, scope)
 			}
 			workspace := filepath.Join(cfg.Root.String(), "workers", scope.Thread)
 			return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace},
 				Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, os.MkdirAll(workspace, 0700)
 		}
-		chiefScoped := turns.Scoped
+		managerScoped := turns.Scoped
 		turns.Scoped = func(ctx context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if scope.Role == trace.Manager || scope.Role == trace.Designer {
-				return chiefScoped(ctx, scope)
+				return managerScoped(ctx, scope)
 			}
 			return questions.Tools(r, designWorkerAgent, scope, clock.Now)
 		}
@@ -588,18 +588,18 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		return fmt.Sprintf("%s status=%s active=%q turns=[%s]", th.Identity.ThreadID, th.Status, th.Active, strings.Join(turns, ", "))
 	}
 
-	waitCompleted := func(label string, chiefCount, workerCount int, workerStatus string) {
+	waitCompleted := func(label string, managerCount, workerCount int, workerStatus string) {
 		t.Helper()
 		deadline := time.Now().Add(fixturekit.DemoTimeout)
 		for {
-			chief, err := repository.ManagerThread(stream)
+			manager, err := repository.ManagerThread(stream)
 			fixturekit.Must(t, err)
 			complete := func(th trace.Thread) bool {
 				return th.Active == "" && !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool {
 					return q.CompletedAt.IsZero() || q.Response == nil || (q.Status() != "idle" && q.Status() != "waiting")
 				})
 			}
-			ready := len(chief.Turns) >= chiefCount && complete(chief)
+			ready := len(manager.Turns) >= managerCount && complete(manager)
 			if design, err := repository.DesignerThread(stream); err == nil {
 				ready = ready && len(design.Turns) > 0 && complete(design)
 			} else if !errors.Is(err, os.ErrNotExist) {
@@ -624,14 +624,14 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 				}
 			}
 			if ready && len(pending) == 0 {
-				t.Logf("%s completed: chief %s; worker %s", label, turnSummary(chief), turnSummary(worker))
+				t.Logf("%s completed: chief %s; worker %s", label, turnSummary(manager), turnSummary(worker))
 				return
 			}
 			if time.Now().After(deadline) {
 				mu.Lock()
 				toolProblems := strings.Join(problems, "; ")
 				mu.Unlock()
-				t.Fatalf("%s: want completed chief >=%d and worker %d/%s; actual chief %s; worker %s; pending events %v; tool problems %s", label, chiefCount, workerCount, workerStatus, turnSummary(chief), turnSummary(worker), pending, toolProblems)
+				t.Fatalf("%s: want completed chief >=%d and worker %d/%s; actual chief %s; worker %s; pending events %v; tool problems %s", label, managerCount, workerCount, workerStatus, turnSummary(manager), turnSummary(worker), pending, toolProblems)
 			}
 			select {
 			case ticks <- clock.Now():
@@ -699,7 +699,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 			return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
 		}
 		names, err := intakefixture.ToolNames(ctx, tools)
-		want := service.ChiefOrdinaryToolsOf("feature")
+		want := service.ManagerOrdinaryToolsOf("feature")
 		slices.Sort(want)
 		if err != nil || !slices.Equal(names, want) {
 			problem("ordinary chief tools: %v %v, want %v", names, err, want)
@@ -754,12 +754,12 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	waitCompleted("worker ask and chief escalation", 2, 1, "waiting")
 
 	mu.Lock()
-	ranChief := acted
+	ranManager := acted
 	mu.Unlock()
-	if !ranChief {
-		chief, err := repository.ManagerThread(stream)
+	if !ranManager {
+		manager, err := repository.ManagerThread(stream)
 		fixturekit.Must(t, err)
-		fatalf("the chief-of-staff turn that answers the worker's question never ran; chief %s", turnSummary(chief))
+		fatalf("the chief-of-staff turn that answers the worker's question never ran; chief %s", turnSummary(manager))
 	}
 
 	after, err := repository.ManagerThread(stream)
@@ -824,7 +824,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		waitCompleted("before restart", 2, len(worker.Turns), worker.Status)
 		previous, err := c.Conversation(ctx, stream)
 		fixturekit.Must(t, err)
-		chief, err := repository.ManagerThread(stream)
+		manager, err := repository.ManagerThread(stream)
 		fixturekit.Must(t, err)
 		options := s.Options
 		c.Close()
@@ -832,7 +832,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		s, c = journey.StartT(t, options)
 		repository = s.Sole().Repository
 		settle()
-		waitCompleted("after restart", len(chief.Turns), len(worker.Turns), worker.Status)
+		waitCompleted("after restart", len(manager.Turns), len(worker.Turns), worker.Status)
 		continued, err := c.Conversation(ctx, stream)
 		fixturekit.Must(t, err)
 		previousJSON, err := json.Marshal(previous)
@@ -842,14 +842,14 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		if string(previousJSON) != string(continuedJSON) {
 			fatalf("restart changed conversation: want %s; actual %s", previousJSON, continuedJSON)
 		}
-		recoveredChief, err := repository.ManagerThread(stream)
+		recoveredManager, err := repository.ManagerThread(stream)
 		fixturekit.Must(t, err)
-		chiefJSON, err := json.Marshal(chief)
+		managerJSON, err := json.Marshal(manager)
 		fixturekit.Must(t, err)
-		recoveredJSON, err := json.Marshal(recoveredChief)
+		recoveredJSON, err := json.Marshal(recoveredManager)
 		fixturekit.Must(t, err)
-		if string(chiefJSON) != string(recoveredJSON) {
-			fatalf("restart changed chief records: want %s; actual %s", turnSummary(chief), turnSummary(recoveredChief))
+		if string(managerJSON) != string(recoveredJSON) {
+			fatalf("restart changed chief records: want %s; actual %s", turnSummary(manager), turnSummary(recoveredManager))
 		}
 		recoveredWorker, err := repository.Thread(stream, designWorkerAgent)
 		fixturekit.Must(t, err)
@@ -920,14 +920,14 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	}
 	ruledConversation, err := c.Conversation(ctx, stream)
 	fixturekit.Must(t, err)
-	ruledChief, err := repository.ManagerThread(stream)
+	ruledManager, err := repository.ManagerThread(stream)
 	fixturekit.Must(t, err)
 	ruling, err := trace.Get[trace.Ruling](repository, stream, "1", 2)
 	fixturekit.Must(t, err)
-	if ruling.ReturnedAnswer != ownerRuling || ruling.OwnerResponse != ownerRuling || !slices.ContainsFunc(ruledChief.Turns, func(q trace.QueuedTurn) bool {
+	if ruling.ReturnedAnswer != ownerRuling || ruling.OwnerResponse != ownerRuling || !slices.ContainsFunc(ruledManager.Turns, func(q trace.QueuedTurn) bool {
 		return q.Request.ID == ruling.Cause && q.Status() == "idle" && !q.CompletedAt.IsZero() && q.Response != nil && q.Response.Result.FinalResponse == ownerRuling
 	}) {
-		fatalf("relay: want ruling linked to a completed chief turn on the actual design thread; ruling %+v; chief %s", ruling, turnSummary(ruledChief))
+		fatalf("relay: want ruling linked to a completed chief turn on the actual design thread; ruling %+v; chief %s", ruling, turnSummary(ruledManager))
 	}
 	ruledDesign, err := repository.DesignerThread(stream)
 	fixturekit.Must(t, err)
@@ -937,7 +937,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 		fatalf("owner ruling changed the original design request, response or recovery state")
 	}
 	if !slices.Equal(ruledConversation.Entries, wantEntries) {
-		fatalf("owner ruling chat: want %+v; actual %+v; chief %s; worker %s", wantEntries, ruledConversation.Entries, turnSummary(ruledChief), turnSummary(worker))
+		fatalf("owner ruling chat: want %+v; actual %+v; chief %s; worker %s", wantEntries, ruledConversation.Entries, turnSummary(ruledManager), turnSummary(worker))
 	}
 	restart()
 	mu.Lock()

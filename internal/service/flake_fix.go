@@ -125,7 +125,7 @@ func findFlakeOccurrence(store *flakes.Store, id string) (flakeFixLookup, bool, 
 }
 
 func (s *Service) flakeStore(repository *trace.Repository) *flakes.Store {
-	return &flakes.Store{Repository: repository, Actor: chiefActor, Now: s.now}
+	return &flakes.Store{Repository: repository, Actor: managerActor, Now: s.now}
 }
 
 func (s *Service) actOnFlake(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, action, id, notes, reason string) (flakeFixResult, string, error) {
@@ -217,7 +217,7 @@ func (s *Service) completeFlakeOpening(ctx context.Context, repository *trace.Re
 					return flakes.Decision{}, "", err
 				}
 			}
-			origin := &intake.HandInOrigin{Actor: chiefActor, Reason: flakeHandInReason(o, group)}
+			origin := &intake.HandInOrigin{Actor: managerActor, Reason: flakeHandInReason(o, group)}
 			out, apiErr := s.intake().HandInAs(ctx, api.HandInRequest{Project: repository.Project(), Key: d.Key, Stdin: &text}, origin)
 			if apiErr != nil {
 				switch apiErr.Code {
@@ -304,7 +304,7 @@ func flakeDecisionText(o flakes.Occurrence, group string) (to, reason string) {
 func (s *Service) closeFlakeDestination(ctx context.Context, store *flakes.Store, group string, o flakes.Occurrence, destination string, workstream config.WorkstreamID, archive runtime.Archive) error {
 	by := archivedBy(archive)
 	who := "the owner"
-	if by == api.ArchivedByChief {
+	if by == api.ArchivedByManager {
 		who = "the chief of staff, through archive-on-merge"
 	}
 	note := fmt.Sprintf("closed as moot: workstream %s was archived by %s, which deletes the trace and feed this announcement of the %s decision would be written to", workstream, who, o.Decision.State)
@@ -336,7 +336,7 @@ func (s *Service) announceToOrigin(ctx context.Context, repository *trace.Reposi
 	}
 	if state.Value == "" {
 		to, reason := flakeDecisionText(o, group)
-		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: subject, Revision: 1, Project: repository.Project(), Workstream: origin, At: s.now(), Actor: chiefActor, Cause: flakeFixToolName}
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: subject, Revision: 1, Project: repository.Project(), Workstream: origin, At: s.now(), Actor: managerActor, Cause: flakeFixToolName}
 		tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: "", To: to, Reason: reason}}
 		if _, err := repository.Transact(ctx, tx); err != nil {
 			if !errors.Is(err, trace.ErrConflict) {

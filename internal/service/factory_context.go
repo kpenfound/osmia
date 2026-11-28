@@ -22,7 +22,7 @@ func memberSchema(scope coreadapter.Scope, properties string) json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{` + properties + `},"additionalProperties":false}`)
 }
 
-func chiefMember(r *trace.Repository, scope coreadapter.Scope, named config.WorkstreamID) (*trace.Repository, config.WorkstreamID, string, error) {
+func managerMember(r *trace.Repository, scope coreadapter.Scope, named config.WorkstreamID) (*trace.Repository, config.WorkstreamID, string, error) {
 	own := config.WorkstreamID(scope.Workstream)
 	if named != "" && named != own && scope.Role != trace.Manager {
 		return nil, "", "only the chief of staff names another workstream; omit workstream to read your own", nil
@@ -56,7 +56,7 @@ func factoryContext(r *trace.Repository, scope coreadapter.Scope) coreadapter.To
 			if err := json.Unmarshal(raw, &in); err != nil {
 				return nil, err
 			}
-			target, stream, refusal, err := chiefMember(r, scope, in.Workstream)
+			target, stream, refusal, err := managerMember(r, scope, in.Workstream)
 			if err != nil {
 				return nil, err
 			}

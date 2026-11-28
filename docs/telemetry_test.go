@@ -47,7 +47,7 @@ func TestTelemetryPageListsWhatTheCodeSends(t *testing.T) {
 	)
 	documented(t, "attribute", telemetry.AttributeKeys()...)
 	documented(t, "unit cause", recordspans.UnitCauses...)
-	documented(t, "workstream cause", recordspans.CauseOwner, recordspans.CauseChief, recordspans.CauseService, recordspans.CauseAgent, recordspans.Archived, recordspans.Removed)
+	documented(t, "workstream cause", recordspans.CauseOwner, recordspans.CauseManager, recordspans.CauseService, recordspans.CauseAgent, recordspans.Archived, recordspans.Removed)
 	documented(t, "turn outcome", recordspans.TurnCompleted, recordspans.TurnWaiting, recordspans.TurnFailed, recordspans.TurnCancelled)
 	documented(t, "verification flow outcome", recordspans.FlowFail, recordspans.FlowInconclusive)
 	documented(t, "check kind", recordspans.CheckUnit, recordspans.CheckFinal, recordspans.CheckSession)

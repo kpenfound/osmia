@@ -91,14 +91,14 @@ func TestCrossRepoContractToolRoutesNonHostRequestToProject(t *testing.T) {
 			if !strings.Contains(ask, `"question":"1"`) {
 				t.Fatalf("ask: %s", ask)
 			}
-			chiefScope := claimCrossRepoTurn(t, wg, wg.Project(), g.Members[0], trace.Manager, trace.Manager, "", "chief")
-			chiefTools, err := questions.Tools(wg, trace.Manager, chiefScope, func() time.Time { return start })
+			managerScope := claimCrossRepoTurn(t, wg, wg.Project(), g.Members[0], trace.Manager, trace.Manager, "", "chief")
+			managerTools, err := questions.Tools(wg, trace.Manager, managerScope, func() time.Time { return start })
 			if err != nil {
 				t.Fatal(err)
 			}
-			chiefTools = decided(t, wg, g.Members[0], chiefTools)
+			managerTools = decided(t, wg, g.Members[0], managerTools)
 			input := `{"question":"` + string(crossMember2) + `:1","citations":["spec#1"],"change":"Widen the retry window","reason":"The consumer needs more time"}`
-			route := find(chiefTools, questions.RouteAmendmentTool)
+			route := find(managerTools, questions.RouteAmendmentTool)
 			result := callTool(t, route, input)
 			if !strings.Contains(result, `"project_amendment":"1"`) || !strings.Contains(result, string(g.ID)) {
 				t.Fatalf("contract routing: %s", result)

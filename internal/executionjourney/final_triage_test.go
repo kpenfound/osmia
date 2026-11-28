@@ -58,7 +58,7 @@ func newTriageKit(t *testing.T, key string, provider *jevtest.Provider) *triageK
 	} else {
 		inspect.SetJudge(jevfixture.Answering(now, provider))
 	}
-	scope := intakefixture.ClaimChiefTurn(t, repository, f.Project, stream, now, intakefixture.ChiefTurnInput{
+	scope := intakefixture.ClaimManagerTurn(t, repository, f.Project, stream, now, intakefixture.ManagerTurnInput{
 		Turn: "events_1", Prompt: "The final review is recorded.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-events", Directory: "events",
 	})
 	decide, triage := inspect.DecideTool(repository, scope), inspect.TriageTool(repository, scope)
@@ -180,7 +180,7 @@ func TestFinalReviewTriageAsksJevOncePerBlockingFinding(t *testing.T) {
 	}
 }
 
-func TestFinalReviewTriageThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
+func TestFinalReviewTriageThatIsNotConfidentLeavesTheManagerFree(t *testing.T) {
 	t.Parallel()
 	for name, provider := range map[string]*jevtest.Provider{
 		"below the threshold": {Results: []jevtest.Result{jevfixture.Pick("code", 0.5, "owner"), jevfixture.Pick("code", 0.5, "owner")}},

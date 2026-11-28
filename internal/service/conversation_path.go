@@ -129,7 +129,7 @@ func (p *conversationPath) scan(ctx context.Context, targets map[config.Workgrou
 type conversationTarget struct {
 	repository *trace.Repository
 	controller *reconcile.Controller
-	gate       *chiefGate
+	gate       *managerGate
 	close      func()
 }
 
@@ -148,7 +148,7 @@ func (p *conversationPath) run(ctx context.Context) (err error) {
 		if err != nil {
 			cancel()
 		}
-		defer p.s.chief.drop(p)
+		defer p.s.manager.drop(p)
 		for _, t := range targets {
 			t.controller.Drain()
 		}
@@ -205,7 +205,7 @@ func (p *conversationPath) target(repository *trace.Repository, closeTarget func
 	if repository != p.repository {
 		options.Workstreams = func() ([]config.WorkstreamID, error) { return p.streams(repository) }
 	}
-	gate := s.chief.gate(p, repository.Project())
+	gate := s.manager.gate(p, repository.Project())
 	hold := options.Hold
 	options.Hold = func(stream config.WorkstreamID, op coreadapter.Operation) bool {
 		return (hold != nil && hold(stream, op)) || p.holds(gate, repository, stream, op)
@@ -331,7 +331,7 @@ func pendingConversation(records []trace.OperationRecord, th trace.Thread, befor
 	return len(pending) > 0
 }
 
-func (p *conversationPath) holds(gate *chiefGate, repository *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation) bool {
+func (p *conversationPath) holds(gate *managerGate, repository *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation) bool {
 	if !conversationOperation(op) || (repository != p.repository && !p.leads(repository)) {
 		return true
 	}

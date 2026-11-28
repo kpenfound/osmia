@@ -41,7 +41,7 @@ func (f *publisherFixture) escalate(stream config.WorkstreamID, id, text string,
 	mason := trace.Actor{Kind: "agent", ID: "mason"}
 	e := &trace.Escalation{Batch: "escalation_" + id, Inbox: 1, Questions: []string{id}, Section: "spec.md: Upload limits", Conflict: "The spec caps uploads at 10 MiB but the plan streams without a cap.",
 		Blocked: "The unit waits on the ruling.", Options: []string{"Cap at 10 MiB", "Stream without a cap"}, Recommendation: "Cap at 10 MiB"}
-	fixturekit.Must(f.t, f.repo.Append(context.Background(), trace.Question{Header: f.header("osmia.trace.question", id, 2, stream, when, chiefActor), AskedBy: mason, Thread: "thread", Turn: "turn-" + id, Question: text, SentToOwner: "Should uploads be capped?", Escalation: e}))
+	fixturekit.Must(f.t, f.repo.Append(context.Background(), trace.Question{Header: f.header("osmia.trace.question", id, 2, stream, when, managerActor), AskedBy: mason, Thread: "thread", Turn: "turn-" + id, Question: text, SentToOwner: "Should uploads be capped?", Escalation: e}))
 }
 
 func (f *publisherFixture) ruling(stream config.WorkstreamID, id string, revision int, r trace.Ruling, when time.Time, actor trace.Actor) {
@@ -73,7 +73,7 @@ func rejectedOf(p fixturekit.HooksPost) []string {
 	return out
 }
 
-func TestPublishOwnerRulingIsAnOwnerDecisionAndTheChiefsRelayIsNot(t *testing.T) {
+func TestPublishOwnerRulingIsAnOwnerDecisionAndTheManagersRelayIsNot(t *testing.T) {
 	f := newPublisherFixture(t)
 	stream := fixturekit.Stream
 	f.ask(stream, "1", "Is the upload cap 10 MiB or unbounded?", hr(1))
@@ -83,7 +83,7 @@ func TestPublishOwnerRulingIsAnOwnerDecisionAndTheChiefsRelayIsNot(t *testing.T)
 	f.pass()
 
 	const relayed = "RELAYED-TO-THE-ASKERS"
-	f.ruling(stream, "1", 2, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Cap uploads at 10 MiB.", ReturnedAnswer: relayed, Scope: trace.ScopeLocal}, hr(4), chiefActor)
+	f.ruling(stream, "1", 2, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Cap uploads at 10 MiB.", ReturnedAnswer: relayed, Scope: trace.ScopeLocal}, hr(4), managerActor)
 	posts, _ := f.pass()
 	if len(posts) != 0 {
 		t.Fatalf("the relay of the ruling posted %v", kinds(posts))
@@ -129,16 +129,16 @@ func TestPublishOwnerRulingIsAnOwnerDecisionAndTheChiefsRelayIsNot(t *testing.T)
 	}
 }
 
-func TestPublishChiefAnswersAreDecisionsUnlessTheyCiteCode(t *testing.T) {
+func TestPublishManagerAnswersAreDecisionsUnlessTheyCiteCode(t *testing.T) {
 	f := newPublisherFixture(t)
 	stream := fixturekit.Stream
 	for i, text := range []string{"Is resume in scope?", "Which function retries?", "Does the cap apply to retries?"} {
 		id := fmt.Sprint(i + 1)
 		f.ask(stream, id, text, hr(1+i))
 	}
-	f.ruling(stream, "1", 1, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "Resume is in scope.", Citations: []string{"spec#1", "charter#1"}}, hr(5), chiefActor)
-	f.ruling(stream, "2", 1, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "CODE-ANSWER retry lives in client.go.", Citations: []string{"inspection#inspection-abc"}}, hr(6), chiefActor)
-	f.ruling(stream, "3", 1, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "MIXED-ANSWER the cap applies.", Citations: []string{"spec#1", "inspection#inspection-def"}}, hr(7), chiefActor)
+	f.ruling(stream, "1", 1, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "Resume is in scope.", Citations: []string{"spec#1", "charter#1"}}, hr(5), managerActor)
+	f.ruling(stream, "2", 1, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "CODE-ANSWER retry lives in client.go.", Citations: []string{"inspection#inspection-abc"}}, hr(6), managerActor)
+	f.ruling(stream, "3", 1, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "MIXED-ANSWER the cap applies.", Citations: []string{"spec#1", "inspection#inspection-def"}}, hr(7), managerActor)
 
 	posts, _ := f.pass()
 	got := fixturekit.Decisions(posts)
@@ -159,12 +159,12 @@ func TestPublishChiefAnswersAreDecisionsUnlessTheyCiteCode(t *testing.T) {
 	}
 }
 
-func TestPublishLoggedAssumptionIsAnInferredChiefDecision(t *testing.T) {
+func TestPublishLoggedAssumptionIsAnInferredManagerDecision(t *testing.T) {
 	f := newPublisherFixture(t)
 	stream := fixturekit.Stream
 	f.recordSeal(stream, 1, "# Upload limits\n\nCap uploads.\n")
 	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":"Treat the 10 MiB cap as inclusive.","actor":{"kind":"agent","id":"chief_of_staff"},"thread":"chief","turn":"t1","at":%q}]}`, string(stream), hr(2).Format(time.RFC3339))
-	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(2), chiefActor)
+	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(2), managerActor)
 
 	posts, _ := f.pass()
 	got := fixturekit.Decisions(posts)
@@ -192,9 +192,9 @@ func TestPublishCharterProposalOutcomesAreOwnerDecisions(t *testing.T) {
 		fixturekit.Must(t, err)
 		return string(data)
 	}
-	f.document(stream, trace.CharterProposalID("1"), 1, trace.CharterProposalPath("1"), proposal("1", "Uploads resume after a restart.", "", "", 0), hr(1), chiefActor)
-	f.document(stream, trace.CharterProposalID("2"), 1, trace.CharterProposalPath("2"), proposal("2", "Never cap uploads.", "", "", 0), hr(1), chiefActor)
-	f.document(stream, trace.CharterProposalID("3"), 1, trace.CharterProposalPath("3"), proposal("3", "Still waiting.", "", "", 0), hr(1), chiefActor)
+	f.document(stream, trace.CharterProposalID("1"), 1, trace.CharterProposalPath("1"), proposal("1", "Uploads resume after a restart.", "", "", 0), hr(1), managerActor)
+	f.document(stream, trace.CharterProposalID("2"), 1, trace.CharterProposalPath("2"), proposal("2", "Never cap uploads.", "", "", 0), hr(1), managerActor)
+	f.document(stream, trace.CharterProposalID("3"), 1, trace.CharterProposalPath("3"), proposal("3", "Still waiting.", "", "", 0), hr(1), managerActor)
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	f.document(stream, trace.CharterProposalID("1"), 2, trace.CharterProposalPath("1"), proposal("1", "Uploads resume after a restart.", trace.CharterRatify, "Yes, state it as a rule.", 0), hr(2), owner)
 	f.document(stream, trace.CharterProposalID("2"), 2, trace.CharterProposalPath("2"), proposal("2", "Never cap uploads.", trace.CharterDecline, "Too broad.", 0), hr(2), owner)
@@ -219,7 +219,7 @@ func TestPublishCharterProposalOutcomesAreOwnerDecisions(t *testing.T) {
 	if !strings.HasPrefix(declined.Str("outcome"), "Declined") || !strings.Contains(declined.Str("outcome"), "Never cap uploads.") || !strings.Contains(declined.Str("rationale"), "Too broad.") {
 		t.Fatalf("declined: %s", declined.Raw)
 	}
-	f.document(stream, trace.CharterProposalID("1"), 3, trace.CharterProposalPath("1"), proposal("1", "Uploads resume after a restart.", trace.CharterRatify, "Yes, state it as a rule.", 4), hr(3), chiefActor)
+	f.document(stream, trace.CharterProposalID("1"), 3, trace.CharterProposalPath("1"), proposal("1", "Uploads resume after a restart.", trace.CharterRatify, "Yes, state it as a rule.", 4), hr(3), managerActor)
 	if again, _ := f.pass(); len(again) != 0 {
 		t.Fatalf("chartering the rule reposted %v", kinds(again))
 	}
@@ -248,7 +248,7 @@ func TestPublishAmendmentDecisionsRouteByWhoDecided(t *testing.T) {
 	f.amendmentDecision(stream, "1", 1, "round", "ROUND-NOTE one more debate round", hr(3), owner)
 	f.amendmentDecision(stream, "1", 2, "approve", "Go ahead.", hr(4), owner)
 	f.amendment(stream, "2", []string{"plan#upload"}, "Split the upload unit.", "It is too large.", "", hr(5))
-	f.amendmentDecision(stream, "2", 1, "approve", "The revised assignments still fulfil the spec.", hr(6), chiefActor)
+	f.amendmentDecision(stream, "2", 1, "approve", "The revised assignments still fulfil the spec.", hr(6), managerActor)
 	f.amendment(stream, "3", []string{"spec#1"}, "Allow 50 MiB uploads.", "More headroom.", "", hr(7))
 	f.amendmentDecision(stream, "3", 1, "approve", "Agreed.", hr(8), owner)
 	f.amendment(stream, "4", []string{"spec#2"}, "UNDECIDED-REQUEST change", "no decision yet", "", hr(9))
@@ -309,7 +309,7 @@ func publishScopeCalls(t *testing.T) *scopePublication {
 	record := func(id string, revision int, disposition, reason, unit string, when time.Time) {
 		data, err := json.Marshal(workDiscovery{ID: id, Description: "Handle empty uploads", Criterion: "spec#1", Disposition: disposition, Unit: unit, Reason: reason})
 		fixturekit.Must(t, err)
-		f.document(stream, id, revision, "discoveries/"+id+".json", string(data), when, chiefActor)
+		f.document(stream, id, revision, "discoveries/"+id+".json", string(data), when, managerActor)
 	}
 	record(scopeDiscovery(1), 1, "open", "", "", hr(1))
 	record(scopeDiscovery(1), 2, "declined", "Outside the approved intent.", "", hr(2))
@@ -328,7 +328,7 @@ func publishScopeCalls(t *testing.T) *scopePublication {
 	return &scopePublication{f: f, stream: stream, posts: posts}
 }
 
-func TestPublishPostsADeclinedAndADeferredDiscoveryAsChiefOfStaffScopeCalls(t *testing.T) {
+func TestPublishPostsADeclinedAndADeferredDiscoveryAsManagerScopeCalls(t *testing.T) {
 	p := publishScopeCalls(t)
 	declined := decisionOf(t, p.posts, string(p.stream)+"-discovery-"+shortHash(scopeDiscovery(1))+"-2")
 	deferred := decisionOf(t, p.posts, string(p.stream)+"-discovery-"+shortHash(scopeDiscovery(1))+"-3")
@@ -358,7 +358,7 @@ func TestPublishPostsAnAcceptedBlockingFindingAsTheOwnersDecision(t *testing.T) 
 	}
 }
 
-func TestPublishPostsAFinalReviewFollowUpAsAChiefOfStaffDecision(t *testing.T) {
+func TestPublishPostsAFinalReviewFollowUpAsAManagerDecision(t *testing.T) {
 	p := publishScopeCalls(t)
 	later := decisionOf(t, p.posts, string(p.stream)+"-followup-final-1")
 	if later.Source != "osmia-work" || later.Str("author") != "" || later.Str("decider") != "chief_of_staff" || !strings.Contains(later.Str("context"), "Resume is not tested after a restart") || later.Str("rationale") == "" {
@@ -389,9 +389,9 @@ func TestPublishDecisionsWaitForAnOutageAndAreNotRepeated(t *testing.T) {
 	f := newPublisherFixture(t)
 	stream := fixturekit.Stream
 	f.ask(stream, "1", "Is the cap per file?", hr(1))
-	f.ruling(stream, "1", 1, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "Per file.", Citations: []string{"spec#1"}}, hr(2), chiefActor)
+	f.ruling(stream, "1", 1, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "Per file.", Citations: []string{"spec#1"}}, hr(2), managerActor)
 	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":"Count bytes, not characters.","actor":{"kind":"agent","id":"chief_of_staff"},"thread":"chief","turn":"t1","at":%q}]}`, string(stream), hr(3).Format(time.RFC3339))
-	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(3), chiefActor)
+	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(3), managerActor)
 
 	f.hooks.SetStatus(http.StatusServiceUnavailable)
 	res, err := f.s.publishPass(context.Background(), f.repo, f.s.current())

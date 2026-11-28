@@ -341,7 +341,7 @@ func runVerificationJourney(t *testing.T, enabled bool) {
 	masons.Mu.Unlock()
 
 	f.Engine.Mu.Lock()
-	chief := f.Engine.Turns["*"]
+	manager := f.Engine.Turns["*"]
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, intake.MasonAgent("resume")+"-revise-"):
@@ -353,7 +353,7 @@ func runVerificationJourney(t *testing.T, enabled bool) {
 		case strings.HasPrefix(req.Name, "final-"):
 			return finalSweep(ctx, req, tools, enabled, lever, problems)
 		}
-		return chief(ctx, req, turn, tools)
+		return manager(ctx, req, turn, tools)
 	}
 	f.Engine.Mu.Unlock()
 

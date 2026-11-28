@@ -28,8 +28,8 @@ var dedupeReport = "skip acknowledged chunks"
 func newLandingFixture(t *testing.T, drafted string) (*journey.ShedFixture, *intakefixture.FakeMasons) {
 	t.Helper()
 	f, masons := journey.NewMasonFixture(t, 1, drafted)
-	chief := &intakefixture.Chief{P: &intakefixture.Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
-	intakefixture.ScriptLanding(f.Engine, masons, execution.MasonTurnID, chief.Turn)
+	manager := &intakefixture.Manager{P: &intakefixture.Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
+	intakefixture.ScriptLanding(f.Engine, masons, execution.MasonTurnID, manager.Turn)
 	return f, masons
 }
 

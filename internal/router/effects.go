@@ -25,7 +25,7 @@ type Plan struct {
 
 // Effect is what entering a target records beyond the transition itself, in the
 // same commit: documents (a move record, an approval record, a fresh review
-// request), events for the outbox (notices to the chief of staff, the
+// request), events for the outbox (notices to the manager, the
 // mason's fresh allowance) and transactions of other subjects of the
 // workstream.
 type Effect struct {
@@ -45,7 +45,7 @@ type EffectFunc func(ctx context.Context, p Plan) (Effect, error)
 
 // Effects is the registry of per-target side effects. Each target of each
 // machine has its effect defined once, here, whoever raises the exit: a
-// default, a Jev pick, a chief proposal, an owner decision and an owner card
+// default, a Jev pick, a manager proposal, an owner decision and an owner card
 // all enter the target through it.
 type Effects struct {
 	mu    sync.RWMutex

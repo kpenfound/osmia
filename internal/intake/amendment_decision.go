@@ -226,7 +226,7 @@ func (s *Controller) RecordAmendmentDecision(ctx context.Context, project config
 // RecordAmendmentDecisionBy is RecordAmendmentDecision with the Jev judgment
 // the decision comes from: a non-empty judgment is Jev deciding an owner gate,
 // as the Jev actor, and the decision names the judgment. It is held to the
-// owner's rules, not the chief of staff's delegated authority.
+// owner's rules, not the manager's delegated authority.
 func (s *Controller) RecordAmendmentDecisionBy(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, id string, req AmendmentDecisionRequest, actor trace.Actor, cause, judgment string) (AmendmentResponse, *APIError) {
 	if judgment != "" && actor != trace.JevActor || judgment == "" && actor == trace.JevActor {
 		return AmendmentResponse{}, &APIError{Code: Validation, Message: "a Jev decision is written by Jev and names its judgment"}
@@ -413,21 +413,21 @@ func (s *Controller) withdrawAmendment(ctx context.Context, project config.Proje
 }
 
 // DecideAmendmentTool records a decision on an amendment that the
-// owner gave the chief of staff in a message.
+// owner gave the manager in a message.
 const DecideAmendmentTool = "decide_amendment"
 
-// AmendmentGuidance tells the chief of staff when and how to use
+// AmendmentGuidance tells the manager when and how to use
 // decide_amendment. It belongs in the system prompt of every owner message
 // turn.
 const AmendmentGuidance = "## Amendments\nWhen the owner's message decides an amendment you presented, call decide_amendment with the amendment's number, the packet revision you presented, the owner's decision and the owner's own words as the note. " +
 	"The decisions are approve, reject, round for one more bounded debate round, and overrule to approve over the objections that still stand. withdraw ends an amendment that was never presented, whose drafting or debate cannot finish or no longer should; it is your own decision, needs no packet and no decide call, and takes your reason as the note. For a plan-only revision preserving approved intent, call decide with kind plan-amendment and the amendment's number as subject first: Jev decides whether it is approved or declined. When Jev's decision is binding, decide_amendment records only the outcome it picked (approve, or reject to decline), with your note; otherwise decide it yourself. Call decide_amendment with owner_decided false and explain why the revised assignments still fulfill the spec; it refuses a plan-only revision decide has not been called for. Investigate engineering disagreements and discovered work internally. Spec changes and charter exceptions require an owner decision; use owner_decided true only to relay the decision in this owner message."
 
 // DecideAmendment returns the decide_amendment tool of one claimed
-// chief-of-staff turn. It records the same decision as POST
+// manager turn. It records the same decision as POST
 // /amendment/<workstream>/<n> on the turn's workstream. Delegated engineering
-// decisions identify the chief; relayed decisions identify the owner. A refusal is an
+// decisions identify the manager; relayed decisions identify the owner. A refusal is an
 // ordinary result, {"recorded":false,"reason":...}, and records nothing. A
-// shared chief of staff names the member whose amendment it decides.
+// shared manager names the member whose amendment it decides.
 func (c *Controls) DecideAmendment(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: DecideAmendmentTool, Effect: coreadapter.ToolMemory,
 		Description: "Decide a plan-only engineering revision that preserves approved intent, with a reason. Set owner_decided true only to relay an explicit owner decision on this turn; spec changes require it. amendment: its number; packet: the presented packet revision; decision: approve, reject, round (one more bounded debate round), overrule (approve over the objections that stand) or withdraw; note: engineering reasoning, or the owner's words when relaying an owner decision. " +
@@ -521,10 +521,10 @@ func (c *Controls) DecideAmendment(repository *trace.Repository, scope coreadapt
 	return tool
 }
 
-// PlanAmendmentSubject says why the chief of staff may not decide the
+// PlanAmendmentSubject says why the manager may not decide the
 // amendment id with Jev today, or "". An amendment that changes the approved
 // intent is the owner's, as is one with an objection that blocks it or that
-// final reviews or merged work put beyond the chief of staff's authority. It
+// final reviews or merged work put beyond the manager's authority. It
 // is decided once, while presented against the sealed spec and plan in force.
 func (s *Controller) PlanAmendmentSubject(repository *trace.Repository, stream config.WorkstreamID, id string) (string, error) {
 	feature, err := repository.Workflow(stream, trace.FeatureSubject)
@@ -808,7 +808,7 @@ func (a AmendmentDebate) Rule(ctx context.Context, stream config.WorkstreamID, r
 
 // DeliverRuling queues the ruling as the next turn of the requester's thread
 // unless the thread holds it already. The turn carries the system prompt of
-// the turn that asked for the amendment, or asked the question the chief of
+// the turn that asked for the amendment, or asked the question the manager of
 // staff routed as one, and the profile the requester's role is bound to now.
 // A requester the trace holds no thread for is sent nothing, and neither is
 // a drift mason: its thread takes turns for a drift rebase's conflicts

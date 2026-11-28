@@ -76,7 +76,7 @@ func startConversation(t *testing.T) (string, *service.Service) {
 	return opts.Config.Root, s
 }
 
-func TestSendQueuesAMessageForTheChiefOfStaff(t *testing.T) {
+func TestSendQueuesAMessageForTheManager(t *testing.T) {
 	root, _ := startConversation(t)
 	var sent wire.ConversationEntry
 	must(t, json.Unmarshal([]byte(successful(t, root, "send", stream, "Start with uploads.", "--json")), &sent))
@@ -105,7 +105,7 @@ func answeredConversation(t *testing.T, root string) (sent wire.ConversationEntr
 	return sent, list
 }
 
-func TestConversationJSONHoldsTheMessageAndTheChiefsResponse(t *testing.T) {
+func TestConversationJSONHoldsTheMessageAndTheManagersResponse(t *testing.T) {
 	root, _ := startConversation(t)
 	sent, list := answeredConversation(t, root)
 	answered := list.Entries[1].At

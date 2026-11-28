@@ -10,7 +10,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestChiefControlsAnotherProjectAndRecordsTheTarget(t *testing.T) {
+func TestManagerControlsAnotherProjectAndRecordsTheTarget(t *testing.T) {
 	t.Parallel()
 	f := newTwoProjectFixture(t)
 	f.opts.Threads = nil

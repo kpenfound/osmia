@@ -106,7 +106,7 @@ func TestUnitStateSpansCarryTheCauseAndNextState(t *testing.T) {
 }
 
 func TestUnitCauseIsFromTheBoundedVocabulary(t *testing.T) {
-	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
+	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
 	rebase := func(from, to string) trace.Transition {
 		return trace.Transition{Header: trace.Header{Actor: service, Cause: "unit-u1-rebase-3-conflicted"}, From: from, To: to}
 	}
@@ -126,9 +126,9 @@ func TestUnitCauseIsFromTheBoundedVocabulary(t *testing.T) {
 		{trace.Transition{Header: trace.Header{Actor: checks}, From: "checking", To: "contested"}, CauseChecksIncomplete},
 		{trace.Transition{Header: trace.Header{Actor: review}, From: "reviewing", To: "contested"}, CauseReviewContested},
 		{trace.Transition{Header: trace.Header{Actor: mason}, From: "implementing", To: "contested"}, CauseContested},
-		{trace.Transition{Header: trace.Header{Actor: chief}, From: "contested", To: "implementing"}, CauseContestRuled},
+		{trace.Transition{Header: trace.Header{Actor: manager}, From: "contested", To: "implementing"}, CauseContestRuled},
 		{trace.Transition{Header: trace.Header{Actor: owner}, From: "contested", To: "reviewing"}, CauseContestRuled},
-		{trace.Transition{Header: trace.Header{Actor: chief}, From: "implementing", To: "approved"}, CauseMoved},
+		{trace.Transition{Header: trace.Header{Actor: manager}, From: "implementing", To: "approved"}, CauseMoved},
 		{trace.Transition{Header: trace.Header{Actor: service}, From: "approved", To: "merged"}, CauseLanded},
 		{trace.Transition{Header: trace.Header{Actor: service}, From: "implementing", To: "waiting"}, CauseAmendmentWait},
 		{trace.Transition{Header: trace.Header{Actor: service}, From: "waiting", To: "implementing"}, CauseAmendmentResolved},

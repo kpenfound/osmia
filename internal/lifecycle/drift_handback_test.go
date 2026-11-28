@@ -35,7 +35,7 @@ func holdDrift(t *testing.T, f *journey.ShedFixture, d journey.Drifter, stream c
 	}
 }
 
-func TestChiefOfStaffHandsAHeldDriftRebaseBack(t *testing.T) {
+func TestManagerHandsAHeldDriftRebaseBack(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, _ := journey.NewFinalFixtureWith(t, "drift-handback", "")
 	f.S.Cfg.Shed.MaxBounces = 1
@@ -96,7 +96,7 @@ func TestChiefOfStaffHandsAHeldDriftRebaseBack(t *testing.T) {
 	if k, err := fm.DriftDriver().AskDrift(ctx, stream, f.S.Now()); err != nil || k != 5 {
 		t.Fatalf("the owner's request answers drift rebase %d: %v", k, err)
 	}
-	if n, err := lifecycle.ChiefHandbacks(repository, stream); err != nil || n != 0 {
+	if n, err := lifecycle.ManagerHandbacks(repository, stream); err != nil || n != 0 {
 		t.Fatalf("chief handbacks after the owner's request: %d %v", n, err)
 	}
 }

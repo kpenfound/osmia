@@ -16,7 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// BriefToolName is the chief-only service tool that records a delivery brief.
+// BriefToolName is the manager-only service tool that records a delivery brief.
 const BriefToolName = "record_delivery_brief"
 
 // The limits of a delivery brief. The main text and the items are counted in
@@ -27,7 +27,7 @@ const (
 	MaxBriefScreenshots = 3
 )
 
-// NoBriefRecorded is what the delivery entry and card say when the chief of
+// NoBriefRecorded is what the delivery entry and card say when the manager of
 // staff's turn for a final review's notice ended without recording a brief.
 const NoBriefRecorded = api.NoBriefRecorded
 
@@ -141,7 +141,7 @@ type BriefInput struct {
 	Text           string
 	BeforeYouShip  []string
 	Screenshots    []string
-	// Turn is the chief-of-staff turn that made the call.
+	// Turn is the manager turn that made the call.
 	Turn string
 }
 
@@ -266,7 +266,7 @@ func (s *Controller) RecordBrief(ctx context.Context, repository *trace.Reposito
 		if err != nil {
 			return Brief{}, 0, "", err
 		}
-		doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: BriefDocument(brief.Review), Revision: revision, Project: repository.Project(), Workstream: stream, At: s.Now(), Actor: chiefActor, Cause: in.Turn}, Path: BriefPath(brief.Review), Content: string(content) + "\n"}
+		doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: BriefDocument(brief.Review), Revision: revision, Project: repository.Project(), Workstream: stream, At: s.Now(), Actor: managerActor, Cause: in.Turn}, Path: BriefPath(brief.Review), Content: string(content) + "\n"}
 		err = repository.RecordDocuments(ctx, []trace.Document{doc})
 		if errors.Is(err, trace.ErrConflict) && attempt < 3 {
 			continue
@@ -276,7 +276,7 @@ func (s *Controller) RecordBrief(ctx context.Context, repository *trace.Reposito
 }
 
 func (s *Controller) briefWaiting(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, k int) (bool, error) {
-	if s.ChiefThread == nil {
+	if s.ManagerThread == nil {
 		return false, nil
 	}
 	transition, _ := FinalReviewIDs(k)
@@ -289,11 +289,11 @@ func (s *Controller) briefWaiting(ctx context.Context, repository *trace.Reposit
 		if e.Event.ID != id {
 			continue
 		}
-		chief, runnable, err := s.ChiefThread(ctx, repository, stream)
+		manager, runnable, err := s.ManagerThread(ctx, repository, stream)
 		if err != nil || !runnable {
 			return false, err
 		}
-		return !events.Handled(e, chief), nil
+		return !events.Handled(e, manager), nil
 	}
 	return false, nil
 }

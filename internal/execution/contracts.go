@@ -41,7 +41,7 @@ const driftsDirectory = intake.DriftsDirectory
 
 type APIError = api.APIError
 type CheckSelection = api.CheckSelection
-type ManagerContestDecision = api.ChiefContestDecision
+type ManagerContestDecision = api.ManagerContestDecision
 type Code = api.Code
 type ContestedRuling = api.ContestedRuling
 type ContestedRulingRequest = api.ContestedRulingRequest
@@ -64,7 +64,7 @@ type streamWorkspaces = intake.StreamWorkspaces
 var abandonActor = intake.AbandonActor
 var abandoned = intake.Abandoned
 var askedBy = intake.AskedBy
-var managerActor = intake.ChiefActor
+var managerActor = intake.ManagerActor
 var errChangeBoundary = intake.ErrChangeBoundary
 var featureBranch = intake.FeatureBranch
 var featureState = intake.FeatureState

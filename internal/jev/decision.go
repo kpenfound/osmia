@@ -22,7 +22,7 @@ import (
 type DecisionKind string
 
 // The decision kinds: the owner gates Jev decides, the owner's own decisions
-// Jev decides at the owner threshold, and the chief of staff's decisions.
+// Jev decides at the owner threshold, and the manager's decisions.
 const (
 	KindRatification       DecisionKind = "ratification"
 	KindIntentAmendment    DecisionKind = "intent-amendment"
@@ -196,14 +196,14 @@ type DecisionRequest struct {
 	// workstream.
 	Scope coreadapter.Scope
 	// Cause is the trace record that asked, such as the gate's record or the
-	// chief's turn request.
+	// manager's turn request.
 	Cause string
 	Depth int
 	Kind  DecisionKind
 	// Occurrence is the subject occurrence's key, built with the key
 	// functions of this package.
 	Occurrence string
-	// State is what the card, packet or chief summary shows.
+	// State is what the card, packet or manager summary shows.
 	State   string
 	Options []DecisionOption
 	Sources []Source

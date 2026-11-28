@@ -26,7 +26,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestChiefDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
+func TestManagerDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name, spec string
@@ -36,7 +36,7 @@ func TestChiefDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
 			f, stream := builtForAmendment(t, 1)
 			defer f.stop(t)
 			requester := presentAmendment(t, f, stream, masonRole, tc.spec, intakefixture.RestartPlan)
-			out, api := f.s.intake().RecordAmendmentDecision(context.Background(), f.project, stream, f.repository(), "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: 1, Note: "The revised verification preserves the approved upload outcome."}, chiefActor, "engineering-decision")
+			out, api := f.s.intake().RecordAmendmentDecision(context.Background(), f.project, stream, f.repository(), "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: 1, Note: "The revised verification preserves the approved upload outcome."}, managerActor, "engineering-decision")
 			if tc.allowed {
 				if api != nil {
 					t.Fatal(api.Message)
@@ -310,7 +310,7 @@ func TestFactoryContextListsFolders(t *testing.T) {
 	c := newContestFixture(t, "factory-folders")
 	var recorded []trace.Document
 	for _, id := range []string{"discovery-a", "discovery-b"} {
-		recorded = append(recorded, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: c.repo.Project(), Workstream: c.stream, At: c.f.clock.Now(), Actor: chiefActor, Cause: "fixture"}, Path: "discoveries/" + id + ".json", Content: "{}"})
+		recorded = append(recorded, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: c.repo.Project(), Workstream: c.stream, At: c.f.clock.Now(), Actor: managerActor, Cause: "fixture"}, Path: "discoveries/" + id + ".json", Content: "{}"})
 	}
 	fixturekit.Must(t, c.repo.RecordDocuments(context.Background(), recorded))
 	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.Manager, Thread: trace.Manager, Turn: "events_1"}
@@ -371,7 +371,7 @@ func TestFactoryContextReadsCompleteCheckOutput(t *testing.T) {
 	}
 }
 
-func TestChiefInspectsMasonCandidateAndCommissionsWork(t *testing.T) {
+func TestManagerInspectsMasonCandidateAndCommissionsWork(t *testing.T) {
 	t.Parallel()
 	c := newContestFixture(t, "chief-engineering-tools")
 	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.Manager, Thread: trace.Manager, Turn: "events_1"}
@@ -425,7 +425,7 @@ func TestChiefInspectsMasonCandidateAndCommissionsWork(t *testing.T) {
 	t.Fatal("chief lacks replanning tool")
 }
 
-func TestChiefRecoveryCannotApproveItsOwnCandidate(t *testing.T) {
+func TestManagerRecoveryCannotApproveItsOwnCandidate(t *testing.T) {
 	t.Parallel()
 	m := newMoveFixture(t, "independent-review")
 	out := intakefixture.Handle(t, m.move, `{"unit":"resume","to":"approved","note":"The change appears correct"}`)

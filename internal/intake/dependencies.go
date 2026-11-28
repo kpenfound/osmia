@@ -38,16 +38,16 @@ type Dependencies struct {
 	RecoveryEntries      func(repository *trace.Repository, w trace.WorkstreamStatus) ([]InboxEntry, error)
 	ChangeHeld           func(repo *trace.Repository, stream config.WorkstreamID) (bool, error)
 	ChangeRepositoryHeld func(repo *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation) (bool, error)
-	ChiefContext         func(ctx context.Context, provider bundle.Provider, repository *trace.Repository, closeRepository func(), project config.ProjectID, stream config.WorkstreamID) (string, error)
-	ChiefOverride        func(cfg *config.Config) (string, coreadapter.Profile, error)
+	ManagerContext       func(ctx context.Context, provider bundle.Provider, repository *trace.Repository, closeRepository func(), project config.ProjectID, stream config.WorkstreamID) (string, error)
+	ManagerOverride      func(cfg *config.Config) (string, coreadapter.Profile, error)
 	// DesignerOverride reads the profile a design turn runs on: the designer
 	// role's own, never the manager's.
-	DesignerOverride func(cfg *config.Config) (string, coreadapter.Profile, error)
-	ChiefRepository  func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host config.WorkstreamID, bundleStream config.WorkstreamID, close func(), err error)
-	// ChiefRepositoryForRead is ChiefRepository for reading the chief of
+	DesignerOverride  func(cfg *config.Config) (string, coreadapter.Profile, error)
+	ManagerRepository func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host config.WorkstreamID, bundleStream config.WorkstreamID, close func(), err error)
+	// ManagerRepositoryForRead is ManagerRepository for reading the manager of
 	// staff's thread; it needs no live member to supply context.
-	ChiefRepositoryForRead func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host config.WorkstreamID, bundleStream config.WorkstreamID, close func(), err error)
-	ContestedEntry         func(repository *trace.Repository, stream config.WorkstreamID, unit string) (InboxEntry, bool, error)
+	ManagerRepositoryForRead func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host config.WorkstreamID, bundleStream config.WorkstreamID, close func(), err error)
+	ContestedEntry           func(repository *trace.Repository, stream config.WorkstreamID, unit string) (InboxEntry, bool, error)
 	// ContestedGate returns the gate of the contested unit's open card when Jev
 	// may decide it, or nil. A card whose unit carries a binding Jev judgment
 	// the service could not carry out returns that judgment instead.
@@ -106,7 +106,7 @@ type Dependencies struct {
 	TrackTurn             func(config.WorkstreamID, context.CancelFunc) func()
 	Options               Execution
 	// Router applies the workstream's gate decisions as pinned moves, routes
-	// the exits Jev judges and routes the chief of staff's decision on a
+	// the exits Jev judges and routes the manager's decision on a
 	// committee objection. A pass hands its exits to the router's worker.
 	Router router.Port
 

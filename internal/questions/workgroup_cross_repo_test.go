@@ -143,14 +143,14 @@ func TestCrossRepoRouteAmendmentToolLandsOnAskingMemberAndResumes(t *testing.T) 
 		t.Fatalf("ask result: %s", askResult)
 	}
 
-	chiefScope := claimCrossRepoTurn(t, wg, wg.Project(), host, trace.Manager, trace.Manager, "", "chief1")
-	chiefTools, err := questions.Tools(wg, trace.Manager, chiefScope, func() time.Time { return start })
+	managerScope := claimCrossRepoTurn(t, wg, wg.Project(), host, trace.Manager, trace.Manager, "", "chief1")
+	managerTools, err := questions.Tools(wg, trace.Manager, managerScope, func() time.Time { return start })
 	if err != nil {
 		t.Fatal(err)
 	}
-	chiefTools = decided(t, wg, host, chiefTools)
+	managerTools = decided(t, wg, host, managerTools)
 	var routeTool coreadapter.Tool
-	for _, tool := range chiefTools {
+	for _, tool := range managerTools {
 		if tool.Name == questions.RouteAmendmentTool {
 			routeTool = tool
 		}

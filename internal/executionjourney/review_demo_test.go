@@ -29,7 +29,7 @@ import (
 func TestExactReviewDemonstration(t *testing.T) {
 	t.Parallel()
 	p := &intakefixture.Faults{}
-	f, masons, chief := newAskingMasonFixture(t, 1, intakefixture.IndependentPlan, p)
+	f, masons, manager := newAskingMasonFixture(t, 1, intakefixture.IndependentPlan, p)
 	defer f.Stop(t)
 	masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Initial candidate")
 
@@ -104,7 +104,7 @@ func TestExactReviewDemonstration(t *testing.T) {
 			}
 			return &agent.Result{ClaudeID: req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 		}
-		return chief.Turn(ctx, req, turn, tools)
+		return manager.Turn(ctx, req, turn, tools)
 	}
 	f.Engine.Mu.Unlock()
 	f.Answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {

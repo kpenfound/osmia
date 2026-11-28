@@ -104,7 +104,7 @@ const (
 )
 
 // BlockingFinding is one thing that stops a reviewed report from authorising
-// delivery on its own, named so the chief of staff can triage it: a sealed
+// delivery on its own, named so the manager can triage it: a sealed
 // criterion no merged unit serves, or a finding the reader called blocking.
 type BlockingFinding struct {
 	// ID names the finding within its final review: "gap-<criterion>" for an
@@ -660,7 +660,7 @@ func (a *FinalReviewer) Inspect(ctx context.Context, op coreadapter.Operation) (
 // the charter in a read-only view and records evidence or a gap for every
 // sealed criterion.
 // One commit records final/report.json with the review's move to reviewed or
-// failed and a notice for the chief of staff. A review whose inputs changed,
+// failed and a notice for the manager. A review whose inputs changed,
 // whose replay conflicted, or whose reader recorded no report fails with the
 // reason in its report. Storage, fetch and Git errors, a missing committee
 // runner and a pause covering the workstream leave the operation pending for
@@ -1374,7 +1374,7 @@ func (a *FinalReviewer) Stage(ctx context.Context, cfg *config.Config, stream co
 }
 
 // Record commits the next revision of final/report.json with the review's
-// move to reviewed or failed and a notice for the chief of staff, and
+// move to reviewed or failed and a notice for the manager, and
 // returns the review's result. A review already recorded returns its result
 // and records nothing more.
 func (a *FinalReviewer) Record(ctx context.Context, stream config.WorkstreamID, report FinalReport) (coreadapter.OperationResult, error) {
@@ -1500,7 +1500,7 @@ func CountSeverity(findings []FinalFinding, severity string) int {
 	return n
 }
 
-// FinalReviewNotice is what the chief of staff hears of a reviewed final
+// FinalReviewNotice is what the manager hears of a reviewed final
 // report: what blocks delivery, what is advisory, and what to do about it.
 // rounds counts the workstream's final reviews with blocking problems,
 // this one included, and edgePending says a delivered workstream's
@@ -1535,7 +1535,7 @@ func FinalReviewNotice(report FinalReport, blocking []string, rounds int, edgePe
 	return b.String()
 }
 
-// BriefNotice is what the chief of staff is told, with a reviewed final
+// BriefNotice is what the manager is told, with a reviewed final
 // report, about recording its delivery brief: the review number and report
 // revision to name, the brief's content, proof, deployment checklist and
 // limits, and what to do when the owner pushes back. revision is the report

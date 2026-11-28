@@ -167,7 +167,7 @@ func (s *Controller) moveUnit(ctx context.Context, repo *trace.Repository, strea
 			if unitStarted(state.Value) {
 				in.Targets = nil
 			}
-			in.Authority = &router.Authority{Kind: router.AuthorityChief, Target: req.To}
+			in.Authority = &router.Authority{Kind: router.AuthorityManager, Target: req.To}
 		}
 	}
 	res, err := s.raise(ctx, false, in)

@@ -50,7 +50,7 @@ func newAmendmentKit(t *testing.T, p *gateJev, spec, graph string) *amendmentKit
 	t.Cleanup(func() { _ = repo.Close() })
 	f.s.setSole(&activeProject{repository: repo})
 	f.s.jev = gateJudge(f.clock.Now, p)
-	scope := intakefixture.ClaimChiefTurn(t, repo, f.project, stream, f.clock.Now, intakefixture.ChiefTurnInput{
+	scope := intakefixture.ClaimManagerTurn(t, repo, f.project, stream, f.clock.Now, intakefixture.ManagerTurnInput{
 		Turn: "events_1", Prompt: "Amendment 1 is presented.", Actor: serviceActor, Cause: "fixture", Token: "token-events", Directory: "events",
 	})
 	controls := &runtimeControls{}
@@ -131,7 +131,7 @@ func TestAConfidentPlanAmendmentPickBindsDecideAmendment(t *testing.T) {
 
 // An amendment that changes the approved intent is the owner's gate: decide
 // refuses it with no request and no judgment, and decide_amendment records
-// nothing for the chief of staff.
+// nothing for the manager.
 func TestDecideRefusesAnAmendmentThatChangesIntent(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95}
@@ -154,9 +154,9 @@ func TestDecideRefusesAnAmendmentThatChangesIntent(t *testing.T) {
 }
 
 // A pick below the threshold and an unconfigured Jev leave a plan-only
-// amendment to the chief of staff: decide says so and decide_amendment takes
+// amendment to the manager: decide says so and decide_amendment takes
 // either decision.
-func TestAPlanAmendmentDecisionThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
+func TestAPlanAmendmentDecisionThatIsNotConfidentLeavesTheManagerFree(t *testing.T) {
 	t.Parallel()
 	for name, p := range map[string]*gateJev{"below the threshold": {confidence: 0.5}, "unconfigured": nil} {
 		t.Run(name, func(t *testing.T) {
@@ -296,7 +296,7 @@ func TestAConfidentDiscoveryPickBindsTheDisposition(t *testing.T) {
 	}
 }
 
-// A caller cannot name the decider of a discovery: a disposition the chief of
+// A caller cannot name the decider of a discovery: a disposition the manager of
 // staff records on its own is never Jev's.
 func TestADiscoveryCannotNameItsDecider(t *testing.T) {
 	t.Parallel()
@@ -349,8 +349,8 @@ func TestADiscoveryPickTheServiceRefusedReachesTheOwner(t *testing.T) {
 }
 
 // A pick below the threshold and an unconfigured Jev leave a discovery's
-// disposition to the chief of staff, who then records any valid disposition.
-func TestADiscoveryDecisionThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
+// disposition to the manager, who then records any valid disposition.
+func TestADiscoveryDecisionThatIsNotConfidentLeavesTheManagerFree(t *testing.T) {
 	t.Parallel()
 	for name, p := range map[string]*gateJev{"below the threshold": {confidence: 0.5}, "unconfigured": nil} {
 		t.Run(name, func(t *testing.T) {

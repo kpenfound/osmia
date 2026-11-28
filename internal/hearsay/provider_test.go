@@ -245,7 +245,7 @@ func TestTraverseUsesTheRolesClassCredentialsNotThePublishers(t *testing.T) {
 	}
 }
 
-func TestEveryRoleWithReadToolsGetsTraverseAndOnlyWorkersAndTheChiefAssert(t *testing.T) {
+func TestEveryRoleWithReadToolsGetsTraverseAndOnlyWorkersAndTheManagerAssert(t *testing.T) {
 	c := Client{Config: settings("https://memory.example")}
 	for _, role := range []string{"chief_of_staff", "architect", "committee", "mason", "reviewer", "session"} {
 		names := map[string]bool{}

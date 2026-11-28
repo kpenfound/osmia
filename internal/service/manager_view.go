@@ -1,0 +1,198 @@
+package service
+
+import (
+	"encoding/json"
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/execution"
+	kindreg "github.com/kpenfound/osmia/internal/kinds"
+	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/router"
+	"github.com/kpenfound/osmia/internal/trace"
+)
+
+func StageManagerDocuments(r *trace.Repository, stream config.WorkstreamID, workspace string) ([]string, error) {
+	docs, err := trace.Read[trace.Document](r, stream)
+	if err != nil {
+		return nil, err
+	}
+	active, err := trace.MemberDocumentsActive(r, stream)
+	if err != nil {
+		return nil, err
+	}
+	latest := map[string]trace.Document{}
+	for _, doc := range docs {
+		if !active && (doc.Path == plan.SpecPath || doc.Path == plan.PlanPath) {
+			continue
+		}
+		if top, _, _ := strings.Cut(doc.Path, "/"); top == "tools" || top == "inspections" {
+			continue
+		}
+		if prior, ok := latest[doc.Path]; !ok || doc.Revision >= prior.Revision {
+			latest[doc.Path] = doc
+		}
+	}
+	if err := os.RemoveAll(workspace); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(workspace, 0700); err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, name := range slices.Sorted(maps.Keys(latest)) {
+		path := filepath.Join(workspace, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(path, []byte(latest[name].Content), 0600); err != nil {
+			return nil, err
+		}
+		if top, _, _ := strings.Cut(name, "/"); !slices.Contains(paths, top) {
+			paths = append(paths, top)
+		}
+	}
+	activity, err := unitActivity(r, stream, docs)
+	if err != nil {
+		return nil, err
+	}
+	for unit, a := range activity {
+		data, err := json.MarshalIndent(a, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		path := filepath.Join(workspace, "units", unit, "activity.json")
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(path, append(data, '\n'), 0600); err != nil {
+			return nil, err
+		}
+		if !slices.Contains(paths, "units") {
+			paths = append(paths, "units")
+		}
+	}
+	if kind, err := r.Kind(stream); err == nil && kind == kindreg.HillClimb {
+		if spec, _, err := climbSpecOf(r, stream); err == nil {
+			text, err := climbProgressText(r, stream, spec, time.Now())
+			if err != nil {
+				return nil, err
+			}
+			path := filepath.Join(workspace, "climb", "progress.md")
+			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+				return nil, err
+			}
+			if err := os.WriteFile(path, []byte(text), 0600); err != nil {
+				return nil, err
+			}
+			if !slices.Contains(paths, "climb") {
+				paths = append(paths, "climb")
+			}
+		}
+	}
+	return paths, nil
+}
+
+const activityTurns, activityTransitions, activityText = 3, 12, 4000
+
+func clip(text string) string {
+	if len(text) <= activityText {
+		return text
+	}
+	return text[:activityText] + "…"
+}
+
+func unitActivity(r *trace.Repository, stream config.WorkstreamID, docs []trace.Document) (map[string]UnitActivity, error) {
+	threads, err := r.Threads(stream)
+	if err != nil {
+		return nil, err
+	}
+	transitions, err := trace.Read[trace.Transition](r, stream)
+	if err != nil {
+		return nil, err
+	}
+	refused := map[string][]ActivityRefusal{}
+	for _, d := range docs {
+		if !strings.HasPrefix(d.Path, "tools/") {
+			continue
+		}
+		var call trace.ToolCall
+		if json.Unmarshal([]byte(d.Content), &call) != nil || call.Output == nil && !call.Failed {
+			continue
+		}
+		var out struct {
+			Recorded *bool  `json:"recorded"`
+			Reason   string `json:"reason"`
+		}
+		switch {
+		case call.Failed:
+			reason := "the call failed"
+			if call.Output != nil && call.Output.Content != "" {
+				reason = clip(call.Output.Content)
+			}
+			refused[call.Scope.Turn] = append(refused[call.Scope.Turn], ActivityRefusal{Tool: call.Name, Reason: reason})
+		case json.Unmarshal([]byte(call.Output.Content), &out) == nil && out.Recorded != nil && !*out.Recorded:
+			refused[call.Scope.Turn] = append(refused[call.Scope.Turn], ActivityRefusal{Tool: call.Name, Reason: out.Reason})
+		}
+	}
+	out := map[string]UnitActivity{}
+	for _, th := range threads {
+		unit := th.Identity.Unit
+		if unit == "" {
+			continue
+		}
+		a, ok := out[unit]
+		if !ok {
+			state, err := r.Workflow(stream, trace.UnitSubject(unit))
+			if err != nil {
+				return nil, err
+			}
+			a = UnitActivity{Unit: unit, State: state.Value, Transitions: []ActivityTransition{}, Turns: []ActivityTurn{}}
+			for _, t := range transitions {
+				if t.Unit == unit && !router.IsJournal(t.Subject) {
+					a.Transitions = append(a.Transitions, ActivityTransition{At: t.At.UTC().Format(time.RFC3339), Subject: t.Subject, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + t.Actor.ID, Reason: t.Reason, DecidedBy: t.DecidedBy, Judgment: t.Judgment, DefaultTo: t.DefaultTo})
+				}
+			}
+			a.Transitions = a.Transitions[max(len(a.Transitions)-activityTransitions, 0):]
+			if contest, contested, err := unitContest(r, stream, unit); err != nil {
+				return nil, err
+			} else if contested {
+				_, mason, err := masonContest(r, stream, unit)
+				if err != nil {
+					return nil, err
+				}
+				left, err := execution.ManagerRulingsLeft(r, stream, unit)
+				if err != nil {
+					return nil, err
+				}
+				a.Contest = &api.ActivityContest{ID: contest.ID, Reason: contest.Reason, Rulings: ContestOptions(contest, unit, mason), ManagerRulingsLeft: left}
+				_, decisions, err := execution.ManagerDecisions(r, stream, unit)
+				if err != nil {
+					return nil, err
+				}
+				if i := slices.IndexFunc(decisions, func(d ManagerContestDecision) bool { return d.Contest == contest.ID }); i >= 0 {
+					a.Contest.Decided = &decisions[i]
+				}
+			}
+		}
+		for _, q := range th.Turns[max(len(th.Turns)-activityTurns, 0):] {
+			turn := ActivityTurn{Agent: th.Identity.ID, Turn: q.Request.TurnID, Status: q.Status(), Refused: refused[q.Request.TurnID]}
+			if q.Response != nil {
+				turn.FinalResponse = clip(q.Response.Result.FinalResponse)
+				turn.Failure = q.Response.Failure
+				if o := q.Response.Result.Outcome; o != nil {
+					turn.Outcome, turn.Report = o.Status, clip(o.Report)
+				}
+			}
+			a.Turns = append(a.Turns, turn)
+		}
+		out[unit] = a
+	}
+	return out, nil
+}

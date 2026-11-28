@@ -30,13 +30,13 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func chiefMoveTool(t *testing.T, f *journey.ShedFixture, repo *trace.Repository, stream config.WorkstreamID, turn string, owner bool) coreadapter.Tool {
+func managerMoveTool(t *testing.T, f *journey.ShedFixture, repo *trace.Repository, stream config.WorkstreamID, turn string, owner bool) coreadapter.Tool {
 	t.Helper()
 	actor, cause := intake.ServiceActor, "fixture"
 	if owner {
 		actor, cause = intake.OwnerActor, "owner-message"
 	}
-	scope := intakefixture.ClaimChiefTurn(t, repo, f.Project, stream, func() time.Time { return fixturekit.DemoStart }, intakefixture.ChiefTurnInput{
+	scope := intakefixture.ClaimManagerTurn(t, repo, f.Project, stream, func() time.Time { return fixturekit.DemoStart }, intakefixture.ManagerTurnInput{
 		Turn: turn, Prompt: "The final review failed.", Actor: actor, Cause: cause, Token: "token-" + turn, Directory: turn,
 	})
 	controls := &journey.RuntimeControls{}
@@ -116,7 +116,7 @@ func TestMoveToAssembledRerunsAFailedFinalReview(t *testing.T) {
 	}
 }
 
-func TestChiefOfStaffMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
+func TestManagerMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, a := journey.NewFinalFixtureWith(t, "chief-move", "")
 	journey.HostFinalReviews(t, f, stream)
@@ -126,7 +126,7 @@ func TestChiefOfStaffMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
 	failFinalReview(t, f, repository, stream, a, 1, op)
-	tool := chiefMoveTool(t, f, repository, stream, "events_1", false)
+	tool := managerMoveTool(t, f, repository, stream, "events_1", false)
 
 	for _, to := range []string{intake.SketchedState, intake.InShedState, intake.RatifiedState, intake.AbandonedState} {
 		out := intakefixture.Handle(t, tool, fmt.Sprintf(`{"to":%q,"note":"Do it."}`, to))
@@ -162,7 +162,7 @@ func TestChiefOfStaffMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 	if in, err := delivery.DecodeFinalReview(ops[1].Operation); err != nil || in.Move != 2 {
 		t.Fatalf("the review asked for after the moves %+v %v", in, err)
 	}
-	actions, err := service.ChiefActions(repository, stream)
+	actions, err := service.ManagerActions(repository, stream)
 	fixturekit.Must(t, err)
 	var texts []string
 	for _, action := range actions {
@@ -189,11 +189,11 @@ func TestChiefOfStaffMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 	}
 }
 
-func TestChiefOfStaffRelaysTheOwnersAbandonment(t *testing.T) {
+func TestManagerRelaysTheOwnersAbandonment(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, _ := journey.NewFinalFixtureWith(t, "chief-relay", "")
 	f.S.SetSole(&journey.ActiveProject{Repository: repository})
-	tool := chiefMoveTool(t, f, repository, stream, "message_1", true)
+	tool := managerMoveTool(t, f, repository, stream, "message_1", true)
 	if out := intakefixture.Handle(t, tool, `{"to":"abandoned","note":"Stop this one.","owner_decided":true}`); !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"state":"abandoned"`) {
 		t.Fatalf("the relayed abandonment: %s", out)
 	}
@@ -370,7 +370,7 @@ func TestDriftResolutionStuckTurnsHoldTheDriftRebase(t *testing.T) {
 			if tip := journey.FeatureTip(t, f, stream); tip != before {
 				t.Fatalf("a held drift rebase moved the feature branch to %s", tip)
 			}
-			if k, apiFault := f.S.Lifecycle().HandBackDrift(context.Background(), repository, stream, "Keep both owners.", intake.ChiefActor, "", f.S.Now()); apiFault != nil || k != 2 {
+			if k, apiFault := f.S.Lifecycle().HandBackDrift(context.Background(), repository, stream, "Keep both owners.", intake.ManagerActor, "", f.S.Now()); apiFault != nil || k != 2 {
 				t.Fatalf("the handback of the stuck drift rebase %d %v", k, apiFault)
 			}
 		})
@@ -423,10 +423,10 @@ func atTheFinalRoundLimit(t *testing.T, key string) (*journey.ShedFixture, *trac
 		fixturekit.Must(t, err)
 		fixturekit.Must(t, repository.RecordDocuments(context.Background(), []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalReportDocument, Revision: revision, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: delivery.FinalReviewActor, Cause: "final-review"}, Path: delivery.FinalReportPath, Content: string(content)}}))
 	}
-	return f, repository, stream, chiefMoveTool(t, f, repository, stream, "events_1", false)
+	return f, repository, stream, managerMoveTool(t, f, repository, stream, "events_1", false)
 }
 
-func TestTheChiefReopensAWorkstreamPastTheFinalRoundLimit(t *testing.T) {
+func TestTheManagerReopensAWorkstreamPastTheFinalRoundLimit(t *testing.T) {
 	t.Parallel()
 	f, repository, stream, tool := atTheFinalRoundLimit(t, "limit-chief")
 	jev := &jevfixture.Transitions{}
@@ -456,7 +456,7 @@ func TestARevisionCommissionedOnAnAssembledWorkstreamReopensIt(t *testing.T) {
 	if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != intake.AssembledState {
 		t.Fatalf("the workstream %+v %v", feature, err)
 	}
-	scope := intakefixture.ClaimChiefTurn(t, repository, f.Project, stream, func() time.Time { return fixturekit.DemoStart }, intakefixture.ChiefTurnInput{
+	scope := intakefixture.ClaimManagerTurn(t, repository, f.Project, stream, func() time.Time { return fixturekit.DemoStart }, intakefixture.ManagerTurnInput{
 		Turn: "events_revision", Prompt: "The final review found a gap.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-events_revision", Directory: "events_revision",
 	})
 	tools, err := questions.Tools(repository, trace.Manager, scope, f.S.Now)

@@ -116,7 +116,7 @@ func hardPauseService(t *testing.T, cfg *config.Config, repo *trace.Repository, 
 }
 
 // A turn operation dispatched before a hard pause and applied while it is in
-// force completes as stopped without calling the backend; a chief-of-staff
+// force completes as stopped without calling the backend; a manager
 // turn runs through a factory-wide hard pause.
 func TestHardPauseStopsATurnBeforeItStarts(t *testing.T) {
 	t.Parallel()
@@ -313,24 +313,24 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 
 	factory := runtime.Target{Scope: "factory"}
 	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: factory, Mode: "hard", Reason: "Travelling", Source: "owner"})
-	chiefEntered, chiefRelease := make(chan struct{}), make(chan struct{})
-	var chiefErr error
+	managerEntered, managerRelease := make(chan struct{}), make(chan struct{})
+	var managerErr error
 	turns.Hooks["chief"] = func(ctx context.Context) {
-		close(chiefEntered)
-		<-chiefRelease
-		chiefErr = ctx.Err()
+		close(managerEntered)
+		<-managerRelease
+		managerErr = ctx.Err()
 	}
 	queueTurn(t, repo, "second", clock.Now())
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_chief", Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "message_chief", Depth: 1},
 		AgentID: trace.Manager, ThreadID: trace.Manager, TurnID: "chief", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message: how is it going?"}
 	_, err = repo.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
-	await(chiefEntered, "the chief of staff did not answer during a factory hard pause")
+	await(managerEntered, "the chief of staff did not answer during a factory hard pause")
 	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "project", Project: fixturekit.Project}, Mode: "hard", Reason: "Really stop", Source: "owner"})
-	close(chiefRelease)
-	chief := completed(trace.Manager, "chief")
-	if chiefErr != nil || chief.Status() != "idle" || chief.Response.Stop != nil {
-		t.Fatalf("chief-of-staff turn under a hard pause: %v %+v", chiefErr, chief)
+	close(managerRelease)
+	manager := completed(trace.Manager, "chief")
+	if managerErr != nil || manager.Status() != "idle" || manager.Response.Stop != nil {
+		t.Fatalf("chief-of-staff turn under a hard pause: %v %+v", managerErr, manager)
 	}
 	tick()
 	tick()

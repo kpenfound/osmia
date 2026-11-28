@@ -268,7 +268,7 @@ func (c *runtimeControls) withQueuedWork(ctx context.Context, cfg *config.Config
 		}
 		return data
 	}
-	target, stream, refusal, err := chiefMember(r, scope, in.Workstream)
+	target, stream, refusal, err := managerMember(r, scope, in.Workstream)
 	if err != nil || refusal != "" {
 		return out
 	}

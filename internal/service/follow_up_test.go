@@ -60,14 +60,14 @@ func (k *followUpKit) unit(t *testing.T, unit, state string) {
 func (k *followUpKit) turn(t *testing.T, id, prompt string) coreadapter.Scope {
 	t.Helper()
 	k.turns++
-	return intakefixture.ClaimChiefTurn(t, k.repo, k.project.ID, k.stream, k.now, intakefixture.ChiefTurnInput{
+	return intakefixture.ClaimManagerTurn(t, k.repo, k.project.ID, k.stream, k.now, intakefixture.ManagerTurnInput{
 		Turn: id, Prompt: prompt, Actor: serviceActor, Cause: "test", Token: "token-" + id, Directory: id,
 	})
 }
 
 func (k *followUpKit) finish(t *testing.T, id string) {
 	t.Helper()
-	fixturekit.AnswerChief(t, k.repo, k.stream, id, "Done.")
+	fixturekit.AnswerManager(t, k.repo, k.stream, id, "Done.")
 }
 
 func (k *followUpKit) tools(scope coreadapter.Scope) (schedule, action coreadapter.Tool) {
@@ -319,7 +319,7 @@ func TestAWholeWorkgroupFollowUpFiresPastAnArchivedMember(t *testing.T) {
 }
 
 func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
-	s, chief, g := workgroupFeedFixture(t, cross, 2)
+	s, manager, g := workgroupFeedFixture(t, cross, 2)
 	ctx := context.Background()
 	host, gone := g.Members[0], fixturekit.Quiet
 	if host == gone {
@@ -327,7 +327,7 @@ func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
 	}
 	member := s.projects[len(s.projects)-1].repository
 	f := followUp{ID: followUpID(trace.Manager, ""), Reason: stallFollowUpReason, ScheduledAt: fixturekit.DemoStart, Due: fixturekit.DemoStart.Add(time.Minute), By: "service", Turn: "events_1", State: followUpPending}
-	fixturekit.Must(t, recordFollowUp(ctx, chief, host, 1, f, followUpActor, "test", fixturekit.DemoStart))
+	fixturekit.Must(t, recordFollowUp(ctx, manager, host, 1, f, followUpActor, "test", fixturekit.DemoStart))
 	fixturekit.Must(t, s.store.SetArchived(runtime.Archive{Workgroup: g.ID, Project: member.Project(), Workstream: gone, State: AbandonedState, Title: "Archived member", Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: fixturekit.DemoStart, CleanupStartedAt: fixturekit.DemoStart, CleanedAt: fixturekit.DemoStart}))
 	_, err := member.MarkWorkstreamTraceForDeletion(gone)
 	fixturekit.Must(t, err)
@@ -337,11 +337,11 @@ func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
 	pass := func(archived func(string) (runtime.Archive, bool)) {
 		t.Helper()
 		fu := followUps{now: func() time.Time { return now }, window: config.DefaultStallAfter, profile: followUpProfile, archived: archived}
-		fixturekit.Must(t, fu.pass(ctx, chief, []config.WorkstreamID{host}))
+		fixturekit.Must(t, fu.pass(ctx, manager, []config.WorkstreamID{host}))
 	}
 	prompts := func() []string {
 		t.Helper()
-		th, err := chief.Thread(host, trace.Manager)
+		th, err := manager.Thread(host, trace.Manager)
 		fixturekit.Must(t, err)
 		var out []string
 		for _, q := range th.Turns {
@@ -356,7 +356,7 @@ func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
 	if len(got) != 1 || !strings.Contains(got[0], "Workstream "+string(gone)+": archived ("+AbandonedState+", cancelled).") || !strings.Contains(got[0], "Workstream "+string(host)+" is ") {
 		t.Fatalf("whole-workgroup follow-up prompts: %q", got)
 	}
-	recs, err := readFollowUps(chief, host)
+	recs, err := readFollowUps(manager, host)
 	fixturekit.Must(t, err)
 	if len(recs.pending()) != 0 {
 		t.Fatalf("the follow-up is still pending: %+v", recs.pending())
@@ -366,7 +366,7 @@ func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
 	}
 
 	named := followUp{ID: followUpID(trace.Manager, gone), Workstream: gone, Reason: "Check the archived member.", ScheduledAt: now, Due: now.Add(time.Minute), By: "chief", Turn: "message_1", State: followUpPending}
-	fixturekit.Must(t, recordFollowUp(ctx, chief, host, 1, named, followUpActor, "test", now))
+	fixturekit.Must(t, recordFollowUp(ctx, manager, host, 1, named, followUpActor, "test", now))
 	now = now.Add(time.Hour)
 	pass(nil)
 	got = prompts()
@@ -376,7 +376,7 @@ func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
 
 	fixturekit.Must(t, s.store.ClearArchived(gone))
 	named.ScheduledAt, named.Due = now, now.Add(time.Minute)
-	fixturekit.Must(t, recordFollowUp(ctx, chief, host, 3, named, followUpActor, "test", now))
+	fixturekit.Must(t, recordFollowUp(ctx, manager, host, 3, named, followUpActor, "test", now))
 	now = now.Add(time.Hour)
 	pass(nil)
 	got = prompts()

@@ -566,7 +566,7 @@ func TestDraftWorkgroupRetryAfterCreationBeforeAnyMemberJoins(t *testing.T) {
 	}
 }
 
-func TestCrossRepoWorkgroupSharesOneChiefOfStaffAcrossARestart(t *testing.T) {
+func TestCrossRepoWorkgroupSharesOneManagerAcrossARestart(t *testing.T) {
 	t.Parallel()
 	f := newCrossRepoRatifyFixture(t)
 	defer f.Stop(t)

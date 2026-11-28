@@ -13,7 +13,7 @@ import (
 
 // Decision states of an occurrence.
 const (
-	// Pending: the chief of staff has not acted.
+	// Pending: the manager has not acted.
 	Pending = "pending"
 	// Opening: a flake-fix workstream's hand-in key is reserved, and intake
 	// may or may not have created the workstream.
@@ -22,7 +22,7 @@ const (
 	Opened = "opened"
 	// Joined: the group already had Workstream open.
 	Joined = "joined"
-	// Declined: the chief of staff declined, for Reason.
+	// Declined: the manager declined, for Reason.
 	Declined = "declined"
 )
 
@@ -40,7 +40,7 @@ type Decision struct {
 	// its key names), and the one an Opened or Joined decision names.
 	Workstream config.WorkstreamID `json:"workstream,omitempty"`
 	Reason     string              `json:"reason,omitempty"`
-	// Notes are the chief of staff's notes reserved with an Opening decision,
+	// Notes are the manager's notes reserved with an Opening decision,
 	// so an interrupted opening is completed with the notes it was given.
 	Notes string `json:"notes,omitempty"`
 }
@@ -77,7 +77,7 @@ const (
 	// workstream's trace, which its feed shows.
 	DestinationOrigin = "origin"
 	// DestinationTarget is the surfacing of a joined occurrence's links to the
-	// open flake-fix workstream's chief of staff. Surfaced marks it delivered.
+	// open flake-fix workstream's manager. Surfaced marks it delivered.
 	DestinationTarget = "target"
 )
 

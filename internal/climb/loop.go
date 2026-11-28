@@ -147,7 +147,7 @@ type Loop struct {
 }
 
 // NoCandidateStall is how many attempts in a row may end without a candidate
-// before the chief of staff is told the climb is stalled.
+// before the manager is told the climb is stalled.
 const NoCandidateStall = 3
 
 const maxSteps = 64

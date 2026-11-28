@@ -74,7 +74,7 @@ func (c *runtimeControls) verify(cfg *config.Config, repo *trace.Repository, sco
 }
 
 func managerVerifyTarget(ctx context.Context, cfg *config.Config, repo *trace.Repository, scope coreadapter.Scope, in verifytool.Input) (verifytool.Target, string, error) {
-	target, stream, refusal, err := chiefMember(repo, scope, in.Workstream)
+	target, stream, refusal, err := managerMember(repo, scope, in.Workstream)
 	if err != nil || refusal != "" {
 		return verifytool.Target{}, refusal, err
 	}

@@ -27,7 +27,7 @@ const (
 
 func (j *briefJourney) requireNoProblems(t *testing.T) {
 	t.Helper()
-	if problems := j.chief.problems(); len(problems) > 0 {
+	if problems := j.manager.problems(); len(problems) > 0 {
 		t.Fatalf("the service refused the chief of staff's brief: %q", problems)
 	}
 }
@@ -37,8 +37,8 @@ func TestDeliveryBriefHoldsTheEntryAndItsItemsReachThePublishedBody(t *testing.T
 	j := newBriefJourney(t, "")
 	stream := j.Stream
 	screenshot := j.capture(t, "uploads", j.Report.Commit)
-	j.chief.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst, briefShipNext}, Screenshots: []string{screenshot}})
-	j.chief.hold()
+	j.manager.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst, briefShipNext}, Screenshots: []string{screenshot}})
+	j.manager.hold()
 	j.run(t)
 	j.awaitStarts(t, 1)
 
@@ -53,7 +53,7 @@ func TestDeliveryBriefHoldsTheEntryAndItsItemsReachThePublishedBody(t *testing.T
 		t.Fatalf("the draft carries a block before any brief:\n%s", waiting.Draft)
 	}
 
-	j.chief.release()
+	j.manager.release()
 	entry := j.awaitEntry(t, stream)
 	if strings.Contains(entry.Question, api.NoBriefRecorded) {
 		t.Fatalf("an entry with a recorded brief says none was recorded: %q", entry.Question)
@@ -99,18 +99,18 @@ func TestDeliveryBriefHoldsTheEntryAndItsItemsReachThePublishedBody(t *testing.T
 	}
 }
 
-func TestDeliveryEntryFallsBackWhenTheChiefRecordsNoBrief(t *testing.T) {
+func TestDeliveryEntryFallsBackWhenTheManagerRecordsNoBrief(t *testing.T) {
 	t.Parallel()
 	j := newBriefJourney(t, "")
 	stream := j.Stream
-	j.chief.hold()
+	j.manager.hold()
 	j.run(t)
 	j.awaitStarts(t, 1)
 	if entries := j.entries(t, stream); len(entries) != 0 {
 		t.Fatalf("the delivery entry is listed while the chief's turn runs: %+v", entries)
 	}
 
-	j.chief.release()
+	j.manager.release()
 	entry := j.awaitEntry(t, stream)
 	if !strings.Contains(entry.Question, api.NoBriefRecorded) {
 		t.Fatalf("the fallback entry: %q", entry.Question)
@@ -142,7 +142,7 @@ func TestReassembledWorkstreamNeedsANewBriefAndKeepsNoEarlierItems(t *testing.T)
 	j := newBriefJourney(t, "")
 	stream := j.Stream
 	const earlier = "Run the one-way migration first"
-	j.chief.plan(1, briefPlan{Text: "First brief.", Items: []string{earlier}})
+	j.manager.plan(1, briefPlan{Text: "First brief.", Items: []string{earlier}})
 	j.run(t)
 	j.awaitEntry(t, stream)
 	first := j.present(t, stream)
@@ -157,11 +157,11 @@ func TestReassembledWorkstreamNeedsANewBriefAndKeepsNoEarlierItems(t *testing.T)
 		t.Fatalf("the new final review %+v after %+v", second, first.Report)
 	}
 	delayed := recordBrief(first, "", "Delayed.", "Old item that must not ship")
-	j.chief.plan(2, briefPlan{Early: []map[string]any{delayed.Input}})
-	j.chief.hold()
+	j.manager.plan(2, briefPlan{Early: []map[string]any{delayed.Input}})
+	j.manager.hold()
 	j.run(t)
 	j.awaitStarts(t, 2)
-	intakefixture.Eventually(t, "the chief of staff never repeated its call for review 1", func() bool { return len(j.chief.earlyResults(2)) == 1 })
+	intakefixture.Eventually(t, "the chief of staff never repeated its call for review 1", func() bool { return len(j.manager.earlyResults(2)) == 1 })
 
 	if entries := j.entries(t, stream); len(entries) != 0 {
 		t.Fatalf("the entry of the new review is listed with no brief for it: %+v", entries)
@@ -173,7 +173,7 @@ func TestReassembledWorkstreamNeedsANewBriefAndKeepsNoEarlierItems(t *testing.T)
 	if strings.Contains(waiting.Draft, earlier) || strings.Contains(waiting.Draft, "Before you ship") {
 		t.Fatalf("the earlier items reached the new draft:\n%s", waiting.Draft)
 	}
-	early := j.chief.earlyResults(2)
+	early := j.manager.earlyResults(2)
 	if len(early) != 1 || !strings.Contains(early[0], `"recorded":false`) || !strings.Contains(early[0], "not the current final review") {
 		t.Fatalf("the delayed call naming review 1: %q", early)
 	}
@@ -181,7 +181,7 @@ func TestReassembledWorkstreamNeedsANewBriefAndKeepsNoEarlierItems(t *testing.T)
 		t.Fatalf("the delayed call released the entry: %+v", entries)
 	}
 
-	j.chief.release()
+	j.manager.release()
 	entry := j.awaitEntry(t, stream)
 	if !strings.Contains(entry.Question, api.NoBriefRecorded) {
 		t.Fatalf("the entry of the new review: %q", entry.Question)
@@ -260,7 +260,7 @@ func TestApprovalOfAnEarlierReadIsRefusedAndTheBodyWithoutItemsIsUnchanged(t *te
 	}
 }
 
-func TestSharedChiefBriefsEachMemberWithItsOwnItems(t *testing.T) {
+func TestSharedManagerBriefsEachMemberWithItsOwnItems(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	j := newBriefFixture(t, "")

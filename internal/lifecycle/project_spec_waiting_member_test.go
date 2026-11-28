@@ -62,19 +62,19 @@ func TestAWaitingMemberNamesTheMemberWhoseDraftingStopped(t *testing.T) {
 		return state.Value == intake.DraftExhausted && feature.Value == intake.SketchedState
 	})
 
-	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
+	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
 	want := "member " + string(f.Stream2) + " is handed: its drafting stopped after 3 refused drafts"
 	for i, to := range []string{intake.InShedState, intake.SketchedState} {
-		_, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo1, f.Stream1, api.WorkstreamMoveRequest{To: to, Note: "Start the review."}, chief, "chief-turn-"+string(rune('1'+i)))
+		_, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo1, f.Stream1, api.WorkstreamMoveRequest{To: to, Note: "Start the review."}, manager, "chief-turn-"+string(rune('1'+i)))
 		if err := asError(apiFault); !intakefixture.Failed(err, api.Conflict) || !containsMessage(err, want) || !containsMessage(err, "move it to sketched with a note") {
 			t.Fatalf("move of the waiting member to %s: %v", to, apiFault)
 		}
 	}
-	_, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo2, f.Stream2, api.WorkstreamMoveRequest{To: intake.InShedState, Note: "Start the review."}, chief, "chief-turn-3")
+	_, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo2, f.Stream2, api.WorkstreamMoveRequest{To: intake.InShedState, Note: "Start the review."}, manager, "chief-turn-3")
 	if err := asError(apiFault); !intakefixture.Failed(err, api.Conflict) || !containsMessage(err, "has no accepted spec and plan to debate") {
 		t.Fatalf("in-shed move of the stopped member: %v", apiFault)
 	}
-	out, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo2, f.Stream2, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: "Draft the client's resume path."}, chief, "chief-turn-4")
+	out, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo2, f.Stream2, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: "Draft the client's resume path."}, manager, "chief-turn-4")
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}

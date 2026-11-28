@@ -42,9 +42,9 @@ func TestWaitingUnitLeavesItsSlotToADisjointUnit(t *testing.T) {
 	p := &intakefixture.Faults{}
 	f, masons := journey.NewParallelMasonFixture(t, 2, 2, journey.ParallelPlan)
 	defer f.Stop(t)
-	chief := &intakefixture.Chief{P: p, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
+	manager := &intakefixture.Manager{P: p, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	f.Engine.Mu.Lock()
-	f.Engine.Turns["*"] = chief.Turn
+	f.Engine.Turns["*"] = manager.Turn
 	f.Engine.Turns[execution.MasonTurnID("resume")] = masons.Asking(p, "", "1")
 	f.Engine.Mu.Unlock()
 	stream := seedBuilding(f, t, "waiting", journey.ParallelPlan)
@@ -87,7 +87,7 @@ func TestMasonSessionsWithinCapacityRunAtOnce(t *testing.T) {
 			return fmt.Errorf("the session of %s never overlapped the other mason's", req.Name)
 		}
 	}
-	chief := &intakefixture.Chief{P: &intakefixture.Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
+	manager := &intakefixture.Manager{P: &intakefixture.Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	f.Engine.Mu.Lock()
 	f.Engine.Turns[execution.MasonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if err := overlap(ctx, req); err != nil {
@@ -114,7 +114,7 @@ func TestMasonSessionsWithinCapacityRunAtOnce(t *testing.T) {
 			}
 			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 		}
-		return chief.Turn(ctx, req, verified, tools)
+		return manager.Turn(ctx, req, verified, tools)
 	}
 	f.Engine.Mu.Unlock()
 	stream := seedBuilding(f, t, "overlap", intakefixture.DisjointPlan)

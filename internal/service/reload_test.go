@@ -268,7 +268,7 @@ func TestReloadAppliesToNextTurnsAndKeepsRunningOnes(t *testing.T) {
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "rl-")
 	files := fixturekit.ConfigFiles(t, opts.Config.Root)
-	turns := &fixturekit.ChiefTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
+	turns := &fixturekit.ManagerTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
 	var (
 		mu       sync.Mutex
 		bound    []*config.Config

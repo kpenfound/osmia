@@ -90,10 +90,10 @@ func (s *Controller) HandBackDrift(ctx context.Context, repo *trace.Repository, 
 	return k, nil
 }
 
-// ChiefHandbacks counts the handbacks the chief of staff recorded on the
+// ManagerHandbacks counts the handbacks the manager recorded on the
 // workstream since the owner last asked for one of its drift rebases or
 // handed one back.
-func ChiefHandbacks(repo *trace.Repository, stream config.WorkstreamID) (int, error) {
+func ManagerHandbacks(repo *trace.Repository, stream config.WorkstreamID) (int, error) {
 	records, err := trace.Read[trace.Record](repo, stream)
 	if err != nil {
 		return 0, err
@@ -140,11 +140,11 @@ func DriftHandbackNote(repo *trace.Repository, stream config.WorkstreamID, k int
 }
 
 // HandBackDrift returns the hand_back_drift tool of one claimed
-// chief-of-staff turn. The chief of staff hands a held drift rebase back on
+// manager turn. The manager hands a held drift rebase back on
 // the owner's behalf with a recorded recovery decision; in a turn answering the
 // owner, it records the owner's own handback. A handback the service refuses
 // is an ordinary result, {"recorded":false,"reason":...}, and records
-// nothing. A shared chief of staff names the member whose drift rebase it
+// nothing. A shared manager names the member whose drift rebase it
 // hands back.
 func (c *Controls) HandBackDrift(repository *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: HandBackDriftTool, Effect: coreadapter.ToolMemory, Description: "Hand this workstream's held drift rebase back: the service asks for another drift rebase onto upstream, and its drift mason and drift reviewer receive your note. Use it when the drift rebase was held and you know what the mason or the reviewer should do differently; the reason it was held is in drift/rebase.json and the workstream's feed. " + "note: what the drift mason should resolve differently, or what the drift reviewer should take into account, which both receive. Hand back only when you are confident the note resolves the problem; otherwise leave the held drift rebase to the owner. owner_decided: true only when the owner asked for it in the message this turn answers, with the owner's words as the note. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.", InputSchema: json.RawMessage(`{"type":"object","properties":{"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["note"],"additionalProperties":false}`)}
@@ -181,7 +181,7 @@ func (c *Controls) HandBackDrift(repository *trace.Repository, scope coreadapter
 		} else if gone {
 			return priorityRefusal("an abandoned workstream takes no drift rebase")
 		}
-		actor := chiefActor
+		actor := managerActor
 		if input.OwnerDecided {
 			turn, owner, err := repository.OwnerTurn(trace.Manager, scope)
 			if err != nil {

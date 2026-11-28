@@ -313,7 +313,7 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 			resolutionGroupState(t, f, true)
 			for i, m := range resolutionMembers(f) {
 				a, _ := intakefixture.ArchiveRecord(t, f.S.Store, m.stream)
-				if a.Actor != runtime.ArchiveActorChief || !lifecycle.ArchiveResolved(a) || a.ResolutionEvidence != "merged" || a.Publication.PullRequest != publications[i].PullRequest || a.MergeCommit != fmt.Sprintf("merged-%d", i) {
+				if a.Actor != runtime.ArchiveActorManager || !lifecycle.ArchiveResolved(a) || a.ResolutionEvidence != "merged" || a.Publication.PullRequest != publications[i].PullRequest || a.MergeCommit != fmt.Sprintf("merged-%d", i) {
 					t.Fatalf("archive of %s=%+v", m.stream, a)
 				}
 			}

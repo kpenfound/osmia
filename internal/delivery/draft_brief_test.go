@@ -27,7 +27,7 @@ func recordBriefFor(t *testing.T, repo *trace.Repository, member config.Workstre
 	fixturekit.Must(t, err)
 	revision, err := nextRevision(repo, member, BriefDocument(brief.Review))
 	fixturekit.Must(t, err)
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: BriefDocument(brief.Review), Revision: revision, Project: repo.Project(), Workstream: member, At: fixturekit.DemoStart, Actor: chiefActor, Cause: "fixture"}, Path: BriefPath(brief.Review), Content: string(content) + "\n"}
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: BriefDocument(brief.Review), Revision: revision, Project: repo.Project(), Workstream: member, At: fixturekit.DemoStart, Actor: managerActor, Cause: "fixture"}, Path: BriefPath(brief.Review), Content: string(content) + "\n"}
 	fixturekit.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{doc}))
 }
 
@@ -113,7 +113,7 @@ func TestDraftDeliveryIsUnchangedWithoutApplicableBriefItems(t *testing.T) {
 	}
 }
 
-func TestDraftDeliveryOfSharedChiefMembersUsesEachMembersOwnBrief(t *testing.T) {
+func TestDraftDeliveryOfSharedManagerMembersUsesEachMembersOwnBrief(t *testing.T) {
 	t.Parallel()
 	cfg, repo, drafts, report := draftFixture(t)
 	defer repo.Close()

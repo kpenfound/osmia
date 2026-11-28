@@ -45,7 +45,7 @@ func (f *workgroupPageFixture) awaitOwnerTurn(t *testing.T, text string, member 
 	})
 }
 
-func (f *workgroupPageFixture) runChief(t *testing.T) {
+func (f *workgroupPageFixture) runManager(t *testing.T) {
 	t.Helper()
 	mutation(t, f.c, "PUT", "pause", service.PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Keep worker activity stable during chief conversation", Source: runtime.PauseOwner})
 	f.c.Close()
@@ -86,8 +86,8 @@ func (f *workgroupPageFixture) runChief(t *testing.T) {
 func TestBrowserMemberConversationRoutingAcrossRestart(t *testing.T) {
 	f := newWorkgroupPageFixture(t, false)
 	shared := f.question(t, 1)
-	fixturekit.AnswerChief(t, f.repo, stream, "group-status", "Status recorded.")
-	f.runChief(t)
+	fixturekit.AnswerManager(t, f.repo, stream, "group-status", "Status recorded.")
+	f.runManager(t)
 	p := openOutcomePage(t, f.s, `
   window.memberPosts = [];
   const postFetch = window.fetch.bind(window);

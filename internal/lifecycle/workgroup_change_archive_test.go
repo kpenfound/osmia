@@ -29,7 +29,7 @@ func TestArchivedWorkstreamKeepsLiveChangesAndStatusAcrossRestart(t *testing.T) 
 	opts, cfg := f.Opts, f.Cfg
 	now := f.Clock.Now()
 	opts.Reconciliation.Now = func() time.Time { return now }
-	journey.RunChief(&opts, cfg, &fixturekit.ChiefTurns{})
+	journey.RunManager(&opts, cfg, &fixturekit.ManagerTurns{})
 	cleanup := &journey.LifecycleCleanupGate{Reached: make(chan struct{})}
 	t.Cleanup(cleanup.Release)
 	previous := opts.Boundary
@@ -344,13 +344,13 @@ func checkFollowupContinuation(t *testing.T, f *journey.ProductionDesignFixture,
 		if _, found := trace.WorkgroupOf(groups, m); found {
 			t.Fatal("member retains a one-workstream group")
 		}
-		target, host, _, close, err := f.S.Lifecycle().ChiefRepository(ctx, repo, m)
+		target, host, _, close, err := f.S.Lifecycle().ManagerRepository(ctx, repo, m)
 		fixturekit.Must(t, err)
-		chief, err := target.Thread(host, trace.Manager)
+		manager, err := target.Thread(host, trace.Manager)
 		close()
 		fixturekit.Must(t, err)
 		for _, design := range f.Design.Turns {
-			if slices.ContainsFunc(chief.Turns, func(q trace.QueuedTurn) bool { return q.Request.ID == design.Request.ID }) {
+			if slices.ContainsFunc(manager.Turns, func(q trace.QueuedTurn) bool { return q.Request.ID == design.Request.ID }) {
 				t.Fatalf("design turn %s is on the chief's thread", design.Request.ID)
 			}
 		}
@@ -401,9 +401,9 @@ func checkFollowupContinuation(t *testing.T, f *journey.ProductionDesignFixture,
 	if !slices.ContainsFunc(historical, func(req trace.TurnRequest) bool { return req.ID == f.Design.Turns[0].Request.ID }) {
 		t.Fatal("historical design request was lost")
 	}
-	chief, _, _, closeChief, err := f.S.Lifecycle().ChiefRepository(ctx, repo, f.Stream1)
+	manager, _, _, closeManager, err := f.S.Lifecycle().ManagerRepository(ctx, repo, f.Stream1)
 	fixturekit.Must(t, err)
-	defer closeChief()
+	defer closeManager()
 	matching, err := readview.Consistent(func() (bool, error) {
 		var entries []api.ConversationEntry
 		var feed []api.FeedEntry
@@ -426,7 +426,7 @@ func checkFollowupContinuation(t *testing.T, f *journey.ProductionDesignFixture,
 			}
 		}
 		return true, nil
-	}, chief.Generation)
+	}, manager.Generation)
 	fixturekit.Must(t, err)
 	if !matching {
 		t.Fatal("continued address and member endpoints resolve to different conversations or feeds")

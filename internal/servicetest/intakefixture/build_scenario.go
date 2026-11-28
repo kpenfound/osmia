@@ -177,7 +177,7 @@ func (f *TurnScenario) CaptureTurn(t *testing.T, repository *trace.Repository, s
 	return q
 }
 
-func (f *TurnScenario) ChiefRecordsAnswer(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, id, text, cite string) {
+func (f *TurnScenario) ManagerRecordsAnswer(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, id, text, cite string) {
 	t.Helper()
 	ctx := context.Background()
 	fixturekit.Must(t, func() error {
@@ -193,8 +193,8 @@ func (f *TurnScenario) ChiefRecordsAnswer(t *testing.T, repository *trace.Reposi
 	directory := filepath.Join(f.Root().String(), "threads", string(f.Project), string(stream), trace.Manager, token)
 	q, err := repository.ClaimTurn(ctx, stream, trace.Manager, token, directory, f.Now())
 	fixturekit.Must(t, err)
-	chiefScope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: turn}
-	tools, err := questions.Tools(repository, trace.Manager, chiefScope, f.Now)
+	managerScope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.Manager, Thread: trace.Manager, Turn: turn}
+	tools, err := questions.Tools(repository, trace.Manager, managerScope, f.Now)
 	fixturekit.Must(t, err)
 	tools = jevfixture.AutoDecide(repository, stream, tools)
 	i := slices.IndexFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == questions.AnswerTool })
@@ -453,10 +453,10 @@ func ConfigureMasonThreads(t *testing.T, root, backend, capacity string, origina
 // ScriptMasons installs the first worker turns and failing clarification turns.
 func ScriptMasons(engine *fixturekit.DemoEngine, turnID func(string) string) *FakeMasons {
 	fake := &FakeMasons{Runs: map[string][]agent.Request{}, Play: map[string]func(context.Context, agent.Request, *mcp.ClientSession) error{}}
-	fake.Chief = &Chief{P: &Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
+	fake.Manager = &Manager{P: &Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	engine.Mu.Lock()
 	defer engine.Mu.Unlock()
-	engine.Turns["*"] = fake.Chief.Turn
+	engine.Turns["*"] = fake.Manager.Turn
 	engine.Turns[turnID("resume")] = fake.Turn
 	engine.Turns[turnID("dedupe")] = fake.Turn
 	for _, unit := range []string{"resume", "dedupe"} {
@@ -526,7 +526,7 @@ func RaiseFixtureContest(t *testing.T, r *trace.Repository, stream config.Workst
 	if !found {
 		t.Fatal("fixture unit has no contest")
 	}
-	data, err := json.Marshal(api.ChiefContestDecision{Contest: header.ID, Decision: escalate, Turn: "fixture"})
+	data, err := json.Marshal(api.ManagerContestDecision{Contest: header.ID, Decision: escalate, Turn: "fixture"})
 	fixturekit.Must(t, err)
 	h := header
 	h.Schema = "osmia.trace.document"

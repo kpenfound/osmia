@@ -24,13 +24,13 @@ func (s *Controller) Archive(raw string) (ArchiveResponse, *APIError) {
 	return s.archive(raw, archiveRequest{})
 }
 
-// ArchiveOnMerge archives a delivered workstream as the chief of staff,
+// ArchiveOnMerge archives a delivered workstream as the manager,
 // through the owner's archive, while the outcome recorded for its current
 // own pull request is merged. It writes nothing when that no longer holds,
 // when the workstream is archived already, or when the archive cannot
 // proceed now; the caller retries on a later pass.
 func (s *Controller) ArchiveOnMerge(raw string) (ArchiveResponse, *APIError) {
-	return s.archive(raw, archiveRequest{actor: runtime.ArchiveActorChief, eligible: mergedOwnPullRequest})
+	return s.archive(raw, archiveRequest{actor: runtime.ArchiveActorManager, eligible: mergedOwnPullRequest})
 }
 
 func mergedOwnPullRequest(state string, evidence MemberEvidence) bool {
@@ -38,10 +38,10 @@ func mergedOwnPullRequest(state string, evidence MemberEvidence) bool {
 }
 
 // ArchivedBy names who archived a: the owner unless the record names the
-// chief of staff.
+// manager.
 func ArchivedBy(a runtime.Archive) string {
-	if a.Actor == runtime.ArchiveActorChief {
-		return api.ArchivedByChief
+	if a.Actor == runtime.ArchiveActorManager {
+		return api.ArchivedByManager
 	}
 	return api.ArchivedByOwner
 }

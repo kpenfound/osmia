@@ -5,11 +5,11 @@ import (
 )
 
 // ContestedRuling records the direction for a contested unit, given by the
-// owner or by the chief of staff on the owner's behalf.
+// owner or by the manager on the owner's behalf.
 type ContestedRuling struct {
 	Decision string `json:"decision"`
 	Note     string `json:"note"`
-	// By names who ruled: "owner", "chief of staff" or "jev". Empty is the
+	// By names who ruled: "owner", "manager" or "jev". Empty is the
 	// owner. Judgment names the Jev judgment record a Jev ruling comes from.
 	By        string `json:"by,omitempty"`
 	Judgment  string `json:"judgment,omitempty"`

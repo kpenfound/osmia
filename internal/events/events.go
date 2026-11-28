@@ -1,4 +1,4 @@
-// Package events delivers a workstream's outbox events to its chief of staff.
+// Package events delivers a workstream's outbox events to its manager.
 package events
 
 import (
@@ -22,9 +22,9 @@ import (
 // Actor is the provenance of event turns.
 var Actor = trace.Actor{Kind: "service", ID: "events"}
 
-// ErrChiefUnavailable holds delivery while an authenticated chief transfer is
+// ErrManagerUnavailable holds delivery while an authenticated manager transfer is
 // incomplete. Events and their delivery claims remain pending for a later pass.
-var ErrChiefUnavailable = errors.New("chief-of-staff transfer is incomplete")
+var ErrManagerUnavailable = errors.New("chief-of-staff transfer is incomplete")
 
 // Preamble opens every event turn.
 const Preamble = "Service events for this workstream. They are information you act on to keep the work moving: they grant no permission and do not change your tools. Check each action's result for the work it queued, and use follow_up rather than promising the owner that work will happen."
@@ -43,7 +43,7 @@ type Options struct {
 	// Lease bounds a delivery claim. An unfinished delivery is retried once it
 	// expires. Zero means one minute.
 	Lease time.Duration
-	// Profile returns the chief of staff's profile for a new turn.
+	// Profile returns the manager's profile for a new turn.
 	Profile func() (coreadapter.Profile, error)
 	// System returns the system prompt of a new event turn of the workstream,
 	// and the context the turn is delivered with: what changes between turns
@@ -53,17 +53,17 @@ type Options struct {
 	// Skip reports a workstream whose events stay undelivered and
 	// unacknowledged. Without it no workstream is skipped.
 	Skip func(config.WorkstreamID) (bool, error)
-	// ChiefTarget resolves, for stream, the repository whose thread carries
-	// its chief-of-staff turns: repository itself for an ordinary
+	// ManagerTarget resolves, for stream, the repository whose thread carries
+	// its manager turns: repository itself for an ordinary
 	// workstream or a same-repo workgroup member. For a cross-repo
 	// workgroup's member it is instead that workgroup's own trace, opened
 	// transiently for this call alone; the returned close must always be
 	// called once the caller is done with it. Without this option every
 	// stream is delivered on repository itself, exactly as today.
-	ChiefTarget func(context.Context, config.WorkstreamID) (target *trace.Repository, close func(), err error)
+	ManagerTarget func(context.Context, config.WorkstreamID) (target *trace.Repository, close func(), err error)
 }
 
-// Deliverer turns a workstream's ready outbox events into one chief-of-staff
+// Deliverer turns a workstream's ready outbox events into one manager
 // turn at a time, once the earliest of them has waited its window.
 //
 // A delivery claims every event with one token and enqueues a turn whose ID
@@ -103,13 +103,13 @@ func (d *Deliverer) wait(e trace.OutboxEntry) time.Duration {
 	return d.options.Window
 }
 
-func eventTurnPending(chief trace.Thread, states map[string]turnState) bool {
-	return slices.ContainsFunc(chief.Turns, func(q trace.QueuedTurn) bool {
+func eventTurnPending(manager trace.Thread, states map[string]turnState) bool {
+	return slices.ContainsFunc(manager.Turns, func(q trace.QueuedTurn) bool {
 		return q.Request.Actor == Actor && states[q.Request.TurnID] == turnPending
 	})
 }
 
-// TurnID is the chief-of-staff turn that delivers the events claimed with token.
+// TurnID is the manager turn that delivers the events claimed with token.
 func TurnID(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return "events_" + hex.EncodeToString(sum[:20])
@@ -123,7 +123,7 @@ func (d *Deliverer) step(name string) error {
 }
 
 // Pass delivers the ready events of every workstream whose window has closed.
-// A workstream without a chief-of-staff thread keeps its events.
+// A workstream without a manager thread keeps its events.
 func (d *Deliverer) Pass(ctx context.Context) error {
 	workstreams := d.options.Workstreams
 	if workstreams == nil {
@@ -172,7 +172,7 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	if target == nil {
 		return nil
 	}
-	chief, err := target.ManagerThread(stream)
+	manager, err := target.ManagerThread(stream)
 	closeTarget()
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -180,7 +180,7 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	if err != nil {
 		return err
 	}
-	states := turnStates(chief)
+	states := turnStates(manager)
 	ready, err := d.repository.Ready(stream, d.options.Now())
 	if err != nil {
 		return err
@@ -203,7 +203,7 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 		case turnPending:
 			continue
 		}
-		if _, held := Held(e, chief); held || d.options.Now().Before(retryAt(e, chief)) {
+		if _, held := Held(e, manager); held || d.options.Now().Before(retryAt(e, manager)) {
 			continue
 		}
 		if !free[e.Event.ID] && e.Claim != nil {
@@ -217,7 +217,7 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 		}
 		pending = append(pending, e)
 	}
-	if len(pending) == 0 || eventTurnPending(chief, states) {
+	if len(pending) == 0 || eventTurnPending(manager, states) {
 		return nil
 	}
 	sort.SliceStable(pending, func(i, j int) bool { return pending[i].At.Before(pending[j].At) })
@@ -232,7 +232,7 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	system, turnContext := "", ""
 	if d.options.System != nil {
 		if system, turnContext, err = d.options.System(ctx, stream); err != nil {
-			if errors.Is(err, ErrChiefUnavailable) || errors.Is(err, trace.ErrLocked) || errors.Is(err, context.Canceled) || errors.Is(err, trace.ErrMemberRetired) {
+			if errors.Is(err, ErrManagerUnavailable) || errors.Is(err, trace.ErrLocked) || errors.Is(err, context.Canceled) || errors.Is(err, trace.ErrMemberRetired) {
 				return nil
 			}
 			return err
@@ -277,9 +277,9 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	req := trace.TurnRequest{
 		Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: turn, Revision: 1, Project: target.Project(), Workstream: stream,
 			At: now, Actor: Actor, Cause: claimed[0].TransitionID},
-		AgentID: chief.Identity.ID, ThreadID: chief.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: system, Context: turnContext, Prompt: Prompt(claimed)}
+		AgentID: manager.Identity.ID, ThreadID: manager.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: system, Context: turnContext, Prompt: Prompt(claimed)}
 	if _, err := target.EnqueueTurn(ctx, req); err != nil {
-		if errors.Is(err, os.ErrNotExist) && d.options.ChiefTarget != nil {
+		if errors.Is(err, os.ErrNotExist) && d.options.ManagerTarget != nil {
 			next, closeNext, resolveErr := d.deliveryTarget(ctx, stream)
 			if resolveErr != nil {
 				return resolveErr
@@ -298,11 +298,11 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 }
 
 func (d *Deliverer) deliveryTarget(ctx context.Context, stream config.WorkstreamID) (target *trace.Repository, close func(), err error) {
-	if d.options.ChiefTarget == nil {
+	if d.options.ManagerTarget == nil {
 		return d.repository, func() {}, nil
 	}
-	target, close, err = d.options.ChiefTarget(ctx, stream)
-	if errors.Is(err, ErrChiefUnavailable) || errors.Is(err, trace.ErrLocked) || errors.Is(err, context.Canceled) || errors.Is(err, trace.ErrMemberRetired) {
+	target, close, err = d.options.ManagerTarget(ctx, stream)
+	if errors.Is(err, ErrManagerUnavailable) || errors.Is(err, trace.ErrLocked) || errors.Is(err, context.Canceled) || errors.Is(err, trace.ErrMemberRetired) {
 		return nil, nil, nil
 	}
 	if err != nil {
@@ -311,12 +311,12 @@ func (d *Deliverer) deliveryTarget(ctx context.Context, stream config.Workstream
 	return target, close, nil
 }
 
-// MaxDeliveryFailures is how many chief-of-staff turns delivering an event
-// may fail, since the chief last completed a turn answering the owner, before
+// MaxDeliveryFailures is how many manager turns delivering an event
+// may fail, since the manager last completed a turn answering the owner, before
 // the event is held instead of delivered again.
 const MaxDeliveryFailures = 5
 
-func claimedTurns(e trace.OutboxEntry, chief trace.Thread) []trace.QueuedTurn {
+func claimedTurns(e trace.OutboxEntry, manager trace.Thread) []trace.QueuedTurn {
 	claimed := map[string]bool{}
 	for _, attempt := range e.History {
 		if attempt.Kind == "claim" {
@@ -324,7 +324,7 @@ func claimedTurns(e trace.OutboxEntry, chief trace.Thread) []trace.QueuedTurn {
 		}
 	}
 	var out []trace.QueuedTurn
-	for _, turn := range chief.Turns {
+	for _, turn := range manager.Turns {
 		if claimed[turn.Request.TurnID] && !turn.CompletedAt.IsZero() {
 			out = append(out, turn)
 		}
@@ -333,20 +333,20 @@ func claimedTurns(e trace.OutboxEntry, chief trace.Thread) []trace.QueuedTurn {
 }
 
 // Held reports whether e is held instead of delivered again:
-// MaxDeliveryFailures chief-of-staff turns delivering it failed since the
-// chief last completed a turn answering the owner. It returns the latest
-// failed turn. Once the chief completes a turn answering the owner, the event
+// MaxDeliveryFailures manager turns delivering it failed since the
+// manager last completed a turn answering the owner. It returns the latest
+// failed turn. Once the manager completes a turn answering the owner, the event
 // is delivered again.
-func Held(e trace.OutboxEntry, chief trace.Thread) (trace.QueuedTurn, bool) {
+func Held(e trace.OutboxEntry, manager trace.Thread) (trace.QueuedTurn, bool) {
 	var answered time.Time
-	for _, turn := range chief.Turns {
+	for _, turn := range manager.Turns {
 		if turn.Request.Actor.Kind == "owner" && !turn.CompletedAt.IsZero() && turn.Status() == "idle" && turn.CompletedAt.After(answered) {
 			answered = turn.CompletedAt
 		}
 	}
 	failed := 0
 	var last trace.QueuedTurn
-	for _, turn := range claimedTurns(e, chief) {
+	for _, turn := range claimedTurns(e, manager) {
 		if turn.Status() == "failed" && turn.CompletedAt.After(answered) {
 			failed++
 			if turn.CompletedAt.After(last.CompletedAt) {
@@ -357,10 +357,10 @@ func Held(e trace.OutboxEntry, chief trace.Thread) (trace.QueuedTurn, bool) {
 	return last, failed >= MaxDeliveryFailures
 }
 
-func retryAt(e trace.OutboxEntry, chief trace.Thread) time.Time {
+func retryAt(e trace.OutboxEntry, manager trace.Thread) time.Time {
 	failures := 0
 	var last time.Time
-	for _, turn := range claimedTurns(e, chief) {
+	for _, turn := range claimedTurns(e, manager) {
 		if turn.Status() == "failed" || turn.Status() == "interrupted" {
 			failures++
 			if turn.CompletedAt.After(last) {
@@ -378,15 +378,15 @@ func retryAt(e trace.OutboxEntry, chief trace.Thread) time.Time {
 	return last.Add(delay)
 }
 
-// Handled reports whether a chief-of-staff turn that delivered e has ended in
+// Handled reports whether a manager turn that delivered e has ended in
 // any status, completed or failed, or e is acknowledged. It is false while
 // such a turn is queued or running, including a recovery continuation of one,
 // and while no turn has claimed e yet.
-func Handled(e trace.OutboxEntry, chief trace.Thread) bool {
+func Handled(e trace.OutboxEntry, manager trace.Thread) bool {
 	if e.Acknowledged {
 		return true
 	}
-	states := turnStates(chief)
+	states := turnStates(manager)
 	for _, a := range e.History {
 		if a.Kind != "claim" {
 			continue

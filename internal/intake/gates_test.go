@@ -56,7 +56,7 @@ func TestAnEscalationOfACharterConflictIsAnOwnerGate(t *testing.T) {
 	}
 }
 
-func TestAnOptionThatNeedsTextIsOfferedOnlyWithTheChiefsText(t *testing.T) {
+func TestAnOptionThatNeedsTextIsOfferedOnlyWithTheManagersText(t *testing.T) {
 	options := TextOptions([]string{"Keep the project.", "  ", "", "Drop it.", "Keep the project."})
 	if len(options) != 2 || options[0] != (jev.DecisionOption{Name: "option-1", Description: "Keep the project."}) || options[1] != (jev.DecisionOption{Name: "option-4", Description: "Drop it."}) {
 		t.Fatalf("options %+v", options)
@@ -66,7 +66,7 @@ func TestAnOptionThatNeedsTextIsOfferedOnlyWithTheChiefsText(t *testing.T) {
 	}
 }
 
-func TestAJevCardKeepsTheChiefsRecommendationOnlyWhenJevGaveNoPick(t *testing.T) {
+func TestAJevCardKeepsTheManagersRecommendationOnlyWhenJevGaveNoPick(t *testing.T) {
 	card := func() InboxEntry {
 		return InboxEntry{Recommendation: "ratify: nothing blocks.", QuickReply: "ratify: nothing blocks."}
 	}
@@ -87,7 +87,7 @@ func TestAJevCardKeepsTheChiefsRecommendationOnlyWhenJevGaveNoPick(t *testing.T)
 	}
 }
 
-func TestAPickIsNamedByTheChiefsTextForAnEscalationAndByNameOtherwise(t *testing.T) {
+func TestAPickIsNamedByTheManagersTextForAnEscalationAndByNameOtherwise(t *testing.T) {
 	options := []jev.DecisionOption{{Name: "option-1", Description: "Resume from the last chunk."}, {Name: "option-2", Description: "Restart."}}
 	if got := optionLabel(options, "option-2"); got != "Restart." {
 		t.Fatalf("label %q", got)

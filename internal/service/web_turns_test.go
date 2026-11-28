@@ -49,7 +49,7 @@ func runEnforced(t *testing.T, turns *isolation.Turns, engine *adaptertest.Engin
 	return got
 }
 
-func TestOrdinaryChiefTurnHoldsWebTools(t *testing.T) {
+func TestOrdinaryManagerTurnHoldsWebTools(t *testing.T) {
 	t.Parallel()
 	f, stream, repository := newReviewFixture(t, "chief-web")
 	for backend, web := range webToolsByBackend {
@@ -72,7 +72,7 @@ func TestOrdinaryChiefTurnHoldsWebTools(t *testing.T) {
 				}
 			}
 			names := slices.Clone(got.MCP)
-			want := ChiefOrdinaryToolsOf("feature")
+			want := ManagerOrdinaryToolsOf("feature")
 			slices.Sort(names)
 			slices.Sort(want)
 			if !slices.Equal(names, want) {
@@ -103,8 +103,8 @@ func TestWebIsGrantedToDesignAndSessionRoles(t *testing.T) {
 	t.Parallel()
 	f, _, repository := newReviewFixture(t, "design-web")
 	turns, _, _ := enforcedTurns(t, f, repository)
-	if !turns.Grants[trace.Manager].Web || !chiefOrdinaryNarrow.Web || !designNarrow.Web {
-		t.Fatalf("chief grant %+v, ordinary narrowing %+v, design narrowing %+v", turns.Grants[trace.Manager], chiefOrdinaryNarrow, designNarrow)
+	if !turns.Grants[trace.Manager].Web || !managerOrdinaryNarrow.Web || !designNarrow.Web {
+		t.Fatalf("chief grant %+v, ordinary narrowing %+v, design narrowing %+v", turns.Grants[trace.Manager], managerOrdinaryNarrow, designNarrow)
 	}
 	if want := []string{"file_read", draftBriefToolName, designReadRepoToolName, designTitleToolName}; !slices.Equal(designNarrow.Tools, want) {
 		t.Fatalf("design narrowing tools %v, want %v", designNarrow.Tools, want)

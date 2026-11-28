@@ -399,11 +399,11 @@ func TestApprovedClimbSpecAmendmentIsResealedAndAppliedWithoutUnits(t *testing.T
 		t.Fatal("the workstream has no seal")
 	}
 	at := f.Clock.Now()
-	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
+	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
 	header := func(schema, id string, by trace.Actor) trace.Header {
 		return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: 1, Project: repository.Project(), Workstream: stream, At: at, Actor: by, Cause: "fixture"}
 	}
-	request := trace.Amendment{Header: header("osmia.trace.amendment", "1", chief), Requester: chief, Role: trace.Manager, Thread: trace.Manager, Turn: "events_1",
+	request := trace.Amendment{Header: header("osmia.trace.amendment", "1", manager), Requester: manager, Role: trace.Manager, Thread: trace.Manager, Turn: "events_1",
 		Citations: []string{"climb#metric"}, Change: "Raise the minimum improvement", Reason: "The noise is larger than first thought", Seal: sealed.Seal, SealRevision: sealDoc.Revision, SpecHash: sealed.SpecHash}
 	fixturekit.Must(t, repository.Append(ctx, request))
 	document := func(id, path, content string) trace.Document {

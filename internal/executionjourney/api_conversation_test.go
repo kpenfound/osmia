@@ -25,8 +25,8 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts, cfg := journey.ConversationFixture(t, "cv-")
-	turns := &fixturekit.ChiefTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
-	journey.RunChief(&opts, cfg, turns)
+	turns := &fixturekit.ManagerTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
+	journey.RunManager(&opts, cfg, turns)
 	s, c := journey.StartT(t, opts)
 
 	first, err := c.Send(ctx, fixturekit.Stream, "Where is the plan?")
@@ -172,8 +172,8 @@ func TestConversationProfileChangesResumeOrReplay(t *testing.T) {
 	data, err := os.ReadFile(file)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, os.WriteFile(file, append(data, []byte("\n[profiles.same]\nagent = \"claude\"\nmodel = \"same\"\n")...), 0600))
-	turns := &fixturekit.ChiefTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
-	journey.RunChief(&opts, cfg, turns)
+	turns := &fixturekit.ManagerTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
+	journey.RunManager(&opts, cfg, turns)
 	s, c := journey.StartT(t, opts)
 	_, err = c.Send(ctx, fixturekit.Stream, "first")
 	fixturekit.Must(t, err)
@@ -256,8 +256,8 @@ func TestConversationMessageRunsOnceAcrossRestart(t *testing.T) {
 	fixturekit.Must(t, repo.Close())
 
 	for lifetime := 2; lifetime <= 3; lifetime++ {
-		turns := &fixturekit.ChiefTurns{}
-		journey.RunChief(&opts, cfg, turns)
+		turns := &fixturekit.ManagerTurns{}
+		journey.RunManager(&opts, cfg, turns)
 		s, c = journey.StartT(t, opts)
 		list := intakefixture.AwaitConversation(t, c, func(l api.ConversationResponse) bool { return len(l.Entries) == 2 })
 		if got := intakefixture.States(list); !reflect.DeepEqual(got, []string{"message:done", "response:done"}) || list.Entries[1].Text != "Answer to Plan the upload work" {

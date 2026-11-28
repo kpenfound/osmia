@@ -30,8 +30,8 @@ func TestConversationPathBypassesSchedulingAndOwnWorkflow(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts, cfg := journey.ConversationFixture(t, "conversation-path-")
-	turns := &fixturekit.ChiefTurns{}
-	journey.RunChief(&opts, cfg, turns)
+	turns := &fixturekit.ManagerTurns{}
+	journey.RunManager(&opts, cfg, turns)
 	opts.Reconciliation.Ticks = make(chan time.Time)
 	opts.ConversationTicks = make(chan time.Time)
 	s, client := journey.StartT(t, opts)
@@ -79,7 +79,7 @@ func TestConversationPathBypassesSchedulingAndOwnWorkflow(t *testing.T) {
 	}
 	t.Cleanup(func() { attempt.Close() })
 
-	chief, err := client.Send(ctx, fixturekit.Stream, "Chief message")
+	manager, err := client.Send(ctx, fixturekit.Stream, "Chief message")
 	fixturekit.Must(t, err)
 	designed, err := client.DesignMessage(ctx, design.Design.Workstream, "Design message")
 	fixturekit.Must(t, err)
@@ -88,7 +88,7 @@ func TestConversationPathBypassesSchedulingAndOwnWorkflow(t *testing.T) {
 	for _, test := range []struct {
 		stream      config.WorkstreamID
 		agent, turn string
-	}{{fixturekit.Stream, trace.Manager, chief.Turn}, {design.Design.Workstream, trace.Designer, designed.Turn}, {session, service.SessionAgentID, sessionMessage.Turn}} {
+	}{{fixturekit.Stream, trace.Manager, manager.Turn}, {design.Design.Workstream, trace.Designer, designed.Turn}, {session, service.SessionAgentID, sessionMessage.Turn}} {
 		fixturekit.ConversationAwait(t, func() bool {
 			th, err := repo.Thread(test.stream, test.agent)
 			if err != nil {
@@ -134,8 +134,8 @@ func TestConversationPathOwnerWaitsForBackgroundTurnAndShowsReason(t *testing.T)
 	t.Parallel()
 	ctx := context.Background()
 	opts, cfg := journey.ConversationFixture(t, "conversation-order-")
-	turns := &fixturekit.ChiefTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
-	journey.RunChief(&opts, cfg, turns)
+	turns := &fixturekit.ManagerTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
+	journey.RunManager(&opts, cfg, turns)
 	opts.Reconciliation.Ticks = make(chan time.Time)
 	opts.ConversationTicks = make(chan time.Time)
 	s, client := journey.StartT(t, opts)
@@ -329,12 +329,12 @@ func TestConversationPathShutdownJoinsBeforeTraceClose(t *testing.T) {
 	}
 }
 
-func TestConversationPathChiefPauseAndProviderHolds(t *testing.T) {
+func TestConversationPathManagerPauseAndProviderHolds(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts, cfg := journey.ConversationFixture(t, "conversation-gates-")
-	turns := &fixturekit.ChiefTurns{}
-	journey.RunChief(&opts, cfg, turns)
+	turns := &fixturekit.ManagerTurns{}
+	journey.RunManager(&opts, cfg, turns)
 	s, client := journey.StartT(t, opts)
 	fixturekit.Must(t, journey.InspectForTest(s).SetPause(runtime.Pause{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Owner pause", Source: runtime.PauseOwner, SetAt: s.Now()}))
 	sent, err := client.Send(ctx, fixturekit.Stream, "Reachable during pause")

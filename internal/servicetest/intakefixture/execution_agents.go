@@ -14,7 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func ScriptLanding(engine *fixturekit.DemoEngine, masons *FakeMasons, turnID func(string) string, chief func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error)) {
+func ScriptLanding(engine *fixturekit.DemoEngine, masons *FakeMasons, turnID func(string) string, manager func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error)) {
 	masons.Play[turnID("resume")] = ReportDone("Built")
 	engine.Mu.Lock()
 	defer engine.Mu.Unlock()
@@ -26,7 +26,7 @@ func ScriptLanding(engine *fixturekit.DemoEngine, masons *FakeMasons, turnID fun
 			}
 			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 		}
-		return chief(ctx, req, verified, tools)
+		return manager(ctx, req, verified, tools)
 	}
 }
 func ReportProblem(mu *sync.Mutex, list *[]string, format string, args ...any) {

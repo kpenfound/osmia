@@ -260,7 +260,7 @@ type CharterState struct {
 }
 
 // HandInRequest hands work to the ordered Projects, whose first project hosts
-// the shared chief and conversation. Project is a one-project shorthand.
+// the shared manager and conversation. Project is a one-project shorthand.
 // Exactly one of Path (an absolute file path), URL (a GitHub issue URL) and
 // Stdin (the input itself) is
 // set. Key identifies the request: a retry with the same key returns the same
@@ -366,7 +366,7 @@ type DesignStartRequest struct {
 
 // DesignStartResponse names the workstream a design session's brief started
 // a workgroup on. Handed is the path of the recorded brief; Source names the
-// design session it came from. The workgroup's chief of staff opens a new
+// design session it came from. The workgroup's manager opens a new
 // thread from that brief and the design transcript attached to it; the design
 // conversation's own thread is not continued.
 type DesignStartResponse struct {
@@ -425,11 +425,11 @@ type BaseUpstreamResponse struct {
 // when the workstream's own base was abandoned: continue from upstream.
 const BaseDecisionUpstream = "upstream"
 
-// The actors that archive a workstream: the owner by request, or the chief of
+// The actors that archive a workstream: the owner by request, or the manager of
 // staff once the workstream's own pull request merged.
 const (
-	ArchivedByOwner = "owner"
-	ArchivedByChief = trace.Manager
+	ArchivedByOwner   = "owner"
+	ArchivedByManager = trace.Manager
 )
 
 // ArchiveResponse reports whether a workstream is archived after the
@@ -475,7 +475,7 @@ type ShedRedraftRequest struct {
 
 // PacketResponse is the ratification packet of a workstream: the revisions the
 // owner decides on, why debate ended, the dissent record with what blocks
-// ratification first, and the chief of staff's recommendation. ProjectSpec
+// ratification first, and the manager's recommendation. ProjectSpec
 // is present only when the workstream belongs to a multi-member workgroup
 // whose project spec is already drafted: ratifying this packet then seals
 // that project spec and every member, not only this workstream.
@@ -950,13 +950,13 @@ type RoleFallback struct {
 	Profile    string `json:"profile"`
 }
 
-// WorkstreamStatus is the chief of staff's status for one workstream, next to
+// WorkstreamStatus is the manager's status for one workstream, next to
 // the facts the service owns. State is null until a feature state is
 // recorded; Units is empty until the units' states are recorded, and each
 // unit carries its latest reported card when present; Advisories holds the
 // active overlap advisories about other workstreams of the project; Gates is
 // empty while no owner decision waits; Drift is null before the first drift
-// rebase; Status is null until the chief of staff writes one. Agents holds
+// rebase; Status is null until the manager writes one. Agents holds
 // service-owned facts about claimed and parked turns. Workspaces is the
 // workspace backend the workstream was created on, git or jujutsu.
 type WorkstreamStatus struct {
@@ -1169,7 +1169,7 @@ type AgentStatus struct {
 // DriftStatus is a workstream's latest drift rebase: its number, its
 // outcome (requested while it has none), and when and why that was recorded.
 // Moved holds, oldest first, the upstream moved events it raised for the
-// chief of staff, one for each visible outcome; it is empty for a drift
+// manager, one for each visible outcome; it is empty for a drift
 // rebase with none.
 type DriftStatus struct {
 	Drift   int       `json:"drift"`
@@ -1179,7 +1179,7 @@ type DriftStatus struct {
 	Moved   []string  `json:"moved"`
 }
 
-// StatusView is one status revision as the chief of staff wrote it.
+// StatusView is one status revision as the manager wrote it.
 type StatusView struct {
 	Goal      string    `json:"goal"`
 	Attention string    `json:"attention"`
@@ -1212,7 +1212,7 @@ const (
 	InboxLoop         = "loop"
 	InboxBase         = "base"
 	// InboxRecovery asks the owner to approve one recovery move: a stall that
-	// neither Jev nor the chief of staff cleared, or a move that belongs to the
+	// neither Jev nor the manager cleared, or a move that belongs to the
 	// owner. The card pins the exact move.
 	InboxRecovery = "recovery"
 	// InboxDiscovery is a discovered piece of work whose disposition Jev
@@ -1226,10 +1226,10 @@ const (
 
 // InboxEntry is one open owner decision. Kind says which, and Answer how it
 // is answered. Number and Batch identify an escalation, the questions the
-// chief of staff sent the owner as one ask, and Asked holds its questions as
+// manager sent the owner as one ask, and Asked holds its questions as
 // their askers put them. Unit names a contested unit, or the unit an
 // amendment was filed from; Amendment names an amendment. Revision is the
-// revision of the record the decision is taken on. Question is the chief of
+// revision of the record the decision is taken on. Question is the manager of
 // staff's rephrasing of an escalation, and the service's statement of the
 // decision for the other kinds. A publication entry reports a publication
 // whose last attempts failed: it takes no decision, its Revision is the owner
@@ -1332,7 +1332,7 @@ type AnswerResponse struct {
 	At         time.Time           `json:"at"`
 }
 
-// SendRequest is an owner message to a workstream's chief of staff.
+// SendRequest is an owner message to a workstream's manager.
 type SendRequest struct {
 	Text string `json:"text"`
 }
@@ -1351,15 +1351,15 @@ const (
 	TurnStopped TurnState = "stopped"
 )
 
-// ConversationResponse lists a workstream's conversation with its chief of
+// ConversationResponse lists a workstream's conversation with its manager of
 // staff, oldest first.
 type ConversationResponse struct {
 	Workstream config.WorkstreamID `json:"workstream"`
 	Entries    []ConversationEntry `json:"entries"`
 }
 
-// ConversationEntry is an owner message (kind "message"), the chief of
-// staff's final response to it (kind "response"), or something the chief of
+// ConversationEntry is an owner message (kind "message"), the manager of
+// staff's final response to it (kind "response"), or something the manager of
 // staff did on the owner's behalf (kind "action"), such as resolving a
 // contested unit. A message and its response carry the state of the turn that
 // answers the message, and At is when the message was accepted, the response
@@ -1373,7 +1373,7 @@ type ConversationEntry struct {
 	State        TurnState `json:"state"`
 }
 
-// WorkgroupFeedResponse lists shared chief entries and current member summaries.
+// WorkgroupFeedResponse lists shared manager entries and current member summaries.
 // Both single-member and multi-member workgroups can use this endpoint.
 type WorkgroupFeedResponse struct {
 	Workgroup config.WorkgroupID       `json:"workgroup"`
@@ -1412,15 +1412,15 @@ type FeedImage struct {
 }
 
 // FeedEntry is one event of a workstream's feed. Kind "message", "response"
-// and "action" are the conversation with the chief of staff, as
+// and "action" are the conversation with the manager, as
 // ConversationEntry describes them, with Turn, Text and State. Kind "status"
-// is a status the chief of staff wrote, with Status. Kind "session" is an
+// is a status the manager wrote, with Status. Kind "session" is an
 // agent turn that started, with Session. Kind "transition" is any recorded
 // workflow state change, with Transition. Kind "unit_checks" summarizes a
 // unit check run, "final_checks" a final check attempt, and "final_review"
 // a final review outcome. Kind "image" carries attachment metadata in Image,
 // with a URL or an archived-member placeholder. Kind "brief" is the delivery
-// brief the chief of staff recorded for a final review, with Brief. Kind
+// brief the manager recorded for a final review, with Brief. Kind
 // "recovery" is a recovery card opened for the owner, with Recovery. At is when
 // the entry first became observable; sessions and final check attempts use
 // their recorded start time.

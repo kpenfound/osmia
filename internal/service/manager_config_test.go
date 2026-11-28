@@ -39,7 +39,7 @@ func TestManagerSettingsGovernTheManagersTurnsAndCapacityUnderEitherKeyForm(t *t
 			if selected := cfg.RoleExecution(trace.ConfigRole(trace.Manager)); selected.Mode != "container" || selected.Image != "manager-image" {
 				t.Fatalf("selected execution %+v", selected)
 			}
-			if _, name, err := s.chiefOverride(cfg); err != nil || name.Name != "other" {
+			if _, name, err := s.managerOverride(cfg); err != nil || name.Name != "other" {
 				t.Fatalf("conversation profile %+v %v", name, err)
 			}
 			if got := cfg.Roles[config.ManagerRole].EventsProfile; got != "default" {
@@ -50,13 +50,13 @@ func TestManagerSettingsGovernTheManagersTurnsAndCapacityUnderEitherKeyForm(t *t
 				t.Fatalf("effective profile %+v", got)
 			}
 			for _, role := range s.capacityStatus(nil).Roles {
-				if role.Role == chiefRole && (role.Limit == nil || *role.Limit != 6) {
+				if role.Role == managerRole && (role.Limit == nil || *role.Limit != 6) {
 					t.Fatalf("manager capacity %+v", role)
 				}
 			}
-			s.chief.mu.Lock()
-			limit := s.chief.limit
-			s.chief.mu.Unlock()
+			s.manager.mu.Lock()
+			limit := s.manager.limit
+			s.manager.mu.Unlock()
 			if limit != 6 {
 				t.Fatalf("manager slot pool limit %d", limit)
 			}

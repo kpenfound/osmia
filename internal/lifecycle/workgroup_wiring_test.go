@@ -80,7 +80,7 @@ func (f *crossRepoWiringFixture) problem(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	f.problems = append(f.problems, msg)
 }
-func TestWorkgroupChiefDispatchVisitsLeaderAfterRetainedSourceLocatorAcrossRestart(t *testing.T) {
+func TestWorkgroupManagerDispatchVisitsLeaderAfterRetainedSourceLocatorAcrossRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := newCrossRepoWiringFixture(t, map[string]string{trace.Manager: trace.Manager})
@@ -367,7 +367,7 @@ func (f *crossRepoWiringFixture) driveTicksUntil(t *testing.T, condition func() 
 	}
 }
 
-func TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupChiefTurnRuns(t *testing.T) {
+func TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupManagerTurnRuns(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	agents := map[string]string{trace.Manager: trace.Manager, "thread_mason": fixturekit.DemoAgent, "thread_mason2": "agent_mason2"}

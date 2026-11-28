@@ -30,7 +30,7 @@ func (d *draftFixture) recordBrief(t *testing.T, items ...string) {
 	fixturekit.Must(t, err)
 	revision, err := intake.NextRevision(d.repository, d.stream, delivery.BriefDocument(brief.Review))
 	fixturekit.Must(t, err)
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.BriefDocument(brief.Review), Revision: revision, Project: d.repository.Project(), Workstream: d.stream, At: d.f.S.Now(), Actor: intake.ChiefActor, Cause: "fixture"},
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.BriefDocument(brief.Review), Revision: revision, Project: d.repository.Project(), Workstream: d.stream, At: d.f.S.Now(), Actor: intake.ManagerActor, Cause: "fixture"},
 		Path: delivery.BriefPath(brief.Review), Content: string(content) + "\n"}
 	fixturekit.Must(t, d.repository.RecordDocuments(context.Background(), []trace.Document{doc}))
 }

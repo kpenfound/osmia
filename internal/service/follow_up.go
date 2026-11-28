@@ -226,7 +226,7 @@ func newFollowUpTool(r *trace.Repository, scope coreadapter.Scope, now func() ti
 				return priorityRefusal("reason must say in at most 1000 characters what to check")
 			}
 			if in.Workstream != "" {
-				if _, _, refusal, err := chiefMember(r, scope, in.Workstream); err != nil {
+				if _, _, refusal, err := managerMember(r, scope, in.Workstream); err != nil {
 					return nil, err
 				} else if refusal != "" {
 					return priorityRefusal(refusal)
@@ -568,7 +568,7 @@ func (p *conversationPath) followUps(ctx context.Context, repository *trace.Repo
 	cfg := s.current()
 	f := followUps{now: s.now, window: followUpWindow(cfg), service: s, system: s.followUpSystem, archived: s.archivedWorkstream,
 		profile: func() (coreadapter.Profile, error) {
-			_, profile, err := s.chiefOverride(cfg)
+			_, profile, err := s.managerOverride(cfg)
 			return profile, err
 		}}
 	return f.pass(ctx, repository, streams)
@@ -579,9 +579,9 @@ func (s *Service) followUpSystem(ctx context.Context, target *trace.Repository, 
 	if err != nil {
 		return "", "", err
 	}
-	context, err := chiefContext(ctx, s.Context(), target, func() {}, bundle.Project(), host)
+	context, err := managerContext(ctx, s.Context(), target, func() {}, bundle.Project(), host)
 	if err != nil {
 		return "", "", err
 	}
-	return fmt.Sprintf(followUpPrompt, host) + "\n\n" + chiefGuidance(), context, nil
+	return fmt.Sprintf(followUpPrompt, host) + "\n\n" + managerGuidance(), context, nil
 }

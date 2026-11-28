@@ -25,7 +25,7 @@ const DesignStartIntentDocument = "design-start-intent"
 const NewProjectHandedLine = "This project's repository is new and holds only a README. Its first unit must set up `dagger check`."
 
 // DesignHandoffTitleSubject is the workflow subject of the one request that
-// asks the chief of staff to title the work a design start began. Its
+// asks the manager to title the work a design start began. Its
 // transition is recorded with the request's outbox notice, so a repeated
 // start records neither again.
 const DesignHandoffTitleSubject = "design-handoff-title"
@@ -37,12 +37,12 @@ const DesignHandoffTitleTransition = "design-handoff-title"
 // HandoffTitleOpening opens the body of every hand-off title request.
 const HandoffTitleOpening = "The owner started work from the design brief handed in at " + DesignBriefPath + "."
 
-// HandoffTitleBody is the body of the notice that asks the chief of staff to
+// HandoffTitleBody is the body of the notice that asks the manager to
 // title the started work: a single workstream when workgroup is false,
 // otherwise the workgroup the brief was handed to every member of. The title
 // is the status goal, set with the status tool under its usual rules. handed
 // is the brief with the design transcript attached, which the new thread of the
-// chief of staff opens from.
+// manager opens from.
 func HandoffTitleBody(workgroup bool, handed string) string {
 	subject := "this workstream"
 	if workgroup {
@@ -53,10 +53,10 @@ func HandoffTitleBody(workgroup bool, handed string) string {
 }
 
 // RequestHandoffTitle records, in the trace of stream, the notice that asks
-// the chief of staff for the started work's title, once. The transition
+// the manager for the started work's title, once. The transition
 // carries the handed brief's timestamp, so a retry of the start repeats the
 // committed transition and records nothing more. stream is the workstream
-// whose chief-of-staff thread opens from the brief.
+// whose manager thread opens from the brief.
 func (s *Controller) RequestHandoffTitle(ctx context.Context, r *trace.Repository, stream config.WorkstreamID, handed trace.Document, workgroup bool) error {
 	h := OwnerHeader(DesignHandoffTitleTransition, r.Project(), stream, DesignStartTransition, handed.At)
 	_, err := r.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: DesignHandoffTitleSubject, To: "requested",
@@ -513,7 +513,7 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 
 // DesignMemberTrace resolves the continued design address to a real member
 // for member-owned drafting and approval documents. Conversation routing keeps
-// the original address and authoritative chief thread.
+// the original address and authoritative manager thread.
 func (s *Controller) DesignMemberTrace(raw string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {
 	project, stream, repo, api := s.ConversationTrace(raw)
 	if api != nil {

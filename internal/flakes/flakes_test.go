@@ -416,7 +416,7 @@ func TestRecordedFromAFlakeFixWorkstreamIsKept(t *testing.T) {
 	}
 }
 
-func TestAReservationKeepsTheChiefsNotesAcrossARestart(t *testing.T) {
+func TestAReservationKeepsTheManagersNotesAcrossARestart(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	o := recordOne(t, f, groupA, "1")

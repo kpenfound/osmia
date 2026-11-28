@@ -255,7 +255,7 @@ func Decision(kind string, stream config.WorkstreamID, opened time.Time, path st
 // escalations: its ratification packet, contested units, presented
 // amendments, held drift rebase, delivery approval, failing publication,
 // final checks that do not complete, parked base, recovery moves that wait for
-// the owner, notices held from the chief of staff and a loop guard pause.
+// the owner, notices held from the manager and a loop guard pause.
 func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Repository, w trace.WorkstreamStatus) ([]InboxEntry, error) {
 	var out []InboxEntry
 	add := func(e InboxEntry, open bool, err error) error {
@@ -369,20 +369,20 @@ func (s *Controller) LoopEntry(repository *trace.Repository, stream config.Works
 	return e, true
 }
 
-// HeldNoticesEntry is the workstream's notices the chief of staff no longer
+// HeldNoticesEntry is the workstream's notices the manager no longer
 // receives because events.MaxDeliveryFailures turns delivering them failed,
-// opened when the first of them was recorded. A message to the chief of
-// staff answers it: once the chief completes a turn answering the owner,
+// opened when the first of them was recorded. A message to the manager of
+// staff answers it: once the manager completes a turn answering the owner,
 // they are delivered again. The notices wait in the workstream's own outbox
-// and are judged against the thread they are delivered to: the shared chief's
+// and are judged against the thread they are delivered to: the shared manager's
 // thread in the workgroup trace for a member of a cross-repo workgroup. A
 // workgroup still joining its members, or whose trace another process holds,
 // shows no card until a later read.
 func (s *Controller) HeldNoticesEntry(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
 	target, closeTarget := repository, func() {}
-	if s.ChiefRepositoryForRead != nil {
+	if s.ManagerRepositoryForRead != nil {
 		var err error
-		target, _, _, closeTarget, err = s.ChiefRepositoryForRead(ctx, repository, stream)
+		target, _, _, closeTarget, err = s.ManagerRepositoryForRead(ctx, repository, stream)
 		if errors.Is(err, ErrWorkgroupJoining) || errors.Is(err, trace.ErrLocked) {
 			return InboxEntry{}, false, nil
 		}
@@ -390,7 +390,7 @@ func (s *Controller) HeldNoticesEntry(ctx context.Context, repository *trace.Rep
 			return InboxEntry{}, false, err
 		}
 	}
-	chief, err := target.ManagerThread(stream)
+	manager, err := target.ManagerThread(stream)
 	closeTarget()
 	if errors.Is(err, os.ErrNotExist) {
 		return InboxEntry{}, false, nil
@@ -409,7 +409,7 @@ func (s *Controller) HeldNoticesEntry(ctx context.Context, repository *trace.Rep
 		if e.Event.Operation != nil || e.Acknowledged {
 			continue
 		}
-		turn, ok := events.Held(e, chief)
+		turn, ok := events.Held(e, manager)
 		if !ok {
 			continue
 		}
@@ -440,7 +440,7 @@ const PublicationEscalation = 3
 
 // RatificationEntry is the workstream's ratification packet while debate
 // rests at the decision it presents and the owner has not ratified it. The
-// chief of staff decides every committee objection that stands first, so the
+// manager decides every committee objection that stands first, so the
 // entry is listed only once none waits for its decision. It offers ratify only
 // while no objection blocks it.
 func RatificationEntry(repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
@@ -568,12 +568,12 @@ func EligibleQuickReply(recommendation string) bool {
 }
 
 // Answer records the owner's ruling on the inbox entry raw numbers. It returns
-// once the ruling and the chief of staff's notice of it are durable; relaying
-// the ruling to the askers is the chief of staff's next turn. For an entry
+// once the ruling and the manager's notice of it are durable; relaying
+// the ruling to the askers is the manager's next turn. For an entry
 // workgroupInbox tagged with a cross-repo workgroup's own synthetic project
 // identity, the ruling is recorded in that workgroup's own trace, which
 // resumes all and only the affected askers in their own repos the next time
-// the shared chief of staff relays it; an ordinary project's own entry is
+// the shared manager relays it; an ordinary project's own entry is
 // unaffected.
 func (s *Controller) Answer(ctx context.Context, raw string, req AnswerRequest) (AnswerResponse, *APIError) {
 	number, err := strconv.Atoi(raw)

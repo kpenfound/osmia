@@ -29,13 +29,13 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-type handoverChief struct {
+type handoverManager struct {
 	mu      sync.Mutex
 	prompts map[string][]string
 	written map[string]string
 }
 
-func (h *handoverChief) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+func (h *handoverManager) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 	listed, err := tools.ListTools(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -75,8 +75,8 @@ func TestHandInToSketchedPlan(t *testing.T) {
 	const issueBody = "# Resumable uploads\r\n\nFrom the issue tracker.\n"
 	opts.Issues = &fixturekit.FakeIssues{Token: "ghp_architect_secret", Text: map[issues.Ref]string{ref: issueBody}}
 
-	chief := &handoverChief{prompts: map[string][]string{}, written: map[string]string{}}
-	engine.Turns["*"] = chief.turn
+	manager := &handoverManager{prompts: map[string][]string{}, written: map[string]string{}}
+	engine.Turns["*"] = manager.turn
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		turns := &isolation.Turns{Workspaces: intake.StagedWorkspaces{}, Views: isolation.Views{Directory: filepath.Join(root, "views")}, Engine: engine,
 			Grants: map[string]coreadapter.Capabilities{trace.Manager: {Tools: []string{status.ToolName}}},
@@ -204,8 +204,8 @@ func TestHandInToSketchedPlan(t *testing.T) {
 		}
 		return ready
 	})
-	chief.mu.Lock()
-	defer chief.mu.Unlock()
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
 	for i, stream := range streams {
 		got, err := f.C.Status(ctx, stream)
 		fixturekit.Must(t, err)
@@ -214,10 +214,10 @@ func TestHandInToSketchedPlan(t *testing.T) {
 			st.Goal != "Ship resumable uploads." || st.Attention != "" || st.Revision != 1 {
 			t.Fatalf("status of %s: %+v %+v", stream, got, st)
 		}
-		if chief.written[string(stream)] != `{"stored":true,"revision":1}` {
-			t.Fatalf("set_status of %s: %q", stream, chief.written[string(stream)])
+		if manager.written[string(stream)] != `{"stored":true,"revision":1}` {
+			t.Fatalf("set_status of %s: %q", stream, manager.written[string(stream)])
 		}
-		prompts := strings.Join(chief.prompts[string(stream)], "\n")
+		prompts := strings.Join(manager.prompts[string(stream)], "\n")
 		for _, want := range []string{
 			events.Preamble,
 			"Workstream state changed to handed: the owner handed in handed/" + inputs[i].handed + " from " + inputs[i].source,

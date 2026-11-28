@@ -182,7 +182,7 @@ func (e *WaitingChecksError) Error() string {
 // the review's operation tries again, so the final read never starts on a
 // commit whose checks show nothing:
 //
-//   - a missing `load` sends the chief of staff one notice for the push;
+//   - a missing `load` sends the manager one notice for the push;
 //   - a failed `load` is a failed result;
 //   - a run still pending, or a completed run with cancelled or unaccounted
 //     checks, is recorded as incomplete when checks_timeout has passed since
@@ -662,7 +662,7 @@ func FinalCheckEvidence(run FinalCheckRun) string {
 	return pullRequestEvidence(run)
 }
 
-// FailedChecksNotice is what the chief of staff hears of a final review whose
+// FailedChecksNotice is what the manager hears of a final review whose
 // recorded check result is a failed Dagger Cloud run: each failed check with
 // the `dagger trace` command that reads it, or the statement that none was
 // found. It is empty for any other record.

@@ -99,7 +99,7 @@ func TestManagerDecisionsSavedBeforeTheChangeAreStillFoundAndStillTakeEffect(t *
 		}
 	}
 
-	actions, err := ChiefActions(repo, stream)
+	actions, err := ManagerActions(repo, stream)
 	fixturekit.Must(t, err)
 	var history []string
 	for _, a := range actions {

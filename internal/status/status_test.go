@@ -143,7 +143,7 @@ func TestCheckAttentionFollowsOwnerGates(t *testing.T) {
 	}
 }
 
-func chief(t *testing.T) (*trace.Repository, coreadapter.Scope, config.Root, config.Project) {
+func manager(t *testing.T) (*trace.Repository, coreadapter.Scope, config.Root, config.Project) {
 	t.Helper()
 	ctx := context.Background()
 	base, err := os.MkdirTemp("", "st-")
@@ -192,7 +192,7 @@ func clock() time.Time { return time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC) }
 
 func TestToolStoresReplacesAndRejects(t *testing.T) {
 	ctx := context.Background()
-	repo, scope, root, p := chief(t)
+	repo, scope, root, p := manager(t)
 	for _, role := range []string{"mason", "reviewer", "architect", ""} {
 		s := scope
 		s.Role = role
@@ -250,8 +250,8 @@ func TestToolStoresReplacesAndRejects(t *testing.T) {
 
 func TestToolAttentionFollowsEscalatedInboxEntry(t *testing.T) {
 	ctx := context.Background()
-	repo, chiefScope, _, p := chief(t)
-	stream := config.WorkstreamID(chiefScope.Workstream)
+	repo, managerScope, _, p := manager(t)
+	stream := config.WorkstreamID(managerScope.Workstream)
 	at := time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC)
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, ID: "mason", Revision: 1, Project: p.ID, Workstream: stream, At: at, Actor: owner, Cause: "workstream-create"}
@@ -265,9 +265,9 @@ func TestToolAttentionFollowsEscalatedInboxEntry(t *testing.T) {
 	asker := coreadapter.Scope{Project: string(p.ID), Workstream: string(stream), Thread: "mason_thread", Turn: "ask", Role: "mason", Unit: "upload"}
 	_, err = repo.Ask(ctx, "mason", asker, "May uploads change?", at)
 	must(t, err)
-	_, err = repo.EscalateQuestions(ctx, "chief", chiefScope, trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "May uploads change?", Blocked: "The upload unit.", Recommendation: "Keep it."}, at)
+	_, err = repo.EscalateQuestions(ctx, "chief", managerScope, trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "May uploads change?", Blocked: "The upload unit.", Recommendation: "Keep it."}, at)
 	must(t, err)
-	tool, err := Tool(repo, "chief", chiefScope, func() time.Time { return at })
+	tool, err := Tool(repo, "chief", managerScope, func() time.Time { return at })
 	must(t, err)
 	call := func(attention string) string {
 		t.Helper()

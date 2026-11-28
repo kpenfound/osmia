@@ -235,7 +235,7 @@ func TestServiceHeldLandingAndStepAllowEveryConversation(t *testing.T) {
 	armed.Store(true)
 	f.Repository().WakeWorkflow()
 	fixturekit.AwaitPollSignal(t, step.entered)
-	chief, err := f.C.Send(context.Background(), a, "Chief message")
+	manager, err := f.C.Send(context.Background(), a, "Chief message")
 	fixturekit.Must(t, err)
 	designed, err := f.C.DesignMessage(context.Background(), design.Design.Workstream, "Design message")
 	fixturekit.Must(t, err)
@@ -244,7 +244,7 @@ func TestServiceHeldLandingAndStepAllowEveryConversation(t *testing.T) {
 	for _, q := range []struct {
 		stream      config.WorkstreamID
 		agent, turn string
-	}{{a, trace.Manager, chief.Turn}, {design.Design.Workstream, trace.Designer, designed.Turn}, {session.Session.Workstream, service.SessionAgentID, messaged.Turn}} {
+	}{{a, trace.Manager, manager.Turn}, {design.Design.Workstream, trace.Designer, designed.Turn}, {session.Session.Workstream, service.SessionAgentID, messaged.Turn}} {
 		pathAwait(t, f.S, "conversation waited for landing or scheduling", func() bool { return pathTurnDone(f.Repository(), q.stream, q.agent, q.turn) })
 	}
 	select {
@@ -898,8 +898,8 @@ func TestServiceEventProfileKeepsItsWindowAndOwnerProfile(t *testing.T) {
 	opts.Reconciliation.Now = clock.Now
 	var passes atomic.Int32
 	opts.SchedulePassed = func() { passes.Add(1) }
-	turns := &fixturekit.ChiefTurns{}
-	journey.RunChief(&opts, cfg, turns)
+	turns := &fixturekit.ManagerTurns{}
+	journey.RunManager(&opts, cfg, turns)
 	s, c := journey.StartT(t, opts)
 	repo := s.Sole().Repository
 
@@ -929,7 +929,7 @@ func TestServiceEventProfileKeepsItsWindowAndOwnerProfile(t *testing.T) {
 	})
 	th, err = repo.ManagerThread(fixturekit.Stream)
 	fixturekit.Must(t, err)
-	eventProfile, err := journey.InspectForTest(s).ChiefEventsProfile(cfg)()
+	eventProfile, err := journey.InspectForTest(s).ManagerEventsProfile(cfg)()
 	fixturekit.Must(t, err)
 	for _, q := range th.Turns {
 		if strings.Contains(q.Request.Prompt, "Profile notice") && q.Request.Profile.Name != eventProfile.Name {
@@ -941,7 +941,7 @@ func TestServiceEventProfileKeepsItsWindowAndOwnerProfile(t *testing.T) {
 	pathAwait(t, s, "owner message did not finish", func() bool { return pathTurnDone(repo, fixturekit.Stream, trace.Manager, sent.Turn) })
 	th, err = repo.ManagerThread(fixturekit.Stream)
 	fixturekit.Must(t, err)
-	_, ownerProfile, err := journey.InspectForTest(s).ChiefOverride(cfg)
+	_, ownerProfile, err := journey.InspectForTest(s).ManagerOverride(cfg)
 	fixturekit.Must(t, err)
 	for _, q := range th.Turns {
 		if q.Request.TurnID == sent.Turn && q.Request.Profile.Name != ownerProfile.Name {

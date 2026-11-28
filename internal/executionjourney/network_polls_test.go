@@ -52,8 +52,8 @@ func TestNetworkPollingKeepsPassesAndConversationsRunning(t *testing.T) {
 			opts, cfg := journey.ConversationFixture(t, "network-poll-")
 			clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 			opts.Reconciliation.Now = clock.Now
-			turns := &fixturekit.ChiefTurns{}
-			journey.RunChief(&opts, cfg, turns)
+			turns := &fixturekit.ManagerTurns{}
+			journey.RunManager(&opts, cfg, turns)
 			host := &heldPoll{entered: make(chan struct{}), cancelled: make(chan struct{}), exit: make(chan struct{})}
 			var exit sync.Once
 			opts.PullRequests = host
@@ -79,11 +79,11 @@ func TestNetworkPollingKeepsPassesAndConversationsRunning(t *testing.T) {
 			before := passes.Load()
 			repo.WakeWorkflow()
 			fixturekit.ConversationAwait(t, func() bool { return passes.Load() > before })
-			chiefStream := fixturekit.Stream
+			managerStream := fixturekit.Stream
 			if archived {
-				chiefStream = fixturekit.Quiet
+				managerStream = fixturekit.Quiet
 			}
-			chief, err := client.Send(ctx, chiefStream, "Chief message")
+			manager, err := client.Send(ctx, managerStream, "Chief message")
 			fixturekit.Must(t, err)
 			designed, err := client.DesignMessage(ctx, design.Design.Workstream, "Design message")
 			fixturekit.Must(t, err)
@@ -92,7 +92,7 @@ func TestNetworkPollingKeepsPassesAndConversationsRunning(t *testing.T) {
 			for _, want := range []struct {
 				stream      config.WorkstreamID
 				agent, turn string
-			}{{chiefStream, trace.Manager, chief.Turn}, {design.Design.Workstream, trace.Designer, designed.Turn}, {session, service.SessionAgentID, messaged.Turn}} {
+			}{{managerStream, trace.Manager, manager.Turn}, {design.Design.Workstream, trace.Designer, designed.Turn}, {session, service.SessionAgentID, messaged.Turn}} {
 				fixturekit.ConversationAwait(t, func() bool {
 					th, err := repo.Thread(want.stream, want.agent)
 					if err != nil {

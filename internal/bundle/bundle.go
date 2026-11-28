@@ -60,7 +60,7 @@ type Bundle struct {
 	ProjectNotices []ProjectNotice  `json:"project_notices"`
 	// ProjectSpec is the scope's workstream's workgroup's project spec,
 	// marked as a draft until group sealing completes. It stays
-	// available to the chief of staff and every unresolved member,
+	// available to the manager and every unresolved member,
 	// including a dependent still waiting on or repairing after an
 	// upstream merge, and leaves the bundle only once every member of the
 	// workgroup is resolved.
@@ -169,7 +169,7 @@ type Decision struct {
 	Scope            string              `json:"scope,omitempty"`
 }
 
-// Notice is an owner ruling the chief of staff relayed with scope notify. It
+// Notice is an owner ruling the manager relayed with scope notify. It
 // applies to the whole project, so every bundle on the project carries it,
 // whatever workstream recorded it and whatever the bundle's scope. A ruling
 // relayed to a batch of questions is one notice.

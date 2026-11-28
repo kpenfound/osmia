@@ -92,7 +92,7 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 			lifecycleWorker(t, f, f.Project2, f.Stream2, "worker_second", "lifecycle-read-ask", "second-read-origin")
 			rightRepo, err := f.S.Repository(f.Project2)
 			fixturekit.Must(t, err)
-			target, host, _, releaseTarget, err := f.S.Lifecycle().ChiefRepository(ctx, rightRepo, f.Stream2)
+			target, host, _, releaseTarget, err := f.S.Lifecycle().ManagerRepository(ctx, rightRepo, f.Stream2)
 			fixturekit.Must(t, err)
 			defer releaseTarget()
 			var original trace.InboxEntry
@@ -117,9 +117,9 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 			journey.LifecycleAwait(t, f, "settled source retirement", func() bool {
 				source, err := f.S.Repository(f.Project)
 				fixturekit.Must(t, err)
-				sourceBusy, sourceChief, err := (&journey.WorkspaceCleanup{Repository: source}).Busy(f.Stream1)
+				sourceBusy, sourceManager, err := (&journey.WorkspaceCleanup{Repository: source}).Busy(f.Stream1)
 				fixturekit.Must(t, err)
-				if len(sourceBusy) != 0 || sourceChief {
+				if len(sourceBusy) != 0 || sourceManager {
 					return false
 				}
 				operations, err := source.Operations(f.Stream1)
@@ -135,7 +135,7 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 				}{{f.Project, f.Stream1}, {f.Project2, f.Stream2}} {
 					repo, err := f.S.Repository(member.project)
 					fixturekit.Must(t, err)
-					skipped, err := intake.ChiefOfStaffSkip(repo)(member.stream)
+					skipped, err := intake.ManagerSkip(repo)(member.stream)
 					fixturekit.Must(t, err)
 					if skipped {
 						continue
@@ -148,9 +148,9 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 						}
 					}
 				}
-				chief, err := target.Thread(host, trace.Manager)
+				manager, err := target.Thread(host, trace.Manager)
 				fixturekit.Must(t, err)
-				return !slices.ContainsFunc(chief.Turns, func(turn trace.QueuedTurn) bool { return turn.CompletedAt.IsZero() })
+				return !slices.ContainsFunc(manager.Turns, func(turn trace.QueuedTurn) bool { return turn.CompletedAt.IsZero() })
 			})
 			before, err := target.Inbox()
 			fixturekit.Must(t, err)
@@ -204,8 +204,8 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 			case <-time.After(time.Minute):
 				source, err := f.S.Repository(f.Project)
 				fixturekit.Must(t, err)
-				busy, chief, err := (&journey.WorkspaceCleanup{Repository: source}).Busy(f.Stream1)
-				t.Logf("source cleanup busy=%v chief=%v error=%v", busy, chief, err)
+				busy, manager, err := (&journey.WorkspaceCleanup{Repository: source}).Busy(f.Stream1)
+				t.Logf("source cleanup busy=%v chief=%v error=%v", busy, manager, err)
 				for _, scope := range []struct {
 					repo   *trace.Repository
 					stream config.WorkstreamID
@@ -269,7 +269,7 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 				}
 				outbox, err := rightRepo.Outbox(f.Stream2)
 				fixturekit.Must(t, err)
-				chief, err := target.Thread(host, trace.Manager)
+				manager, err := target.Thread(host, trace.Manager)
 				fixturekit.Must(t, err)
 				for _, e := range outbox {
 					if e.Event.Operation != nil || !strings.Contains(e.Event.Body, "survivor-after-read-cleanup") {
@@ -288,7 +288,7 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 							claims[events.TurnID(action.Token)] = true
 						}
 					}
-					for _, turn := range chief.Turns {
+					for _, turn := range manager.Turns {
 						if claims[turn.Request.TurnID] && !turn.CompletedAt.IsZero() && turn.Status() == "idle" {
 							deliveries++
 						}

@@ -337,7 +337,7 @@ func TestDesignPinnedStartRecoversEveryDurableBoundaryWithNewerDraft(t *testing.
 	}
 }
 
-func TestDesignStartExcludesConversationHomeAndContinuesSharedChief(t *testing.T) {
+func TestDesignStartExcludesConversationHomeAndContinuesSharedManager(t *testing.T) {
 	t.Parallel()
 	s, c, home, engine := newDesignEnforcementFixture(t)
 	ctx := context.Background()
@@ -374,9 +374,9 @@ func TestDesignStartExcludesConversationHomeAndContinuesSharedChief(t *testing.T
 	if group.Conversation == nil || group.Conversation.Project != home || group.Conversation.Workstream != origin {
 		t.Fatalf("conversation moved: %+v", group)
 	}
-	chief, host, _, close, err := s.ChiefRepository(ctx, r, origin)
+	manager, host, _, close, err := s.ManagerRepository(ctx, r, origin)
 	fixturekit.Must(t, err)
-	after, err := chief.Thread(host, trace.Manager)
+	after, err := manager.Thread(host, trace.Manager)
 	close()
 	fixturekit.Must(t, err)
 	if after.Identity.Role != trace.Manager {

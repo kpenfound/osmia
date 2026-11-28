@@ -111,7 +111,7 @@ func (a *archivedUpstream) scriptTurns(t *testing.T) func(*journey.ProductionDes
 		}
 		fixturekit.ConfigureDeliverySigner(t, clone)
 		f.Engine.Mu.Lock()
-		chief := f.Engine.Turns["*"]
+		manager := f.Engine.Turns["*"]
 		f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 			var err error
 			switch {
@@ -150,7 +150,7 @@ func (a *archivedUpstream) scriptTurns(t *testing.T) func(*journey.ProductionDes
 				}
 				_, err = fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "The client resumes uploads", "findings": findings})
 			default:
-				return chief(ctx, req, turn, tools)
+				return manager(ctx, req, turn, tools)
 			}
 			if err != nil {
 				t.Logf("engine turn %s: %v", req.Name, err)

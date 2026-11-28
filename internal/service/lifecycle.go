@@ -113,12 +113,12 @@ const deltaTurnAction = lifecycle.DeltaTurnAction
 
 type deltaRunner = lifecycle.DeltaRunner
 
-func (s *Service) chiefRepository(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host, bundleStream config.WorkstreamID, close func(), err error) {
-	return s.lifecycle().ChiefRepository(ctx, repository, stream)
+func (s *Service) managerRepository(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host, bundleStream config.WorkstreamID, close func(), err error) {
+	return s.lifecycle().ManagerRepository(ctx, repository, stream)
 }
 
-func (s *Service) chiefRepositoryForRead(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host, bundleStream config.WorkstreamID, close func(), err error) {
-	return s.lifecycle().ChiefRepositoryForRead(ctx, repository, stream)
+func (s *Service) managerRepositoryForRead(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host, bundleStream config.WorkstreamID, close func(), err error) {
+	return s.lifecycle().ManagerRepositoryForRead(ctx, repository, stream)
 }
 
 func (s *Service) archive(raw string) (api.ArchiveResponse, *APIError) {

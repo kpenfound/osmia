@@ -119,7 +119,7 @@ func TestProjectSpecInitialDraftRetriesWithItsProblems(t *testing.T) {
 	}
 }
 
-func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
+func TestProjectSpecDraftStopsRetryingAndTheManagerAsksAgain(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := newCrossRepoRatifyFixture(t)
@@ -172,9 +172,9 @@ func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
 		t.Fatalf("refusal reported %d times", notices)
 	}
 
-	chief := trace.Actor{Kind: "agent", ID: trace.Manager}
+	manager := trace.Actor{Kind: "agent", ID: trace.Manager}
 	repo := mustRepo(t, f.S, f.Project)
-	_, apiFault = f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.InShedState, Note: "Start the review."}, chief, "chief-turn-1")
+	_, apiFault = f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.InShedState, Note: "Start the review."}, manager, "chief-turn-1")
 	if err := asError(apiFault); !intakefixture.Failed(err, api.Conflict) || !containsMessage(err, "stays sketched") || !containsMessage(err, "last 3 drafts were refused") {
 		t.Fatalf("in-shed move does not explain the wait: %v", apiFault)
 	}
@@ -189,14 +189,14 @@ func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
 		_, err := fixturekit.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, validProjectSpecDraft(f))
 		return err
 	})
-	out, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, chief, "chief-turn-2")
+	out, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "chief-turn-2")
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	if out.State != intake.SketchedState || !strings.Contains(out.Detail, "drafts the workgroup spec again") {
 		t.Fatalf("chief's request not taken: %+v", out)
 	}
-	if _, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, chief, "chief-turn-3"); !intakefixture.Failed(asError(apiFault), api.Conflict) || !containsMessage(asError(apiFault), "drafting the workgroup spec") {
+	if _, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "chief-turn-3"); !intakefixture.Failed(asError(apiFault), api.Conflict) || !containsMessage(asError(apiFault), "drafting the workgroup spec") {
 		t.Fatalf("second request while drafting: %v", apiFault)
 	}
 	fixturekit.Must(t, f.S.Lifecycle().DraftProjectSpecIfReady(ctx, mustRepo(t, f.S, f.Project), id))
@@ -218,7 +218,7 @@ func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
 	if got := leaderNotices(t, f, recorded); len(got) != 1 {
 		t.Fatalf("recorded workgroup spec reported %d times after the reported refusals", len(got))
 	}
-	if _, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, chief, "chief-turn-4"); apiFault == nil || containsMessage(asError(apiFault), "drafts the workgroup spec again") {
+	if _, apiFault := f.S.Lifecycle().MoveWorkstream(ctx, repo, f.Stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, manager, "chief-turn-4"); apiFault == nil || containsMessage(asError(apiFault), "drafts the workgroup spec again") {
 		t.Fatalf("a recorded workgroup spec was drafted again: %v", apiFault)
 	}
 }

@@ -120,7 +120,7 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		if scope.Role != trace.Manager && scope.Role != masonRole && scope.Role != reviewerRole {
 			return nil, errors.New("discovery recording is not granted to this role")
 		}
-		target, stream, refusal, err := chiefMember(r, scope, in.Workstream)
+		target, stream, refusal, err := managerMember(r, scope, in.Workstream)
 		if err != nil {
 			return nil, err
 		}

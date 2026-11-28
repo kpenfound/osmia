@@ -102,7 +102,7 @@ func (f *autoArchiveFixture) during(step string, hook func()) {
 	}
 }
 
-func TestAutoArchiveRecordsTheChiefOfStaffAndMatchesTheOwnersArchive(t *testing.T) {
+func TestAutoArchiveRecordsTheManagerAndMatchesTheOwnersArchive(t *testing.T) {
 	t.Parallel()
 	auto := newAutoArchiveFixture(t, "auto-archive-auto-")
 	owner := newAutoArchiveFixture(t, "auto-archive-owner-")
@@ -114,24 +114,24 @@ func TestAutoArchiveRecordsTheChiefOfStaffAndMatchesTheOwnersArchive(t *testing.
 	if resp, apiFault := owner.s.Lifecycle().Archive(string(fixturekit.Stream)); apiFault != nil || !resp.Archived || resp.ArchivedBy != "owner" {
 		t.Fatalf("owner archive: %+v %v", resp, apiFault)
 	}
-	chief, ok := auto.archive()
+	manager, ok := auto.archive()
 	if !ok {
 		t.Fatal("the merged workstream was not archived")
 	}
-	if chief.Actor != runtime.ArchiveActorChief || chief.State != intake.DeliveredState || chief.DeliveryLink != "https://example.invalid/pull/7" || chief.ResolutionEvidence != "merged" || !chief.Resolved ||
-		chief.Publication.PullRequest != autoArchivePullRequest || chief.Publication.Branch != intake.FeatureBranch(fixturekit.Stream) || chief.MergeCommit != "merge-commit" || chief.MergeReference == "" {
-		t.Fatalf("automatic archive=%+v", chief)
+	if manager.Actor != runtime.ArchiveActorManager || manager.State != intake.DeliveredState || manager.DeliveryLink != "https://example.invalid/pull/7" || manager.ResolutionEvidence != "merged" || !manager.Resolved ||
+		manager.Publication.PullRequest != autoArchivePullRequest || manager.Publication.Branch != intake.FeatureBranch(fixturekit.Stream) || manager.MergeCommit != "merge-commit" || manager.MergeReference == "" {
+		t.Fatalf("automatic archive=%+v", manager)
 	}
-	if lifecycle.ArchivedBy(chief) != "chief_of_staff" {
-		t.Fatalf("archived by %q", lifecycle.ArchivedBy(chief))
+	if lifecycle.ArchivedBy(manager) != "chief_of_staff" {
+		t.Fatalf("archived by %q", lifecycle.ArchivedBy(manager))
 	}
 	byOwner, _ := owner.archive()
 	if byOwner.Actor != "" || lifecycle.ArchivedBy(byOwner) != "owner" {
 		t.Fatalf("owner archive=%+v", byOwner)
 	}
-	chief.Actor, chief.ArchivedAt, byOwner.ArchivedAt = "", time.Time{}, time.Time{}
-	if !reflect.DeepEqual(chief, byOwner) {
-		t.Fatalf("automatic archive differs from the owner's:\n%+v\n%+v", chief, byOwner)
+	manager.Actor, manager.ArchivedAt, byOwner.ArchivedAt = "", time.Time{}, time.Time{}
+	if !reflect.DeepEqual(manager, byOwner) {
+		t.Fatalf("automatic archive differs from the owner's:\n%+v\n%+v", manager, byOwner)
 	}
 	if auto.host.Finds != 0 {
 		t.Fatalf("the automatic archive looked up pull requests %d times", auto.host.Finds)
@@ -272,7 +272,7 @@ func TestAutoArchiveWritesNothingWhenEvidenceChangesBeforeCommit(t *testing.T) {
 				}
 				f.mustPass()
 				a, ok := f.archive()
-				if !ok || f.archives() != 1 || a.Actor != runtime.ArchiveActorChief || a.State != intake.DeliveredState {
+				if !ok || f.archives() != 1 || a.Actor != runtime.ArchiveActorManager || a.State != intake.DeliveredState {
 					t.Fatalf("later pass archive=%+v ok=%v", a, ok)
 				}
 				if change == "new publication" && a.Publication.PullRequest != autoArchivePullRequest+1 {

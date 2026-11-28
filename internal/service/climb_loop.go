@@ -203,10 +203,10 @@ func (s *Service) concludeExit(repository *trace.Repository, stream config.Works
 	id := "climb-concluded"
 	authority := router.AuthorityOwner
 	if by.Kind != intake.OwnerActor.Kind {
-		authority = router.AuthorityChief
+		authority = router.AuthorityManager
 	}
 	who := "the owner"
-	if authority == router.AuthorityChief {
+	if authority == router.AuthorityManager {
 		who = "the chief of staff"
 	}
 	body := fmt.Sprintf("The climb was concluded now by %s. No attempt starts again; an attempt in flight is discarded, and the branch goes on to its rebase and delivery.", who)

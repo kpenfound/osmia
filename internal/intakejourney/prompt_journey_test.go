@@ -50,7 +50,7 @@ func (p *journeyProblems) check(t *testing.T) {
 	}
 }
 
-func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheChiefBeginsAnew(t *testing.T) {
+func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheManagerBeginsAnew(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	prepared := servicetest.PrepareDesignEnforcement(t,
@@ -87,7 +87,7 @@ func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheCh
 		if !slices.Equal(names, designToolNames) {
 			problems.add("%s: design tools %v", req.Name, names)
 		}
-		for _, probe := range chiefToolProbes {
+		for _, probe := range managerToolProbes {
 			if out, err := fixturekit.CallTool(ctx, tools, probe, map[string]any{}); err == nil {
 				problems.add("%s: a designer turn called %s: %s", req.Name, probe, out)
 			}
@@ -157,8 +157,8 @@ func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheCh
 	if designThread.Identity.Role != trace.Designer || designThread.Identity.ThreadID != trace.Designer || len(designThread.Turns) != len(steps) {
 		t.Fatalf("the design thread: %+v with %d turns, want %d", designThread.Identity, len(designThread.Turns), len(steps))
 	}
-	if chief, err := repo.ManagerThread(stream); err != nil || len(chief.Turns) != 0 {
-		t.Fatalf("a design turn reached the chief of staff's thread: %+v %v", chief.Turns, err)
+	if manager, err := repo.ManagerThread(stream); err != nil || len(manager.Turns) != 0 {
+		t.Fatalf("a design turn reached the chief of staff's thread: %+v %v", manager.Turns, err)
 	}
 	var first fixturekit.LoggedTurn
 	for i, q := range designThread.Turns {
@@ -211,12 +211,12 @@ func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheCh
 			t.Fatalf("the handed document lacks %q:\n%s", want, handed.Content)
 		}
 	}
-	chief, err := repo.ManagerThread(stream)
+	manager, err := repo.ManagerThread(stream)
 	fixturekit.Must(t, err)
-	if chief.Identity.Role != trace.Manager || chief.Identity.ThreadID != trace.Manager || chief.Identity.ID == designThread.Identity.ID {
-		t.Fatalf("the chief's thread %+v is not its own, apart from the design thread %+v", chief.Identity, designThread.Identity)
+	if manager.Identity.Role != trace.Manager || manager.Identity.ThreadID != trace.Manager || manager.Identity.ID == designThread.Identity.ID {
+		t.Fatalf("the chief's thread %+v is not its own, apart from the design thread %+v", manager.Identity, designThread.Identity)
 	}
-	opening := chief.Turns[0].Request
+	opening := manager.Turns[0].Request
 	seeds := append(strings.Split(content, "\n"), intake.HandoffTitleOpening, "## Transcript", "Owner: message 1", "Agent: Reply to message 1", "Owner: message 5", "Agent: Reply to message 5")
 	for _, want := range seeds {
 		if !strings.Contains(opening.Prompt, want) {
@@ -226,7 +226,7 @@ func TestADesignSessionKeepsItsPromptThroughBriefChangesARestartAndStartAndTheCh
 	if opening.AgentID != trace.Manager || opening.SystemPrompt == intake.DesignRolePrompt {
 		t.Fatalf("the chief's first turn: agent %q, designer prompt %v", opening.AgentID, opening.SystemPrompt == intake.DesignRolePrompt)
 	}
-	for _, q := range chief.Turns {
+	for _, q := range manager.Turns {
 		turn, ok := log.Turn(q.Request.TurnID)
 		if !ok {
 			continue

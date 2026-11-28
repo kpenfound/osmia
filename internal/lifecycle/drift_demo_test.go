@@ -357,14 +357,14 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	f.Engine.Turns[lifecycle.DriftResolveTurnID(1, 1)] = demo.resolve
 	f.Engine.Turns[intake.DriftMasonAgent+"-recover-1"] = demo.recover
 	f.Engine.Turns[lifecycle.DriftReviewTurnID(1, 1)] = demo.reviewDrift
-	chief := f.Engine.Turns["*"]
+	manager := f.Engine.Turns["*"]
 	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for _, unit := range []string{"resume", "audit"} {
 			if strings.HasPrefix(req.Name, intake.ReviewerAgent(unit)+"-review-") {
 				return demo.review(ctx, unit, req, tools)
 			}
 		}
-		return chief(ctx, req, verified, tools)
+		return manager(ctx, req, verified, tools)
 	}
 	f.Engine.Mu.Unlock()
 

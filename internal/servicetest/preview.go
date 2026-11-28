@@ -28,7 +28,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// PreviewJourney binds the production chief tool host to offline capture commands.
+// PreviewJourney binds the production manager tool host to offline capture commands.
 // The member has a sealed build and a feature head beyond its base; its sibling
 // keeps the shared conversation alive after the member is archived.
 type PreviewJourney struct {
@@ -147,7 +147,7 @@ func NewPreviewJourney(t *testing.T) *PreviewJourney {
 	return f
 }
 
-// Capture sends an owner message whose chief turn inspects the committed
+// Capture sends an owner message whose manager turn inspects the committed
 // Service and calls the production preview tool through MCP.
 func (f *PreviewJourney) Capture(t *testing.T) api.FeedImage {
 	t.Helper()

@@ -169,10 +169,10 @@ func (j *crossProjectJourney) cliHandIn(t *testing.T) {
 		fixturekit.Must(t, err)
 		return state.Value == "complete"
 	})
-	chief, host, _, closeChief, err := j.S.ChiefRepository(context.Background(), r, j.Origin)
+	manager, host, _, closeManager, err := j.S.ManagerRepository(context.Background(), r, j.Origin)
 	fixturekit.Must(t, err)
-	j.Before, err = chief.Thread(host, trace.Manager)
-	closeChief()
+	j.Before, err = manager.Thread(host, trace.Manager)
+	closeManager()
 	fixturekit.Must(t, err)
 }
 

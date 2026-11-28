@@ -428,7 +428,7 @@ func TestAmendmentDecisionIsCompletedOnceAfterARestart(t *testing.T) {
 	}
 }
 
-func TestChiefOfStaffRecordsTheOwnersAmendmentDecision(t *testing.T) {
+func TestManagerRecordsTheOwnersAmendmentDecision(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, stream := journey.BuiltForAmendment(t, 1)

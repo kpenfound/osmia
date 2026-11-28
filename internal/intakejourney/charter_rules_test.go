@@ -59,13 +59,13 @@ func newCharterFixture(t *testing.T) *charterFixture {
 	mason := f.claim(t, repo, "agent_mason", "thread_mason", intake.MasonRole, "build", intake.ServiceActor)
 	_, err = repo.Ask(ctx, "agent_mason", mason, "May an upload restart from zero?", f.clock.Now())
 	fixturekit.Must(t, err)
-	chief := f.claim(t, repo, trace.Manager, trace.Manager, trace.Manager, "events_1", intake.ServiceActor)
-	_, err = repo.EscalateQuestions(ctx, trace.Manager, chief, trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "May an upload restart from zero?",
+	manager := f.claim(t, repo, trace.Manager, trace.Manager, trace.Manager, "events_1", intake.ServiceActor)
+	_, err = repo.EscalateQuestions(ctx, trace.Manager, manager, trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "May an upload restart from zero?",
 		Blocked: "The upload unit.", Options: []string{"Resume", "Restart"}, Recommendation: "Resume."}, f.clock.Now())
 	fixturekit.Must(t, err)
 	_, err = repo.Rule(ctx, 1, intakefixture.CharterRuling, intake.OwnerActor, f.clock.Now())
 	fixturekit.Must(t, err)
-	tools, err := questions.Tools(repo, trace.Manager, chief, f.clock.Now)
+	tools, err := questions.Tools(repo, trace.Manager, manager, f.clock.Now)
 	fixturekit.Must(t, err)
 	for _, tool := range tools {
 		if tool.Name != questions.ProposeCharterTool {

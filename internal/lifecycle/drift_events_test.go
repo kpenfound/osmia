@@ -47,7 +47,7 @@ func checkMoved(t *testing.T, e trace.OutboxEntry, stream config.WorkstreamID, m
 	}
 }
 
-func chiefDeliverer(t *testing.T, f *journey.ShedFixture, repository *trace.Repository, stream config.WorkstreamID) *events.Deliverer {
+func managerDeliverer(t *testing.T, f *journey.ShedFixture, repository *trace.Repository, stream config.WorkstreamID) *events.Deliverer {
 	t.Helper()
 	if _, err := repository.ManagerThread(stream); errors.Is(err, os.ErrNotExist) {
 		fixturekit.Must(t, repository.CreateThread(context.Background(), trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: trace.Manager, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.S.Now(), Actor: execution.ForemanActor, Cause: "test"}, Role: trace.Manager, ThreadID: trace.Manager}))
@@ -74,7 +74,7 @@ func deliveredTurns(t *testing.T, repository *trace.Repository, stream config.Wo
 	return n
 }
 
-func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
+func TestConflictedDriftTellsTheManagerOnceAndItsMasonMayAmend(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, _ := journey.NewFinalFixtureWith(t, "drift-moved", "")
 	d := journey.Drifter{Foreman: &journey.Foreman{Masons: journey.NewMasonController(f.S, repository)}}
@@ -90,7 +90,7 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 	}
 	checkMoved(t, moved[0], stream, move, "feature branch "+intake.FeatureBranch(stream)+" conflicts with upstream in CODEOWNERS")
 	conflicted := moved[0].Event.Body
-	fixturekit.Must(t, chiefDeliverer(t, f, repository, stream).Pass(ctx))
+	fixturekit.Must(t, managerDeliverer(t, f, repository, stream).Pass(ctx))
 	if n := deliveredTurns(t, repository, stream, conflicted); n != 1 {
 		t.Fatalf("the conflict was delivered in %d turns", n)
 	}
@@ -160,7 +160,7 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 	if moved = upstreamMovedEvents(t, repository, stream); len(moved) != 2 {
 		t.Fatalf("upstream moved events after a restart %+v", moved)
 	}
-	deliverer := chiefDeliverer(t, f, repository, stream)
+	deliverer := managerDeliverer(t, f, repository, stream)
 	fixturekit.Must(t, deliverer.Pass(ctx))
 	if n := deliveredTurns(t, repository, stream, moved[1].Event.Body); n != 0 {
 		t.Fatalf("the amendment's event was queued behind the conflict's turn in %d turns", n)
@@ -269,7 +269,7 @@ func TestDriftCarryReturnsApprovalsAndTheirReviewerMayAmend(t *testing.T) {
 	}
 }
 
-func TestDriftUnderAFinalReportTellsTheChief(t *testing.T) {
+func TestDriftUnderAFinalReportTellsTheManager(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, report := journey.DeliveryFixture(t)
 	ctx := context.Background()

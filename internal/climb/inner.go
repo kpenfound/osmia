@@ -37,7 +37,7 @@ const (
 	// InnerClimbing is the state the owner's approval starts. The attempt
 	// loop runs in it.
 	InnerClimbing = "climbing"
-	// InnerConcluding is the state a firing stop rule, the owner or the chief
+	// InnerConcluding is the state a firing stop rule, the owner or the manager
 	// of staff moves a climb to. Concluding, the rebase and the delivery of the
 	// branch belong to the delivery of the kind.
 	InnerConcluding = "concluding"

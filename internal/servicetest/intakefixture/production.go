@@ -51,8 +51,8 @@ type ProductionDesignRepo struct {
 	Clone, Upstream, Remote, Main string
 }
 
-// ProductionChiefDispatch records execution-boundary observations for diagnostics.
-type ProductionChiefDispatch struct {
+// ProductionManagerDispatch records execution-boundary observations for diagnostics.
+type ProductionManagerDispatch struct {
 	Mu                         sync.Mutex
 	Bindings                   int
 	Prepared                   thread.TurnInput
@@ -85,11 +85,11 @@ type ProductionDesign struct {
 	Clone                    string
 	Engine                   *fixturekit.DemoEngine
 	Clock                    *fixturekit.FixedClock
-	Dispatch                 *ProductionChiefDispatch
+	Dispatch                 *ProductionManagerDispatch
 	Client                   func() ProductionDesignClient
 	Config                   func() *config.Config
 	Repository               func(config.ProjectID) (*trace.Repository, error)
-	ChiefRepository          func(context.Context, *trace.Repository, config.WorkstreamID) (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error)
+	ManagerRepository        func(context.Context, *trace.Repository, config.WorkstreamID) (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error)
 	Feed                     func(string) (api.FeedResponse, *api.APIError)
 	Ready                    func() bool
 	Done                     func() <-chan struct{}
@@ -223,9 +223,9 @@ func (f *ProductionDesign) Timeout(t *testing.T, phase string) {
 			}
 		}
 		if i == 1 {
-			chief, host, _, close, err := f.ChiefRepository(context.Background(), repo, member)
+			manager, host, _, close, err := f.ManagerRepository(context.Background(), repo, member)
 			if err == nil {
-				f.LogTurns(t, chief, host)
+				f.LogTurns(t, manager, host)
 				close()
 			} else {
 				t.Logf("shared chief error=%v", err)
@@ -265,7 +265,7 @@ func (f *ProductionDesign) OwnerSummary(t *testing.T) {
 		t.Logf("OWNER source error=%v", err)
 		return
 	}
-	chief, host, _, release, err := f.ChiefRepository(context.Background(), repo, *f.Origin)
+	manager, host, _, release, err := f.ManagerRepository(context.Background(), repo, *f.Origin)
 	if err != nil {
 		t.Logf("OWNER shared error=%v", err)
 		return
@@ -292,12 +292,12 @@ func (f *ProductionDesign) OwnerSummary(t *testing.T) {
 			t.Logf("OWNER address=%s project=%s error=%v", address, project, err)
 			continue
 		}
-		target, routedHost, _, closeTarget, err := f.ChiefRepository(context.Background(), member, address)
+		target, routedHost, _, closeTarget, err := f.ManagerRepository(context.Background(), member, address)
 		if err != nil {
 			t.Logf("OWNER address=%s route error=%v", address, err)
 			continue
 		}
-		t.Logf("OWNER address=%s project=%s shared-project=%s host=%s shared-handle=%v leader=%s", address, project, target.Project(), routedHost, target == chief && routedHost == host, leader)
+		t.Logf("OWNER address=%s project=%s shared-project=%s host=%s shared-handle=%v leader=%s", address, project, target.Project(), routedHost, target == manager && routedHost == host, leader)
 		closeTarget()
 		if address == leader {
 			streams, err := member.Workstreams()
@@ -313,13 +313,13 @@ func (f *ProductionDesign) OwnerSummary(t *testing.T) {
 			}
 		}
 	}
-	th, err := chief.Thread(host, trace.Manager)
+	th, err := manager.Thread(host, trace.Manager)
 	if err != nil {
 		t.Logf("OWNER thread error=%v", err)
 		return
 	}
 	q, ready := f.NextReadyTurn(th)
-	t.Logf("OWNER shared-project=%s host=%s identity-project=%s identity-thread=%s status=%s active=%s parked=%v oldest=%s ready=%v", chief.Project(), host, th.Identity.Project, th.Identity.ThreadID, th.Status, th.Active, th.Parked(), q.Request.TurnID, ready)
+	t.Logf("OWNER shared-project=%s host=%s identity-project=%s identity-thread=%s status=%s active=%s parked=%v oldest=%s ready=%v", manager.Project(), host, th.Identity.Project, th.Identity.ThreadID, th.Status, th.Active, th.Parked(), q.Request.TurnID, ready)
 	for _, turn := range th.Turns {
 		if turn.Request.TurnID != sent.Turn && turn.Request.TurnID != q.Request.TurnID {
 			continue
@@ -330,12 +330,12 @@ func (f *ProductionDesign) OwnerSummary(t *testing.T) {
 		}
 		t.Logf("OWNER turn=%s request=%s revision=%d project=%s workstream=%s actor=%+v text-matches=%v status=%s claim=%+v response=%s completed=%v failure=%s", turn.Request.TurnID, turn.Request.ID, turn.Request.Revision, turn.Request.Project, turn.Request.Workstream, turn.Request.Actor, turn.Request.Prompt == sent.Text, turn.Status(), turn.Claim, response, turn.CompletedAt, failure)
 	}
-	op, err := thread.TurnOperation(chief.Project(), "workgroup-chief-"+sent.Turn, thread.TurnInput{Workstream: host, Agent: trace.Manager, Turn: sent.Turn})
+	op, err := thread.TurnOperation(manager.Project(), "workgroup-chief-"+sent.Turn, thread.TurnInput{Workstream: host, Agent: trace.Manager, Turn: sent.Turn})
 	if err != nil {
 		t.Logf("OWNER operation error=%v", err)
 		return
 	}
-	observation, err := (thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: chief}}).Inspect(context.Background(), op)
+	observation, err := (thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: manager}}).Inspect(context.Background(), op)
 	t.Logf("OWNER dispatch=%s observation=%+v error=%v; direct dispatch has no retry timer", op.ID, observation, err)
 }
 
@@ -453,7 +453,7 @@ func (f *ProductionDesign) AwaitPacket(t *testing.T) api.PacketResponse {
 			}
 		}
 	}
-	f.RebaseChief(t)
+	f.RebaseManager(t)
 	return packet
 }
 
@@ -497,16 +497,16 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 		if _, found := trace.WorkgroupOf(groups, m); found {
 			t.Fatal("member retains a one-workstream group")
 		}
-		target, host, _, close, err := f.ChiefRepository(ctx, repo, m)
+		target, host, _, close, err := f.ManagerRepository(ctx, repo, m)
 		fixturekit.Must(t, err)
-		chief, err := target.Thread(host, trace.Manager)
+		manager, err := target.Thread(host, trace.Manager)
 		close()
 		fixturekit.Must(t, err)
-		if chief.Identity.Role != trace.Manager {
-			t.Fatalf("the workgroup's chief thread has role %q", chief.Identity.Role)
+		if manager.Identity.Role != trace.Manager {
+			t.Fatalf("the workgroup's chief thread has role %q", manager.Identity.Role)
 		}
 		for _, design := range f.Design.Turns {
-			if slices.ContainsFunc(chief.Turns, func(q trace.QueuedTurn) bool { return q.Request.ID == design.Request.ID }) {
+			if slices.ContainsFunc(manager.Turns, func(q trace.QueuedTurn) bool { return q.Request.ID == design.Request.ID }) {
 				t.Fatalf("design turn %s is on the chief's thread", design.Request.ID)
 			}
 		}
@@ -557,9 +557,9 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 	if len(f.Design.Turns) > 0 && !slices.ContainsFunc(historical, func(req trace.TurnRequest) bool { return req.ID == f.Design.Turns[0].Request.ID }) {
 		t.Fatal("historical design request was lost")
 	}
-	chief, _, _, closeChief, err := f.ChiefRepository(ctx, repo, *f.Stream1)
+	manager, _, _, closeManager, err := f.ManagerRepository(ctx, repo, *f.Stream1)
 	fixturekit.Must(t, err)
-	defer closeChief()
+	defer closeManager()
 	matching, err := readview.Consistent(func() (bool, error) {
 		var entries []api.ConversationEntry
 		var feed []api.FeedEntry
@@ -582,7 +582,7 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 			}
 		}
 		return true, nil
-	}, chief.Generation)
+	}, manager.Generation)
 	fixturekit.Must(t, err)
 	if !matching {
 		t.Fatal("continued address and member endpoints resolve to different conversations or feeds")
@@ -654,18 +654,18 @@ func (f *ProductionDesign) AssertBarrier(t *testing.T) {
 	}
 }
 
-// RebaseChief makes the baseline of the chief of staff's thread the thread the
-// workgroup's chief opened at Start. A started design session's chief begins a
+// RebaseManager makes the baseline of the manager's thread the thread the
+// workgroup's manager opened at Start. A started design session's manager begins a
 // new thread, so only that thread's identity, not the design session's, holds
 // from here on.
-func (f *ProductionDesign) RebaseChief(t *testing.T) {
+func (f *ProductionDesign) RebaseManager(t *testing.T) {
 	t.Helper()
 	repo, err := f.Repository(*f.Project)
 	fixturekit.Must(t, err)
-	chief, host, _, closeChief, err := f.ChiefRepository(context.Background(), repo, *f.Stream1)
+	manager, host, _, closeManager, err := f.ManagerRepository(context.Background(), repo, *f.Stream1)
 	fixturekit.Must(t, err)
-	th, err := chief.Thread(host, trace.Manager)
-	closeChief()
+	th, err := manager.Thread(host, trace.Manager)
+	closeManager()
 	fixturekit.Must(t, err)
 	if !EqualJSONTest(f.Before.Identity, th.Identity) {
 		*f.Before = trace.Thread{Identity: th.Identity}
@@ -681,7 +681,7 @@ func (f *ProductionDesign) AwaitApproved(t *testing.T) {
 		fixturekit.Must(t, err)
 		return ok
 	})
-	f.RebaseChief(t)
+	f.RebaseManager(t)
 	for i, m := range []config.WorkstreamID{*f.Stream1, *f.Stream2} {
 		p := *f.Project
 		if i == 1 {

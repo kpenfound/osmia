@@ -36,7 +36,7 @@ func startNotifying(t *testing.T, opts Options, inbox *fixturekit.NotificationIn
 }
 
 // The notifier reads the service's own inbox: an escalation that opens after
-// the webhook is set is posted with the chief of staff's rephrasing and
+// the webhook is set is posted with the manager's rephrasing and
 // recommendation, and the delivery already open is not.
 func TestNotifyReadsTheServiceInbox(t *testing.T) {
 	t.Parallel()

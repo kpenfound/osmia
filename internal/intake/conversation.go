@@ -8,9 +8,9 @@ import (
 // OwnerActor is the provenance of messages the owner sends.
 var OwnerActor = trace.Actor{Kind: "owner", ID: "local"}
 
-// OwnerWritingGuidance tells the chief of staff the format of the text the
+// OwnerWritingGuidance tells the manager the format of the text the
 // owner's inbox shows. It belongs in the system prompt of every
-// chief-of-staff turn.
+// manager turn.
 const OwnerWritingGuidance = "## Inbox text\n" +
 	"The owner reads your escalations, escalated contests and held units in an inbox, often on a phone, and decides from them in under a minute. Write each one in this order: " +
 	"the decision you need, in one or two plain sentences; what is stuck, in one sentence; each option as one sentence that says what happens if the owner chooses it; and your recommendation, which is the option you would choose and its main reason. " +

@@ -12,10 +12,10 @@ func IsSession(repository *trace.Repository, stream config.WorkstreamID) (bool, 
 	return kind == trace.SessionKind, err
 }
 
-// ChiefOfStaffSkip reports whether a workstream's events stay undelivered to
-// its chief of staff: an abandoned workstream, or a session, which has no chief
+// ManagerSkip reports whether a workstream's events stay undelivered to
+// its manager: an abandoned workstream, or a session, which has no manager
 // of staff to deliver them to.
-func ChiefOfStaffSkip(repository *trace.Repository) func(config.WorkstreamID) (bool, error) {
+func ManagerSkip(repository *trace.Repository) func(config.WorkstreamID) (bool, error) {
 	return func(stream config.WorkstreamID) (bool, error) {
 		if session, err := IsSession(repository, stream); err != nil || session {
 			return session, err

@@ -517,7 +517,7 @@ func (z *Sealer) Record(ctx context.Context, stream config.WorkstreamID, record 
 		Project: z.Repository.Project(), Workstream: stream, At: z.S.Now(), Actor: SealingActor, Cause: cause}, Path: seal.Path, Content: string(content)}})
 }
 
-// Fail records why the sealing failed, tells the chief of staff, and returns
+// Fail records why the sealing failed, tells the manager, and returns
 // the failure as the operation's result. The subject moves to failed-<k>
 // only while it still reads sealing-<k>: a sealing a later one has replaced
 // records its failure and leaves the subject to the later one.
