@@ -93,7 +93,7 @@ func TestStatusCapacityReportsTheSlotsInUseAndWhoWaitsForThem(t *testing.T) {
 		{Role: committeeRole, Used: 0, Limit: fixturekit.Limit(3), Waiting: []SlotWait{}},
 		fixturekit.Unbounded(architectRole, 0, []SlotWait{}),
 		{Role: checksRole, Limit: fixturekit.Limit(r.s.CheckSlots().Limit), Waiting: []SlotWait{}},
-		{Role: chiefRole, Limit: fixturekit.Limit(r.s.current().Capacity.Chief), Waiting: []SlotWait{}},
+		{Role: chiefRole, Limit: fixturekit.Limit(r.s.current().Capacity.Manager), Waiting: []SlotWait{}},
 	}}
 	want.Clients = got.Capacity.Clients
 	if !reflect.DeepEqual(got.Capacity, want) {
@@ -204,7 +204,7 @@ func TestStatusCapacityWithoutProject(t *testing.T) {
 		{Role: committeeRole, Limit: fixturekit.Limit(s.cfg.Capacity.Committee), Waiting: []SlotWait{}},
 		fixturekit.Unbounded(architectRole, 0, []SlotWait{}),
 		{Role: checksRole, Limit: fixturekit.Limit(s.cfg.Capacity.Checks), Waiting: []SlotWait{}},
-		{Role: chiefRole, Limit: fixturekit.Limit(s.cfg.Capacity.Chief), Waiting: []SlotWait{}},
+		{Role: chiefRole, Limit: fixturekit.Limit(s.cfg.Capacity.Manager), Waiting: []SlotWait{}},
 	}}
 	want.Clients = got.Capacity.Clients
 	if !reflect.DeepEqual(got.Capacity, want) {
@@ -248,7 +248,7 @@ func newProviderUsageRig(t *testing.T) *providerUsageRig {
 	}
 	cfg.Roles[masonRole] = config.Role{Profile: "default"}
 	cfg.Roles[reviewerRole] = config.Role{Profile: "solo"}
-	cfg.Roles[trace.ChiefOfStaff] = config.Role{Profile: "other"}
+	cfg.Roles[config.ManagerRole] = config.Role{Profile: "other"}
 	s.cfg = &cfg
 	fixturekit.Must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{s.cfg.Project.ID: []config.WorkstreamID{fixturekit.Stream}}}))
 	limit := runtime.ProviderLimit{Backend: "claude", Status: "rejected", Kind: "five_hour", SetAt: clock.Now(), ResetsAt: clock.Now().Add(time.Hour)}

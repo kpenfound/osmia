@@ -54,7 +54,7 @@ func newPriorityRig(t *testing.T) *priorityRig {
 	opts, cfg := conversationFixture(t, "pr-")
 	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
 	fixturekit.Must(t, err)
-	_, err = configFile.WriteString("[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")
+	_, err = configFile.WriteString("[roles.manager]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")
 	fixturekit.Must(t, errors.Join(err, configFile.Close()))
 
 	r := &priorityRig{t: t, ctx: ctx, results: map[string][]string{}, prompts: map[string]string{},

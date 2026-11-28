@@ -308,7 +308,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   capacity (`Capacity (per workstream <n>):`, then
   `<role>: <used> of <limit> slot(s) in use`, with `, <n> waiting` appended when work
   waits, for mason, reviewer, committee, checks and chief (the factory-wide
-  `capacity.chief` pool of background chief-of-staff turns, whose waiting
+  `capacity.manager` pool of background chief-of-staff turns, whose waiting
   entries are the queued turns, oldest first), and `<role>: <used> in use, unbounded (no factory-wide
   limit; at most one turn per workstream)` for the architect, which
   no configuration setting limits, each followed by `Waiting: <workstream> turn <turn> of <agent>

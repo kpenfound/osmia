@@ -51,6 +51,10 @@ type Config struct {
 	Notify         Notify             `toml:"notify" json:"notify"`
 	ErrorReports   ErrorReports       `toml:"error_reports" json:"error_reports"`
 	Skills         Skills             `toml:"skills" json:"skills"`
+	// Warnings lists what the configuration loaded with despite being
+	// deprecated: each deprecated key in use and the key that replaces it.
+	// Loading does not fail on them.
+	Warnings []Warning `toml:"-" json:"-"`
 	// Kinds holds each workstream kind's `[kinds.<kind>]` settings table.
 	// The registry names the kinds and each kind validates its own table.
 	Kinds map[string]map[string]any `toml:"kinds" json:"kinds,omitempty"`
@@ -77,11 +81,15 @@ type Listen struct {
 }
 type Capacity struct {
 	Checks        int `toml:"checks" json:"checks"`
-	Chief         int `toml:"chief" json:"chief"`
+	Manager       int `toml:"manager" json:"manager"`
 	Masons        int `toml:"masons" json:"masons"`
 	Reviewers     int `toml:"reviewers" json:"reviewers"`
 	Committee     int `toml:"committee" json:"committee"`
 	PerWorkstream int `toml:"per_workstream" json:"per_workstream"`
+	// DeprecatedChief reads the deprecated capacity.chief key. Loading moves
+	// its value into Manager and clears it, so a loaded configuration holds
+	// the manager's capacity only in Manager.
+	DeprecatedChief int `toml:"chief" json:"-"`
 	// LocalSlots bounds the model sessions that run on the server's own
 	// machine, the built-in local client, whatever their role. Nil adds no cap
 	// beyond the role limits above; 0 runs no session on the server's machine.
@@ -336,7 +344,20 @@ type ProjectCapacity struct {
 // DefaultGitOperations bounds one project's repository and GitHub operations.
 const DefaultGitOperations = 4
 
-var roleNames = []string{"architect", "chief_of_staff", "committee", "designer", "foreman", "mason", "reviewer"}
+// ManagerRole is the configuration key of the manager role: the `[roles.manager]`
+// table that holds its settings. Config.Roles holds the manager's settings
+// under this key whichever key form the file used.
+const ManagerRole = "manager"
+
+// DeprecatedManagerRole is the deprecated `[roles.chief_of_staff]` table, an
+// alias of ManagerRole that loads into the same settings.
+const DeprecatedManagerRole = "chief_of_staff"
+
+// DeprecatedManagerCapacity is the deprecated `capacity.chief` key, an alias of
+// `capacity.manager`.
+const DeprecatedManagerCapacity = "chief"
+
+var roleNames = []string{"architect", "committee", "designer", "foreman", ManagerRole, "mason", "reviewer"}
 var profileName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 var repositoryName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
@@ -360,6 +381,57 @@ func fieldError(path, field, reason string) error {
 	return &FieldError{Path: path, Field: field, Reason: reason}
 }
 
+// Warning is a deprecated key a configuration loads with: the file, the key in
+// use and the key that replaces it. Its text never contains values read from
+// the file.
+type Warning struct{ Path, Field, Replacement string }
+
+func (w Warning) String() string {
+	return w.Path + ": " + w.Field + ": deprecated, use " + w.Replacement
+}
+
+func deprecatedKey(path, field, replacement string) Warning {
+	return Warning{Path: path, Field: field, Replacement: replacement}
+}
+
+// resolveManagerKeys loads the deprecated manager aliases into the canonical
+// settings. Setting both forms of a key is an error naming both; an alias in
+// use adds a warning.
+func (c *Config) resolveManagerKeys(path string, md toml.MetaData) error {
+	if md.IsDefined("capacity", DeprecatedManagerCapacity) {
+		if md.IsDefined("capacity", "manager") {
+			return fieldError(path, "capacity.manager", "conflicts with capacity."+DeprecatedManagerCapacity+": set only capacity.manager")
+		}
+		c.Capacity.Manager, c.Capacity.DeprecatedChief = c.Capacity.DeprecatedChief, 0
+		c.Warnings = append(c.Warnings, deprecatedKey(path, "capacity."+DeprecatedManagerCapacity, "capacity.manager"))
+	}
+	if md.IsDefined("roles", DeprecatedManagerRole) {
+		if md.IsDefined("roles", ManagerRole) {
+			return fieldError(path, "roles."+ManagerRole, "conflicts with roles."+DeprecatedManagerRole+": set only roles."+ManagerRole)
+		}
+		c.Roles[ManagerRole] = c.Roles[DeprecatedManagerRole]
+		c.Warnings = append(c.Warnings, deprecatedKey(path, "roles."+DeprecatedManagerRole, "roles."+ManagerRole))
+	}
+	delete(c.Roles, DeprecatedManagerRole)
+	return nil
+}
+
+// tomlRole is the table that supplied the settings of the role named by its
+// configuration key: the deprecated alias when only the alias is set.
+func managerCapacityField(md toml.MetaData) string {
+	if md.IsDefined("capacity", DeprecatedManagerCapacity) {
+		return "capacity." + DeprecatedManagerCapacity
+	}
+	return "capacity.manager"
+}
+
+func tomlRole(md toml.MetaData, name string) string {
+	if name == ManagerRole && !md.IsDefined("roles", ManagerRole) && md.IsDefined("roles", DeprecatedManagerRole) {
+		return DeprecatedManagerRole
+	}
+	return name
+}
+
 // LoadTopLevel loads and validates the top-level file. It returns nil on every
 // failure and reads no project settings: Project and Projects are zero.
 func LoadTopLevel(options Options) (*Config, error) {
@@ -371,7 +443,7 @@ func LoadTopLevel(options Options) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Config{Listen: Listen{TailnetHTTPS: true}, Capacity: Capacity{Masons: 4, Reviewers: 2, Committee: 3, PerWorkstream: 2, Checks: 2, Chief: 3}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Loop: Loop{MaxSessions: 30, StallAfter: "45m"}, Events: Events{Window: "5s"}, Skills: Skills{skills.DefaultRefresh}, Workspaces: WorkspacesAuto, Jev: defaultJev(), Transcribe: defaultTranscribe(), Telemetry: defaultTelemetry(), ErrorReports: defaultErrorReports()}
+	c := &Config{Listen: Listen{TailnetHTTPS: true}, Capacity: Capacity{Masons: 4, Reviewers: 2, Committee: 3, PerWorkstream: 2, Checks: 2, Manager: 3}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Loop: Loop{MaxSessions: 30, StallAfter: "45m"}, Events: Events{Window: "5s"}, Skills: Skills{skills.DefaultRefresh}, Workspaces: WorkspacesAuto, Jev: defaultJev(), Transcribe: defaultTranscribe(), Telemetry: defaultTelemetry(), ErrorReports: defaultErrorReports()}
 	c.Dagger.Engine = string(DaggerEngineAuto)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -382,6 +454,9 @@ func LoadTopLevel(options Options) (*Config, error) {
 		return nil, err
 	}
 	c.Root = root
+	if err := c.resolveManagerKeys(path, md); err != nil {
+		return nil, err
+	}
 	if c.Version != 1 {
 		return nil, fieldError(path, "version", "must be 1 (no migrations supported)")
 	}
@@ -416,7 +491,7 @@ func LoadTopLevel(options Options) (*Config, error) {
 		field string
 		n     int
 	}{
-		{"capacity.checks", c.Capacity.Checks}, {"capacity.chief", c.Capacity.Chief}, {"capacity.masons", c.Capacity.Masons}, {"capacity.reviewers", c.Capacity.Reviewers},
+		{"capacity.checks", c.Capacity.Checks}, {managerCapacityField(md), c.Capacity.Manager}, {"capacity.masons", c.Capacity.Masons}, {"capacity.reviewers", c.Capacity.Reviewers},
 		{"capacity.committee", c.Capacity.Committee}, {"capacity.per_workstream", c.Capacity.PerWorkstream},
 		{"shed.max_rounds", c.Shed.MaxRounds}, {"shed.max_bounces", c.Shed.MaxBounces},
 		{"mason.max_clean_turns", c.Mason.MaxCleanTurns},
@@ -829,7 +904,7 @@ func knownKey(key toml.Key, project bool) bool {
 		return key[1] == "agents" && (len(key) == 3 || len(key) == 4 && (key[3] == "id" || key[3] == "token_env"))
 	}
 	if len(key) >= 2 && (key[0] == "profiles" || key[0] == "roles") {
-		if key[0] == "roles" && !slices.Contains(roleNames, key[1]) {
+		if key[0] == "roles" && !slices.Contains(roleNames, key[1]) && key[1] != DeprecatedManagerRole {
 			return false
 		}
 		if len(key) == 2 {
@@ -843,7 +918,7 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "events_profile", "sandbox", "image", "cpus", "memory", "skills"}, key[2])
 	}
-	return slices.Contains([]string{"version", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "listen.tailnet_https", "capacity", "capacity.checks", "capacity.chief", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "capacity.local_slots", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "loop.stall_after", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "error_reports", "error_reports.enabled", "error_reports.repository", "error_reports.labels", "error_reports.max_issues_per_hour", "error_reports.max_issues_per_day", "error_reports.max_comments_per_day", "error_reports.sources", "skills", "skills.refresh", "jev", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout", "jev.check_threshold", "jev.decision_threshold", "jev.owner_threshold", "jev.check_fallback_picks", "transcribe", "transcribe.url", "transcribe.model", "transcribe.api_key_env", "telemetry", "telemetry.endpoint", "telemetry.protocol", "telemetry.insecure", "telemetry.headers_env", "projects", "projects.repo_owner", "projects.clone_dir"}, path)
+	return slices.Contains([]string{"version", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "listen.tailnet_https", "capacity", "capacity.checks", "capacity.manager", "capacity.chief", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "capacity.local_slots", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "loop.stall_after", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "error_reports", "error_reports.enabled", "error_reports.repository", "error_reports.labels", "error_reports.max_issues_per_hour", "error_reports.max_issues_per_day", "error_reports.max_comments_per_day", "error_reports.sources", "skills", "skills.refresh", "jev", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout", "jev.check_threshold", "jev.decision_threshold", "jev.owner_threshold", "jev.check_fallback_picks", "transcribe", "transcribe.url", "transcribe.model", "transcribe.api_key_env", "telemetry", "telemetry.endpoint", "telemetry.protocol", "telemetry.insecure", "telemetry.headers_env", "projects", "projects.repo_owner", "projects.clone_dir"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {
@@ -921,14 +996,15 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 	}
 	for _, name := range roleNames {
 		r := c.Roles[name]
-		prefix := "roles." + name
-		if !md.IsDefined("roles", name, "profile") {
+		table := tomlRole(md, name)
+		prefix := "roles." + table
+		if !md.IsDefined("roles", table, "profile") {
 			r.Profile = "default"
 		}
 		if _, ok := c.Profiles[r.Profile]; !ok {
 			return fieldError(path, prefix+".profile", "unknown profile "+r.Profile)
 		}
-		if !md.IsDefined("roles", name, "sandbox") {
+		if !md.IsDefined("roles", table, "sandbox") {
 			r.Sandbox = "none"
 		}
 		if !slices.Contains([]string{"none", "claude", "container", "sbx"}, r.Sandbox) {
@@ -940,7 +1016,7 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 		if r.Sandbox != "container" && r.Sandbox != "sbx" && r.Image != "" {
 			return fieldError(path, prefix+".image", "image requires container or sbx sandbox")
 		}
-		if md.IsDefined("roles", name, "cpus") {
+		if md.IsDefined("roles", table, "cpus") {
 			if r.Sandbox != "sbx" {
 				return fieldError(path, prefix+".cpus", "cpus requires the sbx sandbox")
 			}
@@ -948,7 +1024,7 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 				return fieldError(path, prefix+".cpus", "must be a positive number of CPUs")
 			}
 		}
-		if md.IsDefined("roles", name, "memory") {
+		if md.IsDefined("roles", table, "memory") {
 			if r.Sandbox != "sbx" {
 				return fieldError(path, prefix+".memory", "memory requires the sbx sandbox")
 			}
@@ -974,8 +1050,8 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 			names[spec.Name] = true
 		}
 		if r.EventsProfile != "" {
-			if name != "chief_of_staff" {
-				return fieldError(path, prefix+".events_profile", "only the chief of staff takes event turns")
+			if name != ManagerRole {
+				return fieldError(path, prefix+".events_profile", "only the manager takes event turns")
 			}
 			if _, ok := c.Profiles[r.EventsProfile]; !ok {
 				return fieldError(path, prefix+".events_profile", "unknown profile "+r.EventsProfile)

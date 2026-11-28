@@ -891,7 +891,7 @@ func TestServiceEventProfileKeepsItsWindowAndOwnerProfile(t *testing.T) {
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	data, err := os.ReadFile(path)
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, os.WriteFile(path, append(data, []byte("\n[roles.chief_of_staff]\nevents_profile = \"other\"\n")...), 0600))
+	fixturekit.Must(t, os.WriteFile(path, append(data, []byte("\n[roles.manager]\nevents_profile = \"other\"\n")...), 0600))
 	cfg, err := projectstore.LoadConfig(opts.Config)
 	fixturekit.Must(t, err)
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}

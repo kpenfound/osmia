@@ -248,6 +248,9 @@ func (r *run) config() (*config.Config, []config.Project) {
 		return nil, nil
 	}
 	r.add(GroupConfig, "config.toml", Pass, fmt.Sprintf("%s (%d profiles)", path, len(cfg.Profiles)), "")
+	for _, w := range cfg.Warnings {
+		r.add(GroupConfig, "config.toml "+w.Field, Warn, w.Field+" is deprecated; use "+w.Replacement, "rename "+w.Field+" to "+w.Replacement+" in "+path+"; both forms in one file are refused")
+	}
 	return cfg, r.projects(cfg)
 }
 

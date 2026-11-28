@@ -231,7 +231,7 @@ func (a TestAccess) Handle(w http.ResponseWriter, r *http.Request) { a.s.handle(
 // NewFixtureForTest composes an idle fixture from local state without launching controllers.
 func NewFixtureForTest(cfg *config.Config, opts Options, store *runtime.Store, repos []*trace.Repository) *Service {
 	s := &Service{cfg: cfg, options: opts, store: store, checkSlots: &checkSlotPool{limit: cfg.Capacity.Checks}, fleet: fleet.NewRegistry(fleet.Options{})}
-	s.chief = newChiefSlotPool(cfg.Capacity.Chief, nil, s.conversationSignal.wake)
+	s.chief = newChiefSlotPool(cfg.Capacity.Manager, nil, s.conversationSignal.wake)
 	for _, r := range repos {
 		s.projects = append(s.projects, &activeProject{id: r.Project(), repository: r})
 	}

@@ -235,26 +235,34 @@ func TestStartingAfterDesignGivesTheChiefANewThreadAndCarriesTheKindThrough(t *t
 	}
 }
 
-func TestADesignTurnWithoutADesignerRoleRunsOnTheDefaultProfileNeverTheChiefOfStaffs(t *testing.T) {
+func TestADesignTurnWithoutADesignerRoleRunsOnTheDefaultProfileWhicheverManagerKeyIsSet(t *testing.T) {
 	t.Parallel()
-	d := servicetest.PrepareDesignEnforcementRoles(t,
-		"[profiles.chief]\nagent = \"claude\"\nmodel = \"chief-model\"\n",
-		"[roles.chief_of_staff]\nprofile = \"chief\"\nsandbox = \"container\"\nimage = \"chief-image\"\nskills = [\""+designerSkillRef+"\"]\n")
-	s, c := journey.StartT(t, journey.Enforce(journey.Options{Options: d.Options}, d.Enforcement))
-	home := servicetest.AddDesignProject(t, c.Client, d.Clone)
-	ctx := context.Background()
-	opened, err := c.OpenDesign(ctx, home)
-	fixturekit.Must(t, err)
-	stream := opened.Design.Workstream
-	_, err = c.DesignMessage(ctx, stream, "What should we build?")
-	fixturekit.Must(t, err)
-	th, err := s.Sole().Repository.DesignerThread(stream)
-	fixturekit.Must(t, err)
-	if len(th.Turns) != 1 || th.Turns[0].Request.Profile.Name != "default" || th.Turns[0].Request.Profile.Model == "chief-model" {
-		t.Fatalf("the design turn's profile: %+v", th.Turns)
-	}
-	if chief, err := s.Sole().Repository.ChiefOfStaffThread(stream); err != nil || len(chief.Turns) != 0 {
-		t.Fatalf("the design turn reached the chief of staff's thread: %+v %v", chief.Turns, err)
+	managerSettings := "profile = \"chief\"\nsandbox = \"container\"\nimage = \"chief-image\"\nskills = [\"" + designerSkillRef + "\"]\n"
+	for name, roles := range map[string]string{
+		"canonical key":    "[roles.manager]\n" + managerSettings,
+		"deprecated alias": "[roles.chief_of_staff]\n" + managerSettings,
+		"no manager role":  "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			d := servicetest.PrepareDesignEnforcementRoles(t, "[profiles.chief]\nagent = \"claude\"\nmodel = \"chief-model\"\n", roles)
+			s, c := journey.StartT(t, journey.Enforce(journey.Options{Options: d.Options}, d.Enforcement))
+			home := servicetest.AddDesignProject(t, c.Client, d.Clone)
+			ctx := context.Background()
+			opened, err := c.OpenDesign(ctx, home)
+			fixturekit.Must(t, err)
+			stream := opened.Design.Workstream
+			_, err = c.DesignMessage(ctx, stream, "What should we build?")
+			fixturekit.Must(t, err)
+			th, err := s.Sole().Repository.DesignerThread(stream)
+			fixturekit.Must(t, err)
+			if len(th.Turns) != 1 || th.Turns[0].Request.Profile.Name != "default" || th.Turns[0].Request.Profile.Model == "chief-model" {
+				t.Fatalf("the design turn's profile: %+v", th.Turns)
+			}
+			if manager, err := s.Sole().Repository.ChiefOfStaffThread(stream); err != nil || len(manager.Turns) != 0 {
+				t.Fatalf("the design turn reached the manager's thread: %+v %v", manager.Turns, err)
+			}
+		})
 	}
 }
 

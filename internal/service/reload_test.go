@@ -296,7 +296,7 @@ func TestReloadAppliesToNextTurnsAndKeepsRunningOnes(t *testing.T) {
 		t.Fatal("the first message did not run")
 	}
 
-	files.Write(t, files.TopText+"[roles.chief_of_staff]\nprofile = \"other\"\n[capacity]\nmasons = 7\n")
+	files.Write(t, files.TopText+"[roles.manager]\nprofile = \"other\"\n[capacity]\nmasons = 7\n")
 	_, err = c.Reload(ctx)
 	fixturekit.Must(t, err)
 	second, err := c.Send(ctx, fixturekit.Stream, "second")

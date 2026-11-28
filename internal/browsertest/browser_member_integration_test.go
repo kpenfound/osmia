@@ -53,7 +53,7 @@ func (f *workgroupPageFixture) runChief(t *testing.T) {
 	path := filepath.Join(f.opts.Config.Root, "config.toml")
 	top, err := os.ReadFile(path)
 	must(t, err)
-	must(t, os.WriteFile(path, append(top, []byte("\n[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")...), 0600))
+	must(t, os.WriteFile(path, append(top, []byte("\n[roles.manager]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")...), 0600))
 	sessions := &fixturekit.DemoSessions{ByKey: map[string]*mcp.ClientSession{}}
 	engine := &fixturekit.DemoEngine{Sessions: sessions, Turns: map[string]fixturekit.DemoTurn{}}
 	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {

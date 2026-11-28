@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 const Version = 1
@@ -340,7 +341,7 @@ func resolveAt(st State, in Inputs, at time.Time) (State, []Diagnostic) {
 	out := State{Version: Version, Profiles: map[string]string{}}
 	var ds []Diagnostic
 	for r, b := range in.Config.Roles {
-		out.Profiles[r] = b.Profile
+		out.Profiles[trace.RuntimeRole(r)] = b.Profile
 	}
 	for i, p := range st.Pauses {
 		if err := targetReference(p.Target, in); err != nil {
@@ -388,7 +389,8 @@ func resolveAt(st State, in Inputs, at time.Time) (State, []Diagnostic) {
 		}
 		out.ProviderLimits = append(out.ProviderLimits, limit)
 	}
-	for role, binding := range in.Config.Roles {
+	for key, binding := range in.Config.Roles {
+		role := trace.RuntimeRole(key)
 		if binding.Sandbox == "sbx" {
 			if limit, ok := registryLimit(out.ProviderLimits); ok {
 				out.Pauses = append(out.Pauses, Pause{Target: Target{Scope: "role", Role: role}, Mode: "soft", Source: PauseProviderUsageLimit, Reason: RegistryLimitReason, SetAt: limit.SetAt})
@@ -441,7 +443,7 @@ func targetReference(t Target, in Inputs) error {
 		return nil
 	}
 	if t.Scope == "role" {
-		if _, ok := in.Config.Roles[t.Role]; !ok {
+		if _, ok := in.Config.Roles[trace.ConfigRole(t.Role)]; !ok {
 			return fmt.Errorf("unknown role %s", t.Role)
 		}
 		return nil
@@ -455,7 +457,7 @@ func targetReference(t Target, in Inputs) error {
 	return nil
 }
 func profileReference(role, profile string, in Inputs) error {
-	r, ok := in.Config.Roles[role]
+	r, ok := in.Config.Roles[trace.ConfigRole(role)]
 	if !ok {
 		return fmt.Errorf("unknown role %s", role)
 	}

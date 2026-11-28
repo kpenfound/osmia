@@ -34,7 +34,7 @@ import (
 const exitDemoRoles = `[roles.committee]
 sandbox = "container"
 image = "fixture-image"
-[roles.chief_of_staff]
+[roles.manager]
 sandbox = "container"
 image = "fixture-image"
 [capacity]

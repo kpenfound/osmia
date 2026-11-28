@@ -9,6 +9,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 type runnerAdapter struct {
@@ -88,7 +89,7 @@ func (s *Service) roleExecution(cfg *config.Config, role string) (coreadapter.Pr
 	state, _ := s.effective()
 	name := state.Profiles[role]
 	if name == "" {
-		name = cfg.Roles[role].Profile
+		name = cfg.Roles[trace.ConfigRole(role)].Profile
 	}
 	p, ok := cfg.Profiles[name]
 	if !ok {
@@ -98,6 +99,6 @@ func (s *Service) roleExecution(cfg *config.Config, role string) (coreadapter.Pr
 	if err != nil {
 		return coreadapter.Profile{}, coreadapter.ExecutionSettings{}, err
 	}
-	r := cfg.Roles[role]
+	r := cfg.Roles[trace.ConfigRole(role)]
 	return coreadapter.Profile{Name: name, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns, CostLimitUSD: cfg.Budget.SessionLimitUSD()}, coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image, CPUs: r.CPUs, Memory: r.Memory, Skills: slices.Clone(r.Skills)}, nil
 }

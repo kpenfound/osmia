@@ -407,3 +407,48 @@ func TestStoredSettingsThatDoNotLoadNameTheFieldWithoutItsValue(t *testing.T) {
 		t.Fatalf("%+v", c)
 	}
 }
+
+func TestDoctorWarnsOncePerDeprecatedManagerKeyAndKeepsTheConfigurationPassing(t *testing.T) {
+	o, dir := fixture(t)
+	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte(topLevel+"[capacity]\nchief = 2\n[roles.chief_of_staff]\nprofile = \"default\"\n"), 0o600))
+	checks := Run(context.Background(), o)
+	if Failed(checks) {
+		t.Fatalf("a configuration with only the deprecated keys failed: %+v", checks)
+	}
+	for _, field := range []struct{ old, replacement string }{{"capacity.chief", "capacity.manager"}, {"roles.chief_of_staff", "roles.manager"}} {
+		c := find(t, checks, "config.toml "+field.old)
+		expect(t, c, Warn, field.old+" is deprecated; use "+field.replacement)
+		if !strings.Contains(c.Remediation, field.replacement) {
+			t.Fatalf("remedy does not name %s: %q", field.replacement, c.Remediation)
+		}
+	}
+	warnings := 0
+	for _, c := range checks {
+		if strings.HasPrefix(c.Name, "config.toml ") {
+			warnings++
+		}
+	}
+	if warnings != 2 {
+		t.Fatalf("%d deprecation warnings, want one per key: %+v", warnings, checks)
+	}
+}
+
+func TestDoctorSaysNothingAboutTheManagerKeys(t *testing.T) {
+	o, dir := fixture(t)
+	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte(topLevel+"[capacity]\nmanager = 2\n[roles.manager]\nprofile = \"default\"\n"), 0o600))
+	for _, c := range Run(context.Background(), o) {
+		if strings.HasPrefix(c.Name, "config.toml ") {
+			t.Fatalf("unexpected warning %+v", c)
+		}
+	}
+}
+
+func TestDoctorRefusesBothFormsOfAManagerKey(t *testing.T) {
+	o, dir := fixture(t)
+	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte(topLevel+"[capacity]\nchief = 2\nmanager = 2\n"), 0o600))
+	c := find(t, Run(context.Background(), o), "config.toml")
+	expect(t, c, Fail, "capacity.manager")
+	if !strings.Contains(c.Detail, "capacity.chief") {
+		t.Fatalf("detail does not name capacity.chief: %q", c.Detail)
+	}
+}

@@ -58,7 +58,7 @@ func newNewProjectStartFixture(t *testing.T, creation bool) *newProjectStart {
 	f.remote, f.readme = servicetest.SeedRemote(t, dir, "gadget", "main")
 	f.github.Remote = func(string) string { return f.remote }
 	opts.Repositories = f.github.Client()
-	text := "[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.designer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
+	text := "[roles.manager]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.designer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
 	if creation {
 		text += fmt.Sprintf("[projects]\nrepo_owner = \"owner\"\nclone_dir = %q\n", f.cloneDir)
 	}

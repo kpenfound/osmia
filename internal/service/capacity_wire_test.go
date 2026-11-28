@@ -31,7 +31,7 @@ func TestCapacityToolAndStatusSerializeUnboundedPools(t *testing.T) {
 	controls.service.Store(s)
 
 	tool := controls.capacity(repo, scope)
-	for _, want := range []string{"config.toml", "reload", "not bounded factory-wide", "nothing to raise", "capacity.chief", "background chief-of-staff"} {
+	for _, want := range []string{"config.toml", "reload", "not bounded factory-wide", "nothing to raise", "capacity.manager", "background chief-of-staff"} {
 		if !strings.Contains(tool.Description, want) {
 			t.Fatalf("capacity tool description lacks %q: %s", want, tool.Description)
 		}
@@ -45,7 +45,7 @@ func TestCapacityToolAndStatusSerializeUnboundedPools(t *testing.T) {
 	fromStatus := fixturekit.CapacityWire(t, status)
 
 	cfg := s.current().Capacity
-	for i, want := range map[int]int{0: cfg.Masons, 1: cfg.Reviewers, 2: cfg.Committee, 4: cfg.Checks, 5: cfg.Chief} {
+	for i, want := range map[int]int{0: cfg.Masons, 1: cfg.Reviewers, 2: cfg.Committee, 4: cfg.Checks, 5: cfg.Manager} {
 		for name, roles := range map[string][]map[string]any{"tool": fromTool, "status": fromStatus} {
 			if got := roles[i]["limit"]; got != float64(want) {
 				t.Fatalf("%s %v limit %v, want %d", name, roles[i]["role"], got, want)

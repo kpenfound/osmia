@@ -339,7 +339,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	})
 	s.pool = &scheduler.Shared{Changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, Spans: s.slots, Limits: s.poolLimit}
 	s.checkSlots = &checkSlotPool{limit: cfg.Capacity.Checks, changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, spans: s.slots, now: s.now}
-	s.chief = newChiefSlotPool(cfg.Capacity.Chief, func() { s.hub.Publish(Event{Kind: EventCapacity}) }, s.conversationSignal.wake)
+	s.chief = newChiefSlotPool(cfg.Capacity.Manager, func() { s.hub.Publish(Event{Kind: EventCapacity}) }, s.conversationSignal.wake)
 	s.slots.Interrupt(telemetry.PoolID(checksRole))
 	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider, Getenv: func(name string) string {
 		value := os.Getenv(name)
@@ -938,7 +938,7 @@ func (s *Service) priorities() []runtime.Priority {
 func (s *Service) chiefEventsProfile(cfg *config.Config) func() (coreadapter.Profile, error) {
 	return func() (coreadapter.Profile, error) {
 		st, _ := s.effective()
-		if name := cfg.Roles[trace.ChiefOfStaff].EventsProfile; name != "" && st.Profiles[trace.ChiefOfStaff] == "" {
+		if name := cfg.Roles[config.ManagerRole].EventsProfile; name != "" && st.Profiles[trace.ChiefOfStaff] == "" {
 			return cfg.NamedProfile(name)
 		}
 		_, profile, err := s.chiefOverride(cfg)
@@ -950,14 +950,14 @@ func (s *Service) chiefOverride(cfg *config.Config) (string, coreadapter.Profile
 	st, _ := s.effective()
 	name := st.Profiles[trace.ChiefOfStaff]
 	if name == "" {
-		name = cfg.Roles[trace.ChiefOfStaff].Profile
+		name = cfg.Roles[config.ManagerRole].Profile
 	}
 	profile, err := cfg.NamedProfile(name)
 	return name, profile, err
 }
 
 // designerOverride reads the profile design turns run on. The designer is a
-// role of its own: it never takes the chief of staff's profile or its
+// role of its own: it never takes the manager's profile or its
 // override, only its own configured profile, which is the default profile
 // when the configuration names none.
 func (s *Service) designerOverride(cfg *config.Config) (string, coreadapter.Profile, error) {

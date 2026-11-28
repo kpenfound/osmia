@@ -6845,9 +6845,6 @@
           "checks": {
             "type": "integer"
           },
-          "chief": {
-            "type": "integer"
-          },
           "committee": {
             "type": "integer"
           },
@@ -6856,6 +6853,9 @@
               "null",
               "integer"
             ]
+          },
+          "manager": {
+            "type": "integer"
           },
           "masons": {
             "type": "integer"
@@ -10449,7 +10449,7 @@
             "type": "string"
           },
           "role": {
-            "description": "Slot pool: mason, reviewer, committee, architect, checks or chief. The checks pool uses capacity.checks (default 2) across all projects and workstreams. The chief pool uses capacity.chief (default 3) across all projects and workstreams and holds background chief-of-staff turns only; turns the owner starts take no chief slot.",
+            "description": "Slot pool: mason, reviewer, committee, architect, checks or chief. The checks pool uses capacity.checks (default 2) across all projects and workstreams. The chief pool uses capacity.manager (default 3) across all projects and workstreams and holds background chief-of-staff turns only; turns the owner starts take no chief slot.",
             "type": "string"
           },
           "scope": {

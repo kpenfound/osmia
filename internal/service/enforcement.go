@@ -191,11 +191,11 @@ func Enforce(opts Options, e Enforcement) Options {
 				if scope.Role == sessionRole && scope.Project == project {
 					return sessionSelection(ctx, cfg, scope, cfg.RoleExecution(masonRole))
 				}
-				_, ok := cfg.Roles[scope.Role]
+				_, ok := cfg.Roles[trace.ConfigRole(scope.Role)]
 				if !ok || scope.Project != project {
 					return isolation.Selection{}, errors.New("view selection denied")
 				}
-				settings := cfg.RoleExecution(scope.Role)
+				settings := cfg.RoleExecution(trace.ConfigRole(scope.Role))
 				if scope.Unit != "" && scope.Thread != driftMasonAgent && scope.Thread != driftReviewerAgent {
 					if kind, err := r.Kind(config.WorkstreamID(scope.Workstream)); err == nil {
 						settings = cfg.WithUnitKindSkills(settings, kind, scope.Role, scope.Unit)

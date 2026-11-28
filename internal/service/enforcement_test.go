@@ -30,9 +30,9 @@ func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
 	runnerIntent(t, opts)
 	cfg, err := projectstore.LoadConfig(opts.Config)
 	fixturekit.Must(t, err)
-	chief := cfg.Roles[trace.ChiefOfStaff]
+	chief := cfg.Roles[config.ManagerRole]
 	chief.Sandbox, chief.Image, chief.Skills = "container", "loaded-image", []string{"https://github.com/acme/skills#skills/triage"}
-	cfg.Roles[trace.ChiefOfStaff] = chief
+	cfg.Roles[config.ManagerRole] = chief
 	mason := cfg.Roles[masonRole]
 	mason.Sandbox, mason.Skills = "sbx", []string{"https://github.com/acme/skills#skills/tdd"}
 	cfg.Roles[masonRole] = mason

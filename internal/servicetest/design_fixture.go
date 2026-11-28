@@ -35,7 +35,7 @@ type DesignEnforcement struct {
 // platform can enforce.
 func PrepareDesignEnforcement(t *testing.T, before, after string) DesignEnforcement {
 	t.Helper()
-	return PrepareDesignEnforcementRoles(t, before, "[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.designer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"+after)
+	return PrepareDesignEnforcementRoles(t, before, "[roles.manager]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.designer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"+after)
 }
 
 // PrepareDesignEnforcementRoles is PrepareDesignEnforcement with the role

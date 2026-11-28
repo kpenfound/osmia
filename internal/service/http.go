@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/tailnet"
+	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/web"
 )
 
@@ -167,7 +168,8 @@ func (s *Service) effectiveProfiles(state runtime.State) map[string]EffectivePro
 	stored, _ := s.store.Snapshot()
 	profiles := make(map[string]EffectiveProfile)
 	cfg := s.current()
-	for role, binding := range cfg.Roles {
+	for key, binding := range cfg.Roles {
+		role := trace.RuntimeRole(key)
 		name, source := binding.Profile, "configuration"
 		if override := stored.Profiles[role]; override != "" && state.Profiles[role] == override {
 			name, source = override, "owner_override"

@@ -700,7 +700,7 @@ const (
 	AskedAnswer   = "Yes: the store is a file under the root, and files survive restarts."
 	OwnerRuling   = "Yes, the store is durable; do not object on that account."
 	RelayedRuling = "The store keeps acknowledged chunks across a restart: it is durable."
-	ChiefRole     = "[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
+	ChiefRole     = "[roles.manager]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
 	PinOne        = "spec.md revision 1 and plan.json revision 1"
 )
 

@@ -142,7 +142,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	s.capacity.Store(&next.Capacity)
 	reloadedAt := s.now()
 	s.checkSlots.resize(next.Capacity.Checks)
-	s.chief.resize(next.Capacity.Chief)
+	s.chief.resize(next.Capacity.Manager)
 	for p, stage := range staged {
 		p.pipeline.next.Store(stage)
 		p.pipeline.conversation.Store(stage)

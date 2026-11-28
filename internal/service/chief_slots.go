@@ -17,7 +17,7 @@ const chiefSlotWaitReason = "waiting for a chief slot"
 const chiefRole = "chief"
 
 // ChiefSlotTurn identifies a background chief-of-staff turn waiting for or
-// holding capacity.chief. At is when its request was enqueued.
+// holding capacity.manager. At is when its request was enqueued.
 type ChiefSlotTurn struct {
 	Project    config.ProjectID
 	Workstream config.WorkstreamID

@@ -38,7 +38,7 @@ import (
 
 const chiefDemoRoles = `[capacity]
 masons = 1
-[roles.chief_of_staff]
+[roles.manager]
 sandbox = "container"
 image = "fixture-image"
 [roles.mason]
@@ -138,7 +138,7 @@ func newChiefFixture(t *testing.T) *chiefFixture {
 				return selectChief(ctx, scope)
 			}
 			workspace := filepath.Join(cfg.Root.String(), "workers", scope.Thread)
-			role := cfg.Roles[trace.ChiefOfStaff]
+			role := cfg.Roles[config.ManagerRole]
 			return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace},
 				Execution: coreadapter.ExecutionSettings{Mode: role.Sandbox, Image: role.Image}}, os.MkdirAll(workspace, 0700)
 		}

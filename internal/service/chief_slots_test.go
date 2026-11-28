@@ -24,7 +24,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const chiefLimitTwo = "[capacity]\nchief = 2\n"
+const chiefLimitTwo = "[capacity]\nmanager = 2\n"
 
 func TestChiefSlotsCapAFakeHearsayNoticeReachingFourteenProjects(t *testing.T) {
 	t.Setenv("CHIEF_OWNER_TOKEN", "owner-secret")
@@ -48,7 +48,7 @@ func TestChiefSlotsCapAFakeHearsayNoticeReachingFourteenProjects(t *testing.T) {
 	for _, class := range []string{"worker", "orchestrator", "observer"} {
 		agents += fmt.Sprintf("[hearsay.agents.%s]\nid = %q\ntoken_env = \"CHIEF_AGENT_TOKEN\"\n", class, class+"-agent")
 	}
-	top := fmt.Sprintf("[capacity]\nchief = 3\n[hearsay]\nurl = %q\nprincipal = \"owner\"\ntoken_env = \"CHIEF_OWNER_TOKEN\"\n%s", server.URL, agents)
+	top := fmt.Sprintf("[capacity]\nmanager = 3\n[hearsay]\nurl = %q\nprincipal = \"owner\"\ntoken_env = \"CHIEF_OWNER_TOKEN\"\n%s", server.URL, agents)
 	f := newChiefFleet(t, 14, top, "hearsay_scope = \"work:osmia:project\"\n")
 	s, _ := start(t, f.opts)
 
@@ -175,7 +175,7 @@ func TestChiefSlotsOwnerMessageRunsTheWaitingBackgroundTurnAheadOfItWithoutASlot
 
 func TestChiefSlotsFreedSlotGoesToTheOldestWaiterWhicheverProjectScansFirst(t *testing.T) {
 	t.Parallel()
-	f := newChiefFleet(t, 6, "[capacity]\nchief = 1\n", "")
+	f := newChiefFleet(t, 6, "[capacity]\nmanager = 1\n", "")
 	s, _ := start(t, f.opts)
 	f.background(t, s, 5, "H", 1)
 	awaitStarted(t, f.agent, f.key(5, "H"))
@@ -241,7 +241,7 @@ func TestChiefSlotsTurnHeldByAnotherGateDoesNotBlockAYoungerEligibleTurn(t *test
 func TestChiefSlotsAbandonedWaiterDoesNotBlockAYoungerOne(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newChiefFleet(t, 3, "[capacity]\nchief = 1\n", "")
+	f := newChiefFleet(t, 3, "[capacity]\nmanager = 1\n", "")
 	s, c := start(t, f.opts)
 	f.background(t, s, 0, "H", 1)
 	awaitStarted(t, f.agent, f.key(0, "H"))
@@ -294,7 +294,7 @@ func TestChiefSlotsEveryExitReleasesTheSlot(t *testing.T) {
 		t.Run(exit, func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			f := newChiefFleet(t, 2, "[capacity]\nchief = 1\n", "")
+			f := newChiefFleet(t, 2, "[capacity]\nmanager = 1\n", "")
 			s, c := start(t, f.opts)
 			prompt := map[string]string{"failure": "fail", "interruption": "cancel", "waiting": "wait"}[exit]
 			if prompt == "" {
@@ -337,7 +337,7 @@ func TestChiefSlotsEveryExitReleasesTheSlot(t *testing.T) {
 func TestChiefSlotsRestartAdmitsFourteenInterruptedTurnsAgainstThePool(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newChiefFleet(t, 14, "[capacity]\nchief = 3\n", "")
+	f := newChiefFleet(t, 14, "[capacity]\nmanager = 3\n", "")
 	for i, p := range f.cfg.Projects {
 		repo, err := trace.Open(f.cfg.Root, p)
 		fixturekit.Must(t, err)

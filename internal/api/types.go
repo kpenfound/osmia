@@ -874,7 +874,7 @@ type ClientFailure struct {
 // Limit, and says in Scope and Note how it is bounded instead.
 // Waiting lists work waiting for a slot and never paused work.
 type RoleCapacity struct {
-	Role      string     `json:"role" description:"Slot pool: mason, reviewer, committee, architect, checks or chief. The checks pool uses capacity.checks (default 2) across all projects and workstreams. The chief pool uses capacity.chief (default 3) across all projects and workstreams and holds background chief-of-staff turns only; turns the owner starts take no chief slot."`
+	Role      string     `json:"role" description:"Slot pool: mason, reviewer, committee, architect, checks or chief. The checks pool uses capacity.checks (default 2) across all projects and workstreams. The chief pool uses capacity.manager (default 3) across all projects and workstreams and holds background chief-of-staff turns only; turns the owner starts take no chief slot."`
 	Used      int        `json:"used" description:"Number of slots currently in use."`
 	Limit     *int       `json:"limit,omitempty" description:"Configured factory-wide slot limit from config.toml. Present only for bounded pools (mason, reviewer, committee, checks, chief). Absent when unbounded is true: that pool has no factory-wide limit, which is not a limit of 0."`
 	Unbounded bool       `json:"unbounded,omitempty" description:"True when the pool has no factory-wide limit (architect). Such an entry has no limit field, scope is per_workstream and note explains it; there is no configuration setting to raise."`

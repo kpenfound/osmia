@@ -9,6 +9,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // Handout builds the profile handout of cfg: its profiles and what each role
@@ -20,8 +21,8 @@ func Handout(cfg *config.Config) api.ProfileHandout {
 		p := cfg.Profiles[name]
 		h.Profiles = append(h.Profiles, api.ProfileSpec{Name: name, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Fallback: p.Fallback, Timeout: p.Timeout, MaxTurns: p.MaxTurns})
 	}
-	for _, role := range slices.Sorted(maps.Keys(cfg.Roles)) {
-		r := cfg.Roles[role]
+	for _, role := range trace.ConfiguredRoles(cfg) {
+		r := cfg.Roles[trace.ConfigRole(role)]
 		main := cfg.Profiles[r.Profile]
 		req := api.RoleRequirement{Role: role, Profile: r.Profile, EventsProfile: r.EventsProfile, Chain: chain(cfg, r.Profile),
 			Backend: main.Agent, Model: main.Model, Sandbox: r.Sandbox, Image: r.Image, CPUs: r.CPUs, Memory: r.Memory,
